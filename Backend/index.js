@@ -2,7 +2,15 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import crypto from "crypto";
-import { getDb } from "./mongo.js";
+import {
+  initPostgres,
+  dbPing,
+  listScholarships,
+  createScholarship,
+  findUserByEmail,
+  createUser,
+  createSession,
+} from "./postgres.js";
 import { rankScholarships } from "./matching-algorithms.js";
 
 const app = express();
@@ -20,18 +28,15 @@ async function seedDemoAccount() {
       return;
     }
 
-    const db = await getDb();
-    const usersCollection = db.collection("users");
-    const existing = await usersCollection.findOne({ email: demoEmail });
+    const existing = await findUserByEmail(demoEmail);
     if (!existing) {
-      await usersCollection.insertOne({
+      await createUser({
         fullName: "Demo User",
         email: demoEmail,
         password: demoPassword,
         phone: "",
         userType: "student",
         avatar: "",
-        createdAt: new Date(),
       });
       console.log(`✓ Demo account created: ${demoEmail}`);
     } else {
@@ -48,10 +53,19 @@ app.get("/health", (_, res) => {
   res.json({ ok: true });
 });
 
+// DB health check: pings the database to confirm connectivity
+app.get("/api/db-health", async (_, res) => {
+  try {
+    await dbPing();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err && (err.message || err)) });
+  }
+});
+
 app.get("/api/scholarships", async (_, res) => {
   try {
-    const db = await getDb();
-    const scholarships = await db.collection("scholarships").find({}).toArray();
+    const scholarships = await listScholarships();
     res.json({ data: scholarships });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch scholarships." });
@@ -60,8 +74,7 @@ app.get("/api/scholarships", async (_, res) => {
 
 app.get("/api/scholarships/recommendations", async (req, res) => {
   try {
-    const db = await getDb();
-    const scholarships = await db.collection("scholarships").find({}).toArray();
+    const scholarships = await listScholarships();
     const studentId = String(req.query.studentId || "current-student");
     const ranked = rankScholarships(scholarships, {}, studentId);
     res.json({ data: ranked });
@@ -72,8 +85,7 @@ app.get("/api/scholarships/recommendations", async (req, res) => {
 
 app.post("/api/scholarships/recommendations", async (req, res) => {
   try {
-    const db = await getDb();
-    const scholarships = await db.collection("scholarships").find({}).toArray();
+    const scholarships = await listScholarships();
     const payload = req.body ?? {};
     const profile = payload.profile ?? payload;
     const studentId = String(payload.studentId || profile.email || "current-student");
@@ -86,10 +98,9 @@ app.post("/api/scholarships/recommendations", async (req, res) => {
 
 app.post("/api/scholarships", async (req, res) => {
   try {
-    const db = await getDb();
     const payload = req.body ?? {};
-    const result = await db.collection("scholarships").insertOne(payload);
-    res.status(201).json({ insertedId: result.insertedId });
+    const insertedId = await createScholarship(payload);
+    res.status(201).json({ insertedId });
   } catch (error) {
     res.status(500).json({ error: "Failed to create scholarship." });
   }
@@ -97,7 +108,6 @@ app.post("/api/scholarships", async (req, res) => {
 
 app.post("/api/auth/signup", async (req, res) => {
   try {
-    const db = await getDb();
     const payload = req.body ?? {};
     const email = String(payload.email || "").trim().toLowerCase();
     const password = String(payload.password || "");
@@ -106,7 +116,7 @@ app.post("/api/auth/signup", async (req, res) => {
       return res.status(400).json({ error: "Email and password are required." });
     }
 
-    const existing = await db.collection("users").findOne({ email });
+    const existing = await findUserByEmail(email);
     if (existing) {
       return res.status(409).json({ error: "Email is already registered." });
     }
@@ -122,11 +132,11 @@ app.post("/api/auth/signup", async (req, res) => {
       createdAt: new Date(),
     };
 
-    await db.collection("users").insertOne(user);
+    await createUser(user);
 
     // create a simple session token so clients can auto-login after signup
     const token = crypto.randomBytes(24).toString("hex");
-    await db.collection("sessions").insertOne({ token, email, createdAt: new Date() });
+    await createSession(token, email);
 
     return res.status(201).json({
       user: {
@@ -145,7 +155,6 @@ app.post("/api/auth/signup", async (req, res) => {
 
 app.post("/api/auth/signin", async (req, res) => {
   try {
-    const db = await getDb();
     const payload = req.body ?? {};
     const email = String(payload.email || "").trim().toLowerCase();
     const password = String(payload.password || "");
@@ -154,14 +163,14 @@ app.post("/api/auth/signin", async (req, res) => {
       return res.status(400).json({ error: "Email and password are required." });
     }
 
-    const user = await db.collection("users").findOne({ email });
+    const user = await findUserByEmail(email);
     if (!user || user.password !== password) {
       return res.status(401).json({ error: "Invalid email or password." });
     }
 
     // create a simple session token for the client
     const token = crypto.randomBytes(24).toString("hex");
-    await db.collection("sessions").insertOne({ token, email, createdAt: new Date() });
+    await createSession(token, email);
 
     return res.json({
       user: {
@@ -181,6 +190,9 @@ app.post("/api/auth/signin", async (req, res) => {
 const port = Number(process.env.PORT || 4000);
 app.listen(port, () => {
   console.log(`API listening on ${port}`);
+  initPostgres().catch((err) => {
+    console.error("Postgres initialization failed:", err);
+  });
   // Seed demo account after server is listening so failures don't prevent server from starting
   seedDemoAccount().catch(err => {
     console.error('Seed demo account failed (non-fatal):', err);
