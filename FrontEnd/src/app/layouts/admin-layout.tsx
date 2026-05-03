@@ -1,0 +1,108 @@
+import { Outlet, Link, useLocation } from "react-router";
+import { LayoutDashboard, Users, Award, FileText, MessageSquare, BarChart3, Bell, Settings } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
+import { Badge } from "../components/ui/badge";
+
+export function AdminLayout() {
+  const location = useLocation();
+  
+  const navItems = [
+    { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/admin/users", label: "Manage Users", icon: Users },
+    { href: "/admin/scholarships", label: "Scholarships", icon: Award },
+    { href: "/admin/applications", label: "Applications", icon: FileText },
+    { href: "/admin/messages", label: "Messages", icon: MessageSquare },
+    { href: "/admin/reports", label: "Reports", icon: BarChart3 },
+    { href: "/admin/notifications", label: "Notifications", icon: Bell },
+    { href: "/admin/settings", label: "Settings", icon: Settings },
+  ];
+
+  return (
+    <div className="flex min-h-screen bg-gray-50">
+      {/* Admin Sidebar */}
+      <aside className="w-[280px] bg-white border-r border-gray-200 fixed left-0 top-0 h-screen overflow-y-auto">
+        <div className="p-4">
+          {/* Admin Header */}
+          <div className="mb-6 pt-2">
+            <div className="flex items-center gap-3 mb-1">
+              <Avatar className="h-14 w-14 border-2 border-orange-100">
+                <AvatarImage src="https://api.dicebear.com/7.x/avataaars/svg?seed=admin" />
+                <AvatarFallback className="bg-orange-100 text-orange-700 text-lg font-semibold">AD</AvatarFallback>
+              </Avatar>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-gray-900 text-base truncate">Admin User</p>
+                <Badge className="bg-orange-600 hover:bg-orange-600 text-white text-xs px-2 py-0.5 mt-1">
+                  Administrator
+                </Badge>
+              </div>
+            </div>
+          </div>
+
+          {/* Navigation Menu */}
+          <nav className="space-y-1">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = location.pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  to={item.href}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
+                    isActive
+                      ? "bg-[#1E3A5F] text-white shadow-sm"
+                      : "text-gray-700 hover:bg-gray-100"
+                  }`}
+                >
+                  <Icon className="h-5 w-5 flex-shrink-0" />
+                  <span className="font-medium text-sm">{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+
+          {/* Quick Stats Section */}
+          <div className="mt-8 pt-6 border-t border-gray-200">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 px-3">
+              Quick Stats
+            </h3>
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between px-3 py-1.5">
+                <span className="text-sm text-gray-600">Total Scholars</span>
+                <Badge className="bg-[#1E3A5F] hover:bg-[#1E3A5F] text-white px-2.5 py-0.5 text-xs font-semibold">
+                  1,247
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between px-3 py-1.5">
+                <span className="text-sm text-gray-600">Pending Applications</span>
+                <Badge className="bg-amber-600 hover:bg-amber-600 text-white px-2.5 py-0.5 text-xs font-semibold">
+                  38
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between px-3 py-1.5">
+                <span className="text-sm text-gray-600">Active Scholarships</span>
+                <Badge className="bg-green-600 hover:bg-green-600 text-white px-2.5 py-0.5 text-xs font-semibold">
+                  24
+                </Badge>
+              </div>
+            </div>
+          </div>
+
+          {/* Back to Scholar Panel Link */}
+          <div className="mt-8 pt-6 border-t border-gray-200">
+            <Link
+              to="/dashboard"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 text-sm font-medium"
+            >
+              ← Back to Scholar Panel
+            </Link>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="flex-1 ml-[280px]">
+        <Outlet />
+      </main>
+    </div>
+  );
+}
