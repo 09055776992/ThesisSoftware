@@ -2,7 +2,7 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import crypto from "crypto";
-import { getDb } from "./mongo.js";
+import { getDb } from "./db.js";
 import { rankScholarships } from "./matching-algorithms.js";
 
 const app = express();

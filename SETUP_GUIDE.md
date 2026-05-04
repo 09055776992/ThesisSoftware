@@ -2,7 +2,7 @@
 
 ## What Was Fixed
 
-The login issue was caused by each group member potentially using a **different or disconnected MongoDB database**. The credentials weren't hardcoded—they just didn't exist in the shared database.
+The login issue was caused by each group member potentially using a **different or disconnected database**. The credentials weren't hardcoded—they just didn't exist in the shared database.
 
 ### Changes Made:
 1. ✅ Added **automatic demo account seeding** on server startup
@@ -11,29 +11,27 @@ The login issue was caused by each group member potentially using a **different 
 
 ## Setup Instructions for Group Members
 
-### Step 1: Set up MongoDB Atlas (if not done)
-1. Go to https://www.mongodb.com/cloud/atlas
-2. Create a free cluster
-3. Get your connection string from the "Connect" button
-4. Format: `mongodb+srv://username:password@cluster-name.mongodb.net/thesis_software`
+### Step 1: Set up Supabase Postgres (if not done)
+1. Go to https://supabase.com
+2. Create a project or sign in
+3. Open the database settings and copy the Postgres connection string
+4. Format: `postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres`
 
 ### Step 2: Configure Backend
 Create `.env` files in both locations:
 
 **`Backend/.env`:**
 ```
-MONGODB_URI=mongodb+srv://ilcarpio3956qc_db_user:<db_password>@cluster0.roo7wsb.mongodb.net/?appName=Cluster0
-MONGODB_DB=thesis_software
+DATABASE_URL=postgresql://postgres:<db_password>@db.iiuwvjlugadnjjazmxdj.supabase.co:5432/postgres
 PORT=4000
-MONGODB_TLS_INSECURE=true
+# DATABASE_SSL=disable
 ```
 
 **`server/.env`:**
 ```
-MONGODB_URI=mongodb+srv://ilcarpio3956qc_db_user:<db_password>@cluster0.roo7wsb.mongodb.net/?appName=Cluster0
-MONGODB_DB=thesis_software
+DATABASE_URL=postgresql://postgres:<db_password>@db.iiuwvjlugadnjjazmxdj.supabase.co:5432/postgres
 PORT=4000
-MONGODB_TLS_INSECURE=true
+# DATABASE_SSL=disable
 ```
 
 ### Step 3: Configure Frontend
@@ -64,7 +62,7 @@ The demo account will be created automatically when the backend starts up.
 
 ## Important Notes
 
-- ✅ **All group members must use the same `MONGODB_URI`** to see shared accounts and data
+- ✅ **All group members must use the same `DATABASE_URL`** to see shared accounts and data
 - ✅ New user signups will be stored in the same database
 - ✅ The demo account persists—subsequent server restarts will just verify it exists
 - ⚠️ **Never commit `.env` files to git** (they contain credentials)
@@ -73,8 +71,8 @@ The demo account will be created automatically when the backend starts up.
 
 **"Invalid email or password":**
 - Ensure backend is running (`npm run dev`)
-- Check that `MONGODB_URI` is correct and network access is enabled on MongoDB Atlas
-- If you get an SSL/TLS handshake error, try adding `MONGODB_TLS_INSECURE=true` locally and restart the API
+- Check that `DATABASE_URL` is correct and network access is enabled for Supabase
+- If you get a TLS handshake error, try `DATABASE_SSL=disable` only for a local non-TLS Postgres server
 - Verify you're all connected to the same database
 
 **API connection fails:**

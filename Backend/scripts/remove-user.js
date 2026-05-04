@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { getDb } from "../mongo.js";
+import { getDb } from "../db.js";
 
 const email = String(process.env.USER_EMAIL || process.argv[2] || "").trim().toLowerCase();
 if (!email) {
