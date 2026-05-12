@@ -1,10 +1,26 @@
+import { useState, useEffect } from "react";
 import { Outlet, Link, useLocation } from "react-router";
-import { LayoutDashboard, Users, Award, FileText, MessageSquare, BarChart3, Bell, Settings } from "lucide-react";
+import { LayoutDashboard, Users, Award, FileText, MessageSquare, BarChart3, Bell, Settings, Loader2 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
+import { Redirect } from "../pages/redirect";
+import { getStoredUser } from "../lib/user-storage";
+
+interface QuickStats {
+  totalScholars: number;
+  pendingApplications: number;
+  activeScholarships: number;
+}
 
 export function AdminLayout() {
   const location = useLocation();
+  const [quickStats, setQuickStats] = useState<QuickStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const user = getStoredUser();
+
+  if (user?.userType !== "admin") {
+    return <Redirect to="/auth/signin" />;
+  }
   
   const navItems = [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
@@ -16,6 +32,24 @@ export function AdminLayout() {
     { href: "/admin/notifications", label: "Notifications", icon: Bell },
     { href: "/admin/settings", label: "Settings", icon: Settings },
   ];
+
+  useEffect(() => {
+    const fetchQuickStats = async () => {
+      try {
+        const response = await fetch("/api/admin/analytics");
+        if (response.ok) {
+          const data = await response.json();
+          setQuickStats(data.quickStats);
+        }
+      } catch (err) {
+        console.error("Error fetching quick stats:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchQuickStats();
+  }, []);
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -66,24 +100,32 @@ export function AdminLayout() {
               Quick Stats
             </h3>
             <div className="space-y-2.5">
-              <div className="flex items-center justify-between px-3 py-1.5">
-                <span className="text-sm text-gray-600">Total Scholars</span>
-                <Badge className="bg-[#1E3A5F] hover:bg-[#1E3A5F] text-white px-2.5 py-0.5 text-xs font-semibold">
-                  1,247
-                </Badge>
-              </div>
-              <div className="flex items-center justify-between px-3 py-1.5">
-                <span className="text-sm text-gray-600">Pending Applications</span>
-                <Badge className="bg-amber-600 hover:bg-amber-600 text-white px-2.5 py-0.5 text-xs font-semibold">
-                  38
-                </Badge>
-              </div>
-              <div className="flex items-center justify-between px-3 py-1.5">
-                <span className="text-sm text-gray-600">Active Scholarships</span>
-                <Badge className="bg-green-600 hover:bg-green-600 text-white px-2.5 py-0.5 text-xs font-semibold">
-                  24
-                </Badge>
-              </div>
+              {loading ? (
+                <div className="flex items-center justify-center px-3 py-4">
+                  <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between px-3 py-1.5">
+                    <span className="text-sm text-gray-600">Total Scholars</span>
+                    <Badge className="bg-[#1E3A5F] hover:bg-[#1E3A5F] text-white px-2.5 py-0.5 text-xs font-semibold">
+                      {quickStats?.totalScholars?.toLocaleString() ?? "—"}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-1.5">
+                    <span className="text-sm text-gray-600">Pending Applications</span>
+                    <Badge className="bg-amber-600 hover:bg-amber-600 text-white px-2.5 py-0.5 text-xs font-semibold">
+                      {quickStats?.pendingApplications?.toLocaleString() ?? "—"}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between px-3 py-1.5">
+                    <span className="text-sm text-gray-600">Active Scholarships</span>
+                    <Badge className="bg-green-600 hover:bg-green-600 text-white px-2.5 py-0.5 text-xs font-semibold">
+                      {quickStats?.activeScholarships?.toLocaleString() ?? "—"}
+                    </Badge>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

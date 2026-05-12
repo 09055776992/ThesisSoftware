@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -8,99 +8,55 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
-import { Search, MoreVertical, Eye, Edit, UserX, Download } from "lucide-react";
+import { Search, MoreVertical, Eye, Edit, UserX, Download, Loader2 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu";
 
-const mockUsers = [
-  {
-    id: 1,
-    name: "John Doe",
-    email: "john.doe@university.edu",
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=user1",
-    type: "Student",
-    status: "Active",
-    joinedDate: "Jan 15, 2024",
-    profileComplete: 100,
-  },
-  {
-    id: 2,
-    name: "Sarah Johnson",
-    email: "sarah.j@mit.edu",
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=sarah",
-    type: "Student",
-    status: "Active",
-    joinedDate: "Feb 20, 2024",
-    profileComplete: 95,
-  },
-  {
-    id: 3,
-    name: "Michael Chen",
-    email: "m.chen@stanford.edu",
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=michael",
-    type: "Student",
-    status: "Active",
-    joinedDate: "Mar 5, 2024",
-    profileComplete: 80,
-  },
-  {
-    id: 4,
-    name: "Emily Rodriguez",
-    email: "emily.r@jhu.edu",
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=emily",
-    type: "Student",
-    status: "Active",
-    joinedDate: "Jan 28, 2024",
-    profileComplete: 100,
-  },
-  {
-    id: 5,
-    name: "Tech Foundation",
-    email: "info@techfoundation.org",
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=org1",
-    type: "Provider",
-    status: "Active",
-    joinedDate: "Dec 10, 2023",
-    profileComplete: 100,
-  },
-  {
-    id: 6,
-    name: "Dr. Amanda Williams",
-    email: "a.williams@mentor.edu",
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=mentor1",
-    type: "Mentor",
-    status: "Active",
-    joinedDate: "Nov 5, 2023",
-    profileComplete: 90,
-  },
-  {
-    id: 7,
-    name: "David Lee",
-    email: "david.lee@harvard.edu",
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=david",
-    type: "Student",
-    status: "Suspended",
-    joinedDate: "Apr 12, 2024",
-    profileComplete: 60,
-  },
-  {
-    id: 8,
-    name: "Global Scholarship Fund",
-    email: "contact@globalscholarship.org",
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=org2",
-    type: "Provider",
-    status: "Active",
-    joinedDate: "Oct 1, 2023",
-    profileComplete: 100,
-  },
-];
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string;
+  type: string;
+  status: string;
+  joinedDate: string;
+  profileCompleteness: number;
+}
 
 export function AdminUsers() {
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedUser, setSelectedUser] = useState<typeof mockUsers[0] | null>(null);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
 
-  const filteredUsers = mockUsers.filter((user) => {
+  // Fetch users from API on component mount
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await fetch("/api/admin/users");
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch users: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        setUsers(Array.isArray(data) ? data : (data.data || []));
+      } catch (err) {
+        console.error("Error fetching users:", err);
+        setError(err instanceof Error ? err.message : "Failed to load users");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUsers();
+  }, []);
+
+  const filteredUsers = users.filter((user) => {
     const matchesSearch = user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       user.email.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesType = filterType === "all" || user.type.toLowerCase() === filterType.toLowerCase();
@@ -115,10 +71,21 @@ export function AdminUsers() {
         <p className="text-muted-foreground">Manage and monitor all platform users</p>
       </div>
 
+      {error && (
+        <Card className="border-destructive bg-destructive/10">
+          <CardContent className="pt-6">
+            <p className="text-destructive font-semibold">Error loading users: {error}</p>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <CardTitle>All Users ({filteredUsers.length})</CardTitle>
+            <CardTitle>
+              All Users ({filteredUsers.length})
+              {loading && <Loader2 className="inline h-4 w-4 ml-2 animate-spin" />}
+            </CardTitle>
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1 sm:w-[300px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -127,9 +94,10 @@ export function AdminUsers() {
                   className="pl-9"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  disabled={loading}
                 />
               </div>
-              <Select value={filterType} onValueChange={setFilterType}>
+              <Select value={filterType} onValueChange={setFilterType} disabled={loading}>
                 <SelectTrigger className="w-[150px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -138,9 +106,10 @@ export function AdminUsers() {
                   <SelectItem value="student">Students</SelectItem>
                   <SelectItem value="provider">Providers</SelectItem>
                   <SelectItem value="mentor">Mentors</SelectItem>
+                  <SelectItem value="admin">Admins</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={filterStatus} onValueChange={setFilterStatus}>
+              <Select value={filterStatus} onValueChange={setFilterStatus} disabled={loading}>
                 <SelectTrigger className="w-[150px]">
                   <SelectValue />
                 </SelectTrigger>
@@ -150,7 +119,7 @@ export function AdminUsers() {
                   <SelectItem value="suspended">Suspended</SelectItem>
                 </SelectContent>
               </Select>
-              <Button>
+              <Button disabled={loading}>
                 <Download className="h-4 w-4 mr-2" />
                 Export
               </Button>
@@ -158,82 +127,91 @@ export function AdminUsers() {
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Joined Date</TableHead>
-                <TableHead>Profile</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredUsers.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <Avatar>
-                        <AvatarImage src={user.avatar} />
-                        <AvatarFallback>{user.name[0]}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="font-semibold">{user.name}</p>
-                        <p className="text-sm text-muted-foreground">{user.email}</p>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{user.type}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={user.status === "Active" ? "default" : "destructive"}
-                      className={user.status === "Active" ? "bg-accent" : ""}
-                    >
-                      {user.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{user.joinedDate}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden max-w-[100px]">
-                        <div
-                          className="h-full bg-primary"
-                          style={{ width: `${user.profileComplete}%` }}
-                        />
-                      </div>
-                      <span className="text-sm font-mono">{user.profileComplete}%</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm">
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setSelectedUser(user)}>
-                          <Eye className="h-4 w-4 mr-2" />
-                          View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Edit className="h-4 w-4 mr-2" />
-                          Edit User
-                        </DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive">
-                          <UserX className="h-4 w-4 mr-2" />
-                          Suspend User
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">No users found</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Joined Date</TableHead>
+                  <TableHead>Profile</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filteredUsers.map((user) => (
+                  <TableRow key={user.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <Avatar>
+                          <AvatarImage src={user.avatar} />
+                          <AvatarFallback>{user.name[0]}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <p className="font-semibold">{user.name}</p>
+                          <p className="text-sm text-muted-foreground">{user.email}</p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{user.type}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={user.status === "Active" ? "default" : "destructive"}
+                        className={user.status === "Active" ? "bg-accent" : ""}
+                      >
+                        {user.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{user.joinedDate}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <progress
+                          className="h-2 w-[100px] overflow-hidden rounded-full"
+                          value={user.profileCompleteness}
+                          max={100}
+                        />
+                        <span className="text-sm font-mono">{user.profileCompleteness}%</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setSelectedUser(user)}>
+                            <Eye className="h-4 w-4 mr-2" />
+                            View Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem>
+                            <Edit className="h-4 w-4 mr-2" />
+                            Edit User
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="text-destructive">
+                            <UserX className="h-4 w-4 mr-2" />
+                            Suspend User
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -289,7 +267,7 @@ export function AdminUsers() {
                         </div>
                         <div>
                           <p className="text-sm text-muted-foreground">Profile Completion</p>
-                          <p className="font-semibold">{selectedUser.profileComplete}%</p>
+                          <p className="font-semibold">{selectedUser.profileCompleteness}%</p>
                         </div>
                       </div>
                     </CardContent>

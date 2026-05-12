@@ -34,8 +34,8 @@ export function ProfileSetup() {
     
     // Step 3
     netWorth: storedUser?.netWorth ?? "",
-    currency: storedUser?.currency ?? "USD",
-    incomeCategory: storedUser?.incomeCategory ?? "25000-50000",
+    currency: storedUser?.currency ?? "PHP",
+    incomeCategory: storedUser?.incomeCategory ?? "0-25000",
     financialNeed: storedUser?.financialNeed ?? [3],
   });
 
@@ -288,10 +288,7 @@ export function ProfileSetup() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="USD">USD ($)</SelectItem>
-                        <SelectItem value="EUR">EUR (€)</SelectItem>
-                        <SelectItem value="GBP">GBP (£)</SelectItem>
-                        <SelectItem value="CAD">CAD ($)</SelectItem>
+                        <SelectItem value="PHP">PHP (₱)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -318,11 +315,11 @@ export function ProfileSetup() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="0-25000">Under $25,000</SelectItem>
-                      <SelectItem value="25000-50000">$25,000 - $50,000</SelectItem>
-                      <SelectItem value="50000-75000">$50,000 - $75,000</SelectItem>
-                      <SelectItem value="75000-100000">$75,000 - $100,000</SelectItem>
-                      <SelectItem value="100000+">$100,000+</SelectItem>
+                      <SelectItem value="0-25000">Under ₱25,000</SelectItem>
+                      <SelectItem value="25000-50000">₱25,000 - ₱50,000</SelectItem>
+                      <SelectItem value="50000-75000">₱50,000 - ₱75,000</SelectItem>
+                      <SelectItem value="75000-100000">₱75,000 - ₱100,000</SelectItem>
+                      <SelectItem value="100000+">₱100,000+</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

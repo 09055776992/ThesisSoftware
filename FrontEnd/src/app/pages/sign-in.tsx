@@ -4,7 +4,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { GraduationCap } from "lucide-react";
-import { buildNameFromEmail, clearStoredUser, getStoredUser, saveStoredUser } from "../lib/user-storage";
+import { buildNameFromEmail, clearStoredUser, getStoredUser, saveAuthToken, saveStoredUser } from "../lib/user-storage";
 import { signIn } from "../lib/api-client";
 
 export function SignIn() {
@@ -43,6 +43,7 @@ export function SignIn() {
       };
 
       clearStoredUser();
+      saveAuthToken((result as { token?: string }).token ?? null);
       saveStoredUser({
         email: user.email || normalizedEmail,
         fullName:
@@ -55,6 +56,8 @@ export function SignIn() {
 
       if ((user.userType || "").toLowerCase() === "admin") {
         navigate("/admin");
+      } else if ((user.userType || "").toLowerCase() === "provider") {
+        navigate("/provider/dashboard");
       } else {
         navigate("/dashboard");
       }

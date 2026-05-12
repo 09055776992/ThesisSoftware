@@ -2,66 +2,330 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import crypto from "crypto";
+import bcryptjs from "bcryptjs";
+import jwt from "jsonwebtoken";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 import { getDb } from "./db.js";
 import { rankScholarships } from "./matching-algorithms.js";
+import { seedQCSPPScholarships } from "./seed-qcsp-scholarships.js";
+import * as eligibilityMatching from "./eligibility-matching.js";
+
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const { studentEmail, scholarshipId } = req.body;
+    const uploadDir = path.join(__dirname, "uploads", "applications", 
+      studentEmail ? studentEmail.replace(/[^a-zA-Z0-9]/g, "_") : "unknown", 
+      scholarshipId || "unknown"
+    );
+    
+    // Create directory if it doesn't exist
+    fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const timestamp = Date.now();
+    const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9.]/g, "_");
+    cb(null, `${timestamp}_${sanitizedFilename}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF, JPG, JPEG, and PNG files are allowed'), false);
+    }
+  }
+});
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// Seed demo account on startup (only if DEMO_EMAIL and DEMO_PASSWORD are set)
-async function seedDemoAccount() {
-  try {
-    const demoEmail = String(process.env.DEMO_EMAIL || "").trim();
-    const demoPassword = String(process.env.DEMO_PASSWORD || "").trim();
+// Serve uploads folder as static files
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-    if (!demoEmail || !demoPassword) {
-      console.log("Skipping demo account seeding (no DEMO_EMAIL/DEMO_PASSWORD set).");
-      return;
-    }
-
-    const db = await getDb();
-    const usersCollection = db.collection("users");
-    const existing = await usersCollection.findOne({ email: demoEmail });
-    if (!existing) {
-      await usersCollection.insertOne({
-        fullName: "Demo User",
-        email: demoEmail,
-        password: demoPassword,
-        phone: "",
-        userType: "student",
-        avatar: "",
-        createdAt: new Date(),
-      });
-      console.log(`✓ Demo account created: ${demoEmail}`);
-    } else {
-      console.log("✓ Demo account already exists");
-    }
-  } catch (error) {
-    console.error("Error seeding demo account:", error);
-  }
+function createAuthToken({ userId, email, userType }) {
+  return jwt.sign(
+    {
+      userId: String(userId || ""),
+      email: String(email || "").toLowerCase(),
+      userType: String(userType || "student"),
+    },
+    process.env.JWT_SECRET || "your-secret-key",
+    { expiresIn: "7d" },
+  );
 }
-
-// Initialize demo account when app starts (will run after server is listening)
 
 app.get("/health", (_, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/scholarships", async (_, res) => {
+app.get("/api/scholarships", async (req, res) => {
   try {
     const db = await getDb();
-    const scholarships = await db.collection("scholarships").find({}).toArray();
+    const scholarships = await db.collection("scholarships").find({ status: "Active" }).toArray();
+    
+    // Get student email from query parameter for eligibility filtering
+    const studentEmail = req.query.studentEmail || req.query.email;
+    
+    if (studentEmail) {
+      // Fetch student profile for eligibility matching
+      const student = await db.collection("users").findOne({ email: studentEmail.toLowerCase() });
+      
+      if (student) {
+        // Apply eligibility filtering
+        const eligibleScholarships = eligibilityMatching.filterScholarshipsByEligibility(scholarships, student);
+        res.json({ 
+          data: eligibleScholarships,
+          studentProfile: {
+            email: student.email,
+            educationLevel: student.educationLevel || student.education_level,
+            gwa: student.gwa || student.GWA,
+            is_qc_resident: student.is_qc_resident
+          }
+        });
+        return;
+      }
+    }
+    
+    // No student profile provided or not found - return all active scholarships
     res.json({ data: scholarships });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch scholarships." });
   }
 });
 
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+async function getUserStateByEmail(db, email) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return null;
+  return db.collection("user_state").findOne({ email: normalizedEmail });
+}
+
+function mergeById(existingItems, incomingItems) {
+  const merged = new Map();
+
+  for (const item of Array.isArray(existingItems) ? existingItems : []) {
+    if (item && typeof item === "object" && item.id != null) {
+      merged.set(String(item.id), item);
+    }
+  }
+
+  for (const item of Array.isArray(incomingItems) ? incomingItems : []) {
+    if (item && typeof item === "object" && item.id != null) {
+      merged.set(String(item.id), item);
+    }
+  }
+
+  return Array.from(merged.values());
+}
+
+async function getDisplayNameByEmail(db, email) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return "";
+
+  const user = await db.collection("users").findOne({ email: normalizedEmail });
+  return String(user?.fullName || user?.email || normalizedEmail.split("@")[0] || normalizedEmail);
+}
+
+async function saveConversationsForEmail(db, email, incomingConversations) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return;
+
+  const previous = (await getUserStateByEmail(db, normalizedEmail)) ?? {};
+  const nextConversations = mergeById(previous.conversations, incomingConversations);
+
+  await db.collection("user_state").replaceOne(
+    { email: normalizedEmail },
+    {
+      ...previous,
+      email: normalizedEmail,
+      conversations: nextConversations,
+      updatedAt: new Date().toISOString(),
+    },
+    { upsert: true },
+  );
+}
+
+app.get("/api/users/:email/saved-scholarships", async (req, res) => {
+  try {
+    const db = await getDb();
+    const email = normalizeEmail(req.params.email);
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    const state = await getUserStateByEmail(db, email);
+    const ids = Array.isArray(state?.savedScholarshipIds)
+      ? state.savedScholarshipIds.map((v) => Number(v)).filter(Number.isFinite)
+      : [];
+
+    return res.json({ data: ids });
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to fetch saved scholarships." });
+  }
+});
+
+app.put("/api/users/:email/saved-scholarships", async (req, res) => {
+  try {
+    const db = await getDb();
+    const email = normalizeEmail(req.params.email);
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    const payload = req.body ?? {};
+    const ids = Array.isArray(payload.ids)
+      ? payload.ids.map((v) => Number(v)).filter(Number.isFinite)
+      : [];
+
+    const previous = (await getUserStateByEmail(db, email)) ?? {};
+    await db.collection("user_state").replaceOne(
+      { email },
+      {
+        ...previous,
+        email,
+        savedScholarshipIds: ids,
+        updatedAt: new Date().toISOString(),
+      },
+      { upsert: true },
+    );
+
+    return res.json({ data: ids });
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to save scholarships." });
+  }
+});
+
+app.get("/api/users/:email/conversations", async (req, res) => {
+  try {
+    const db = await getDb();
+    const email = normalizeEmail(req.params.email);
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    const state = await getUserStateByEmail(db, email);
+    const conversations = Array.isArray(state?.conversations) ? state.conversations : [];
+    return res.json({ data: conversations });
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to fetch conversations." });
+  }
+});
+
+app.put("/api/users/:email/conversations", async (req, res) => {
+  try {
+    const db = await getDb();
+    const email = normalizeEmail(req.params.email);
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    const payload = req.body ?? {};
+    const conversations = Array.isArray(payload.conversations) ? payload.conversations : [];
+
+    await saveConversationsForEmail(db, email, conversations);
+
+    const senderName = await getDisplayNameByEmail(db, email);
+    const mirroredByRecipient = new Map();
+
+    for (const conversation of conversations) {
+      const participantEmail = normalizeEmail(conversation?.participantId);
+      if (!participantEmail || participantEmail === email || !participantEmail.includes("@")) {
+        continue;
+      }
+
+      const mirroredConversation = {
+        ...conversation,
+        participantId: email,
+        name: senderName || conversation?.name || email,
+      };
+
+      const existing = mirroredByRecipient.get(participantEmail) ?? [];
+      existing.push(mirroredConversation);
+      mirroredByRecipient.set(participantEmail, existing);
+    }
+
+    for (const [recipientEmail, recipientConversations] of mirroredByRecipient.entries()) {
+      await saveConversationsForEmail(db, recipientEmail, recipientConversations);
+    }
+
+    return res.json({ data: conversations });
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to save conversations." });
+  }
+});
+
+// GET /api/users/:email/screening-appointments
+// Student views their scheduled screening appointments
+app.get("/api/users/:email/screening-appointments", async (req, res) => {
+  try {
+    const db = await getDb();
+    const email = normalizeEmail(req.params.email);
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    // Find all applications for this student with scheduled screenings
+    const applications = await db
+      .collection("applications")
+      .find({
+        studentEmail: email,
+        "screeningSchedule.isScheduled": true,
+      })
+      .sort({ "screeningSchedule.scheduledDate": 1 })
+      .toArray();
+
+    const screeningAppointments = applications.map((app) => ({
+      applicationId: app._id.toString(),
+      scholarshipName: app.scholarshipName,
+      status: app.status,
+      submittedAt: app.submittedAt,
+      screening: {
+        scheduledDate: app.screeningSchedule?.scheduledDate,
+        scheduledTime: app.screeningSchedule?.scheduledTime,
+        venue: app.screeningSchedule?.venue,
+        notes: app.screeningSchedule?.notes,
+        scheduledAt: app.screeningSchedule?.scheduledAt,
+      },
+    }));
+
+    res.json({
+      data: screeningAppointments,
+      count: screeningAppointments.length,
+      message:
+        screeningAppointments.length > 0
+          ? "Screening appointments retrieved successfully."
+          : "No screening appointments scheduled.",
+    });
+  } catch (error) {
+    console.error("Error fetching screening appointments:", error);
+    res.status(500).json({ error: "Failed to fetch screening appointments." });
+  }
+});
+
 app.get("/api/scholarships/recommendations", async (req, res) => {
   try {
     const db = await getDb();
-    const scholarships = await db.collection("scholarships").find({}).toArray();
+    const scholarships = await db.collection("scholarships").find({ status: "Active" }).toArray();
     const studentId = String(req.query.studentId || "current-student");
     const ranked = rankScholarships(scholarships, {}, studentId);
     res.json({ data: ranked });
@@ -73,7 +337,7 @@ app.get("/api/scholarships/recommendations", async (req, res) => {
 app.post("/api/scholarships/recommendations", async (req, res) => {
   try {
     const db = await getDb();
-    const scholarships = await db.collection("scholarships").find({}).toArray();
+    const scholarships = await db.collection("scholarships").find({ status: "Active" }).toArray();
     const payload = req.body ?? {};
     const profile = payload.profile ?? payload;
     const studentId = String(payload.studentId || profile.email || "current-student");
@@ -92,6 +356,330 @@ app.post("/api/scholarships", async (req, res) => {
     res.status(201).json({ insertedId: result.insertedId });
   } catch (error) {
     res.status(500).json({ error: "Failed to create scholarship." });
+  }
+});
+
+app.get("/api/admin/scholarships", async (_, res) => {
+  try {
+    const db = await getDb();
+    const scholarships = await db.collection("scholarships").find({}).sort({ createdAt: -1 }).toArray();
+    res.json({ data: scholarships });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch scholarships." });
+  }
+});
+
+app.post("/api/admin/scholarships", async (req, res) => {
+  try {
+    const db = await getDb();
+    const payload = req.body ?? {};
+    const scholarship = {
+      name: String(payload.name || "").trim(),
+      provider: String(payload.provider || payload.organization || "").trim(),
+      organization: String(payload.organization || payload.provider || "").trim(),
+      amount: Number(payload.amount || 0),
+      deadline: payload.deadline ? new Date(payload.deadline) : new Date(),
+      status: String(payload.status || "Active"),
+      type: String(payload.type || "Other"),
+      fieldOfStudy: String(payload.fieldOfStudy || "").trim(),
+      location: String(payload.location || "").trim(),
+      description: String(payload.description || "").trim(),
+      eligibilityCriteria: payload.eligibilityCriteria || {},
+      applicationsCount: Number(payload.applicationsCount || 0),
+      createdAt: new Date(),
+    };
+
+    const result = await db.collection("scholarships").insertOne(scholarship);
+    res.status(201).json({ data: { ...scholarship, _id: result.insertedId } });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to create scholarship." });
+  }
+});
+
+app.put("/api/admin/scholarships/:id", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const payload = req.body ?? {};
+    
+    console.log("[PUT Scholarship] ID param:", req.params.id);
+    
+    // Validate ObjectId format
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid scholarship ID format." });
+    }
+    
+    const objectId = new ObjectId(req.params.id);
+    console.log("[PUT Scholarship] Converted ObjectId:", objectId.toString());
+    
+    const updates = {
+      ...payload,
+      provider: payload.provider ?? payload.organization,
+      organization: payload.organization ?? payload.provider,
+    };
+
+    if (updates.amount !== undefined) updates.amount = Number(updates.amount);
+    if (updates.deadline) updates.deadline = new Date(updates.deadline);
+
+    Object.keys(updates).forEach((key) => updates[key] === undefined && delete updates[key]);
+
+    console.log("[PUT Scholarship] Updates:", Object.keys(updates));
+    
+    // First verify scholarship exists
+    const exists = await db.collection("scholarships").findOne({ _id: objectId });
+    console.log("[PUT Scholarship] Scholarship exists:", !!exists);
+
+    // Use updateOne and fetch separately to ensure compatibility
+    const updateResult = await db.collection("scholarships").updateOne(
+      { _id: objectId },
+      { $set: updates }
+    );
+
+    console.log("[PUT Scholarship] Update result - matched:", updateResult.matchedCount, "modified:", updateResult.modifiedCount);
+
+    if (!updateResult.matchedCount) {
+      return res.status(404).json({ error: "Scholarship not found." });
+    }
+
+    // Fetch the updated document
+    const updatedScholarship = await db.collection("scholarships").findOne({ _id: objectId });
+
+    res.json({ data: updatedScholarship });
+  } catch (error) {
+    console.error("Error updating scholarship:", error);
+    res.status(500).json({ error: "Failed to update scholarship.", details: error.message });
+  }
+});
+
+app.delete("/api/admin/scholarships/:id", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const result = await db.collection("scholarships").deleteOne({ _id: new ObjectId(req.params.id) });
+
+    if (!result.deletedCount) {
+      return res.status(404).json({ error: "Scholarship not found." });
+    }
+
+    res.json({ message: "Scholarship deleted successfully." });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete scholarship." });
+  }
+});
+
+// QCSP Scholarship Seeding Endpoint
+app.post("/api/admin/seed-qcsp", async (req, res) => {
+  try {
+    console.log("🌱 Starting QCSP scholarship seeding...");
+    const result = await seedQCSPPScholarships();
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        message: `Successfully seeded ${result.seeded} new QCSP scholarships. Total QCSP scholarships: ${result.total}`,
+        seeded: result.seeded,
+        total: result.total
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error("Error seeding QCSP scholarships:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: "Failed to seed QCSP scholarships" 
+    });
+  }
+});
+
+app.get("/api/admin/applications", async (_, res) => {
+  try {
+    const db = await getDb();
+    const applicationsCollection = db.collection("applications");
+    const [applications, pending, underReview, approved, rejected] = await Promise.all([
+      applicationsCollection.find({}).sort({ submittedAt: -1 }).toArray(),
+      applicationsCollection.countDocuments({ status: "Pending" }),
+      applicationsCollection.countDocuments({ status: "Under Review" }),
+      applicationsCollection.countDocuments({ status: "Approved" }),
+      applicationsCollection.countDocuments({ status: "Rejected" }),
+    ]);
+
+    res.json({
+      data: applications,
+      stats: { pending, underReview, approved, rejected },
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch applications." });
+  }
+});
+
+app.patch("/api/admin/applications/:id/approve", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const result = await db.collection("applications").findOneAndUpdate(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: "Approved" } },
+      { returnDocument: "after" },
+    );
+
+    if (!result?.value) {
+      return res.status(404).json({ error: "Application not found." });
+    }
+
+    res.json({ data: result.value, message: "Application approved successfully." });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to approve application." });
+  }
+});
+
+app.patch("/api/admin/applications/:id/reject", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const result = await db.collection("applications").findOneAndUpdate(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: "Rejected" } },
+      { returnDocument: "after" },
+    );
+
+    if (!result?.value) {
+      return res.status(404).json({ error: "Application not found." });
+    }
+
+    res.json({ data: result.value, message: "Application rejected successfully." });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to reject application." });
+  }
+});
+
+// TEST ENDPOINT - verify new code is loaded
+app.get("/api/test-screening", (req, res) => {
+  res.json({ message: "Screening endpoints are loaded!" });
+});
+
+// PATCH /api/admin/applications/:id/schedule-screening
+// Admin schedules final screening appointment for eligible student
+app.patch("/api/admin/applications/:id/schedule-screening", async (req, res) => {
+  console.log("[SCREENING-ENDPOINT] Received request for:", req.params.id);
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const { scheduledDate, scheduledTime, venue, notes } = req.body;
+
+    // Validate required fields
+    if (!scheduledDate || !scheduledTime || !venue) {
+      return res.status(400).json({
+        error: "scheduledDate, scheduledTime, and venue are required.",
+      });
+    }
+
+    // Validate date format (YYYY-MM-DD)
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (!datePattern.test(scheduledDate)) {
+      return res.status(400).json({
+        error: "Invalid date format. Use YYYY-MM-DD.",
+      });
+    }
+
+    // Validate time format (HH:MM in 24-hour format)
+    const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (!timePattern.test(scheduledTime)) {
+      return res.status(400).json({
+        error: "Invalid time format. Use HH:MM (24-hour format).",
+      });
+    }
+
+    // Ensure scheduled date is in the future
+    const screeningDateTime = new Date(`${scheduledDate}T${scheduledTime}:00Z`);
+    if (screeningDateTime < new Date()) {
+      return res.status(400).json({
+        error: "Screening date and time must be in the future.",
+      });
+    }
+
+    // Update application with screening schedule
+    const idParam = String(req.params.id || "").trim();
+    const query = ObjectId.isValid(idParam)
+      ? { $or: [{ _id: new ObjectId(idParam) }, { _id: idParam }] }
+      : { _id: idParam };
+    console.log('[SCREENING-ENDPOINT] idParam:', idParam, 'isValidObjectId:', ObjectId.isValid(idParam));
+    try {
+      console.log('[SCREENING-ENDPOINT] Query for update:', JSON.stringify(query));
+    } catch (e) {
+      console.log('[SCREENING-ENDPOINT] Query for update (non-serializable)');
+    }
+
+    const result = await db.collection("applications").findOneAndUpdate(
+      query,
+      {
+        $set: {
+          screeningSchedule: {
+            scheduledDate: screeningDateTime,
+            scheduledTime,
+            venue,
+            scheduledBy: req.user?.id || null,
+            scheduledAt: new Date(),
+            notes: notes || null,
+            isScheduled: true,
+          },
+        },
+      },
+      { returnDocument: "after" },
+    );
+    console.log('[SCREENING-ENDPOINT] findOneAndUpdate raw result type:', typeof result);
+    try { console.log('[SCREENING-ENDPOINT] findOneAndUpdate raw result keys:', Object.keys(result || {})); } catch (e) {}
+    try { console.log('[SCREENING-ENDPOINT] findOneAndUpdate value:', JSON.stringify(result?.value || result)); } catch (e) { console.log('[SCREENING-ENDPOINT] findOneAndUpdate value: <non-serializable>'); }
+
+    if (!result?.value) {
+      return res.status(404).json({ error: "Application not found." });
+    }
+
+    res.json({
+      data: result.value,
+      message: "Screening appointment scheduled successfully.",
+      screening: result.value.screeningSchedule,
+    });
+  } catch (error) {
+    console.error("Error scheduling screening:", error);
+    res.status(500).json({ error: "Failed to schedule screening appointment." });
+  }
+});
+
+// GET /api/admin/applications/:id/screening
+// Get screening details for a specific application
+app.get("/api/admin/applications/:id/screening", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+
+    const idParam = String(req.params.id || "").trim();
+    const query = ObjectId.isValid(idParam)
+      ? { $or: [{ _id: new ObjectId(idParam) }, { _id: idParam }] }
+      : { _id: idParam };
+
+    const application = await db.collection("applications").findOne(query);
+
+    if (!application) {
+      return res.status(404).json({ error: "Application not found." });
+    }
+
+    res.json({
+      data: {
+        applicationId: String(application._id),
+        studentName: application.studentName,
+        studentEmail: application.studentEmail,
+        scholarshipName: application.scholarshipName,
+        status: application.status,
+        screeningSchedule: application.screeningSchedule,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching screening details:", error);
+    res.status(500).json({ error: "Failed to fetch screening details." });
   }
 });
 
@@ -117,15 +705,15 @@ app.post("/api/auth/signup", async (req, res) => {
       email,
       password,
       phone: String(payload.phone || ""),
+      location: String(payload.location || ""),
       userType,
       avatar: "",
       createdAt: new Date(),
     };
 
-    await db.collection("users").insertOne(user);
+    const result = await db.collection("users").insertOne(user);
 
-    // create a simple session token so clients can auto-login after signup
-    const token = crypto.randomBytes(24).toString("hex");
+    const token = createAuthToken({ userId: result.insertedId, email, userType });
     await db.collection("sessions").insertOne({ token, email, createdAt: new Date() });
 
     return res.status(201).json({
@@ -133,6 +721,7 @@ app.post("/api/auth/signup", async (req, res) => {
         fullName: user.fullName,
         email: user.email,
         phone: user.phone,
+        location: user.location,
         userType: user.userType,
         avatar: user.avatar,
       },
@@ -159,8 +748,7 @@ app.post("/api/auth/signin", async (req, res) => {
       return res.status(401).json({ error: "Invalid email or password." });
     }
 
-    // create a simple session token for the client
-    const token = crypto.randomBytes(24).toString("hex");
+    const token = createAuthToken({ userId: user._id, email, userType: user.userType || "student" });
     await db.collection("sessions").insertOne({ token, email, createdAt: new Date() });
 
     return res.json({
@@ -168,6 +756,7 @@ app.post("/api/auth/signin", async (req, res) => {
         fullName: user.fullName || "",
         email: user.email,
         phone: user.phone || "",
+        location: user.location || "",
         userType: user.userType || "student",
         avatar: user.avatar || "",
       },
@@ -178,11 +767,1590 @@ app.post("/api/auth/signin", async (req, res) => {
   }
 });
 
+// Admin authentication endpoints
+app.post("/api/auth/admin/signin", async (req, res) => {
+  try {
+    const db = await getDb();
+    const payload = req.body ?? {};
+    const email = String(payload.email || "").trim().toLowerCase();
+    const password = String(payload.password || "");
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required." });
+    }
+
+    const admin = await db.collection("admins").findOne({ email });
+    if (!admin) {
+      return res.status(401).json({ error: "Invalid admin credentials." });
+    }
+
+    // Use bcrypt to compare passwords securely
+    const passwordMatch = await bcryptjs.compare(password, admin.passwordHash || admin.password);
+    if (!passwordMatch) {
+      return res.status(401).json({ error: "Invalid admin credentials." });
+    }
+
+    const token = createAuthToken({ userId: admin._id, email, userType: "admin" });
+    await db.collection("sessions").insertOne({ token, email, role: "admin", createdAt: new Date() });
+
+    return res.json({
+      user: {
+        fullName: admin.fullName || "",
+        email: admin.email,
+        userType: "admin",
+      },
+      token,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to sign in as admin." });
+  }
+});
+
+app.post("/api/auth/admin/signup", async (req, res) => {
+  try {
+    const db = await getDb();
+    const payload = req.body ?? {};
+    const email = String(payload.email || "").trim().toLowerCase();
+    const password = String(payload.password || "");
+    const fullName = String(payload.fullName || "");
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required." });
+    }
+
+    const existing = await db.collection("admins").findOne({ email });
+    if (existing) {
+      return res.status(409).json({ error: "Admin account already exists." });
+    }
+
+    // Hash password using bcrypt
+    const passwordHash = await bcryptjs.hash(password, 10);
+
+    const admin = {
+      fullName,
+      email,
+      passwordHash,
+      userType: "admin",
+      createdAt: new Date(),
+    };
+
+    const adminResult = await db.collection("admins").insertOne(admin);
+
+    const token = createAuthToken({ userId: adminResult.insertedId, email, userType: "admin" });
+    await db.collection("sessions").insertOne({ token, email, role: "admin", createdAt: new Date() });
+
+    return res.status(201).json({
+      user: {
+        fullName: admin.fullName,
+        email: admin.email,
+        userType: "admin",
+      },
+      token,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to create admin account." });
+  }
+});
+
+// Provider authentication endpoints
+app.post("/api/auth/provider/signin", async (req, res) => {
+  try {
+    const db = await getDb();
+    const payload = req.body ?? {};
+    const email = String(payload.email || "").trim().toLowerCase();
+    const password = String(payload.password || "");
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required." });
+    }
+
+    const provider = await db.collection("providers").findOne({ email });
+    if (!provider || provider.password !== password) {
+      return res.status(401).json({ error: "Invalid provider credentials." });
+    }
+
+    const token = createAuthToken({ userId: provider._id, email, userType: "provider" });
+    await db.collection("sessions").insertOne({ token, email, role: "provider", createdAt: new Date() });
+
+    return res.json({
+      user: {
+        fullName: provider.fullName || "",
+        email: provider.email,
+        userType: "provider",
+      },
+      token,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to sign in as provider." });
+  }
+});
+
+app.post("/api/auth/provider/signup", async (req, res) => {
+  try {
+    const db = await getDb();
+    const payload = req.body ?? {};
+    const email = String(payload.email || "").trim().toLowerCase();
+    const password = String(payload.password || "");
+    const fullName = String(payload.fullName || "");
+    const phone = String(payload.phone || "");
+    const contactPerson = String(payload.contactPerson || "");
+
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required." });
+    }
+
+    const existing = await db.collection("providers").findOne({ email });
+    if (existing) {
+      return res.status(409).json({ error: "Provider account already exists." });
+    }
+
+    const provider = {
+      fullName,
+      email,
+      password,
+      phone,
+      contactPerson,
+      userType: "provider",
+      createdAt: new Date(),
+    };
+
+    const providerResult = await db.collection("providers").insertOne(provider);
+
+    const token = createAuthToken({ userId: providerResult.insertedId, email, userType: "provider" });
+    await db.collection("sessions").insertOne({ token, email, role: "provider", createdAt: new Date() });
+
+    return res.status(201).json({
+      user: {
+        fullName: provider.fullName,
+        email: provider.email,
+        userType: "provider",
+      },
+      token,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to create provider account." });
+  }
+});
+
+app.get("/api/provider/scholarships", async (req, res) => {
+  try {
+    const db = await getDb();
+    const providerEmail = req.query.email ? String(req.query.email).trim().toLowerCase() : null;
+    
+    if (!providerEmail) {
+      return res.status(400).json({ error: "Provider email is required." });
+    }
+
+    const scholarships = await db
+      .collection("scholarships")
+      .find({ provider: providerEmail })
+      .toArray();
+    
+    res.json({ data: scholarships });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch provider scholarships." });
+  }
+});
+
+app.get("/api/provider/applications", async (req, res) => {
+  try {
+    const db = await getDb();
+    const providerEmail = req.query.email ? String(req.query.email).trim().toLowerCase() : null;
+    
+    if (!providerEmail) {
+      return res.status(400).json({ error: "Provider email is required." });
+    }
+
+    // This assumes applications have a provider field linking to the scholarship provider
+    const applications = await db
+      .collection("applications")
+      .find({ providerEmail })
+      .toArray();
+    
+    res.json({ data: applications });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch provider applications." });
+  }
+});
+
+app.post("/api/provider/scholarships", async (req, res) => {
+  try {
+    const db = await getDb();
+    const payload = req.body ?? {};
+    const providerEmail = String(payload.providerEmail || "").trim().toLowerCase();
+
+    if (!providerEmail) {
+      return res.status(400).json({ error: "Provider email is required." });
+    }
+
+    const scholarship = {
+      ...payload,
+      provider: providerEmail,
+      createdAt: new Date(),
+    };
+
+    const result = await db.collection("scholarships").insertOne(scholarship);
+    res.status(201).json({ insertedId: result.insertedId });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to create scholarship." });
+  }
+});
+
+// PUT /api/users/profile - Update user profile (location, gpa, education, etc.)
+app.put("/api/users/profile", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { email, fullName, phone, location, gpa, gwa, educationLevel, yearLevel, fieldOfStudy, incomeCategory, financialNeed, school, schoolName, schoolCampus, schoolType, schoolLocation, enrolledInQCSchool, isAthlete, isArtist, isSKOfficial, isStudentLeader, isIndigent, isPWD, isSoloParent } = req.body;
+
+    console.log("[Profile Update] Request body:", req.body);
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    // First check if user exists
+    const existingUser = await db.collection("users").findOne({ email: normalizedEmail });
+    console.log("[Profile Update] Found user:", existingUser ? "YES" : "NO", "for email:", normalizedEmail);
+
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    // Build updated user object merging existing with new fields
+    const updatedUser = { ...existingUser };
+    if (fullName !== undefined) updatedUser.fullName = String(fullName);
+    if (phone !== undefined) updatedUser.phone = String(phone);
+    if (location !== undefined) updatedUser.location = String(location);
+    if (gpa !== undefined) updatedUser.gpa = String(gpa);
+    if (gwa !== undefined) updatedUser.gwa = String(gwa);
+    if (educationLevel !== undefined) updatedUser.educationLevel = String(educationLevel);
+    if (yearLevel !== undefined) updatedUser.yearLevel = String(yearLevel);
+    if (fieldOfStudy !== undefined) updatedUser.fieldOfStudy = String(fieldOfStudy);
+    if (incomeCategory !== undefined) updatedUser.incomeCategory = String(incomeCategory);
+    if (financialNeed !== undefined) updatedUser.financialNeed = financialNeed;
+    if (school !== undefined) updatedUser.school = String(school);
+    if (schoolName !== undefined) updatedUser.schoolName = String(schoolName);
+    if (schoolCampus !== undefined) updatedUser.schoolCampus = String(schoolCampus);
+    if (schoolType !== undefined) updatedUser.schoolType = String(schoolType);
+    if (schoolLocation !== undefined) updatedUser.schoolLocation = String(schoolLocation);
+    if (enrolledInQCSchool !== undefined) updatedUser.enrolledInQCSchool = enrolledInQCSchool === true || enrolledInQCSchool === "true";
+    
+    // Special category fields for scholarship eligibility
+    if (isAthlete !== undefined) updatedUser.isAthlete = isAthlete === true || isAthlete === "true";
+    if (isArtist !== undefined) updatedUser.isArtist = isArtist === true || isArtist === "true";
+    if (isSKOfficial !== undefined) updatedUser.isSKOfficial = isSKOfficial === true || isSKOfficial === "true";
+    if (isStudentLeader !== undefined) updatedUser.isStudentLeader = isStudentLeader === true || isStudentLeader === "true";
+    if (isIndigent !== undefined) updatedUser.isIndigent = isIndigent === true || isIndigent === "true";
+    if (isPWD !== undefined) updatedUser.isPWD = isPWD === true || isPWD === "true";
+    if (isSoloParent !== undefined) updatedUser.isSoloParent = isSoloParent === true || isSoloParent === "true";
+
+    console.log("[Profile Update] Updating fields:", Object.keys(updatedUser).filter(k => k !== '_id' && k !== 'password'));
+
+    // Use replaceOne since updateOne is not available in the wrapper
+    await db.collection("users").replaceOne(
+      { email: normalizedEmail },
+      updatedUser
+    );
+
+    console.log("[Profile Update] Profile updated successfully");
+
+    return res.json({
+      message: "Profile updated successfully.",
+      user: {
+        fullName: updatedUser.fullName || "",
+        email: updatedUser.email,
+        phone: updatedUser.phone || "",
+        location: updatedUser.location || "",
+        gpa: updatedUser.gpa || "",
+        gwa: updatedUser.gwa || "",
+        educationLevel: updatedUser.educationLevel || "",
+        yearLevel: updatedUser.yearLevel || "",
+        fieldOfStudy: updatedUser.fieldOfStudy || "",
+        incomeCategory: updatedUser.incomeCategory || "",
+        financialNeed: updatedUser.financialNeed || [],
+        school: updatedUser.school || "",
+        schoolName: updatedUser.schoolName || "",
+        schoolCampus: updatedUser.schoolCampus || "",
+        schoolType: updatedUser.schoolType || "",
+        schoolLocation: updatedUser.schoolLocation || "",
+        enrolledInQCSchool: updatedUser.enrolledInQCSchool || false,
+        isAthlete: updatedUser.isAthlete || false,
+        isArtist: updatedUser.isArtist || false,
+        isSKOfficial: updatedUser.isSKOfficial || false,
+        isStudentLeader: updatedUser.isStudentLeader || false,
+        isIndigent: updatedUser.isIndigent || false,
+        isPWD: updatedUser.isPWD || false,
+        isSoloParent: updatedUser.isSoloParent || false,
+      },
+    });
+  } catch (error) {
+    console.error("[Profile Update] Error:", error);
+    return res.status(500).json({ error: "Failed to update profile: " + error.message });
+  }
+});
+
+  // ===== ADMIN DASHBOARD ROUTES =====
+
+  function normalizeUserRole(user) {
+    return String(user?.userType || user?.role || "").trim().toLowerCase();
+  }
+
+  function calculateProfileCompleteness(user) {
+    const checks = [
+      { key: "fullName", fallback: "userName" },
+      { key: "email" },
+      { key: "phone" },
+      { key: "location", fallback: "address" },
+      { key: "about" },
+      { key: "profileImage", fallback: "avatar" },
+      { key: "skills", isArray: true },
+      { key: "gpa", fallback: "gwa" },
+      { key: "fieldOfStudy", fallback: "course" },
+      { key: "incomeCategory", fallback: "netWorth" },
+      { key: "schoolName", fallback: "school" }, // NEW: School information required for QC scholarships
+    ];
+
+    let filled = 0;
+    for (const check of checks) {
+      const value = user?.[check.key] ?? user?.[check.fallback];
+      if (check.isArray) {
+        if (Array.isArray(value) && value.length > 0) filled++;
+      } else if (String(value ?? "").trim() !== "") {
+        filled++;
+      }
+    }
+
+    return Math.round((filled / checks.length) * 100);
+  }
+
+  function mapRoleToType(role) {
+    const normalized = String(role || "").trim().toLowerCase();
+    if (normalized === "customer" || normalized === "student") return "Student";
+    if (normalized === "provider") return "Provider";
+    if (normalized === "mentor") return "Mentor";
+    if (normalized === "admin") return "Admin";
+    return "Unknown";
+  }
+
+  // GET /api/admin/users - Fetch all users
+  app.get("/api/admin/users", async (req, res) => {
+    try {
+      const db = await getDb();
+      const users = await db.collection("users").find({}).sort({ createdAt: -1 }).toArray();
+
+      const transformedUsers = users.map((user) => ({
+        id: user._id?.toString() || "",
+        name: user.fullName || user.userName || "",
+        email: user.email || "",
+        role: mapRoleToType(normalizeUserRole(user)),
+        type: mapRoleToType(normalizeUserRole(user)),
+        status: String(user.status || "Active"),
+        createdAt: user.createdAt || null,
+        joinedDate: user.createdAt
+          ? new Date(user.createdAt).toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+            })
+          : "Unknown",
+        profileCompleteness: calculateProfileCompleteness(user),
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.email || "")}`,
+      }));
+
+      res.json(transformedUsers);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      res.status(500).json({ error: "Failed to fetch users" });
+    }
+  });
+
+  // GET /api/admin/stats - Fetch user statistics
+  app.get("/api/admin/stats", async (req, res) => {
+    try {
+      const db = await getDb();
+      const usersCollection = db.collection("users");
+      const scholarshipsCollection = db.collection("scholarships");
+
+      const [
+        totalUsers,
+        totalStudents,
+        totalMentors,
+        activeScholarships,
+        newUsersThisMonth,
+        userGrowthByMonth,
+      ] = await Promise.all([
+        usersCollection.countDocuments({}),
+        usersCollection.countDocuments({
+          $or: [
+            { userType: { $in: ["student", "customer"] } },
+            { role: { $in: ["Student", "student", "customer"] } },
+          ],
+        }),
+        usersCollection.countDocuments({
+          $or: [{ userType: "mentor" }, { role: "Mentor" }, { role: "mentor" }],
+        }),
+        scholarshipsCollection.countDocuments({
+          $or: [{ status: { $regex: /^active$/i } }, { status: { $exists: false } }],
+        }),
+        usersCollection.countDocuments({
+          createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+        }),
+        usersCollection
+          .aggregate([
+            {
+              $addFields: {
+                createdAtDate: {
+                  $convert: {
+                    input: "$createdAt",
+                    to: "date",
+                    onError: null,
+                    onNull: null,
+                  },
+                },
+              },
+            },
+            { $match: { createdAtDate: { $ne: null } } },
+            {
+              $group: {
+                _id: { year: { $year: "$createdAtDate" }, month: { $month: "$createdAtDate" } },
+                users: { $sum: 1 },
+              },
+            },
+            { $sort: { "_id.year": 1, "_id.month": 1 } },
+          ])
+          .toArray(),
+      ]);
+
+      const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const userGrowth = userGrowthByMonth.map((entry) => ({
+        month: `${monthLabels[entry._id.month - 1]} ${entry._id.year}`,
+        users: entry.users,
+      }));
+
+      res.json({
+        totalUsers,
+        totalStudents,
+        totalMentors,
+        activeScholarships,
+        newThisMonth: newUsersThisMonth,
+        userGrowthByMonth: userGrowth,
+      });
+    } catch (error) {
+      console.error("Error fetching stats:", error);
+      res.status(500).json({ error: "Failed to fetch statistics" });
+    }
+  });
+
+  // Backwards-compatible alias for the older dashboard route
+  app.get("/api/admin/users/stats", async (req, res) => {
+    try {
+      const db = await getDb();
+      const usersCollection = db.collection("users");
+      const scholarshipsCollection = db.collection("scholarships");
+
+      const [
+        totalUsers,
+        totalStudents,
+        totalMentors,
+        activeScholarships,
+        newUsersThisMonth,
+        userGrowthByMonth,
+      ] = await Promise.all([
+        usersCollection.countDocuments({}),
+        usersCollection.countDocuments({
+          $or: [
+            { userType: { $in: ["student", "customer"] } },
+            { role: { $in: ["Student", "student", "customer"] } },
+          ],
+        }),
+        usersCollection.countDocuments({
+          $or: [{ userType: "mentor" }, { role: "Mentor" }, { role: "mentor" }],
+        }),
+        scholarshipsCollection.countDocuments({
+          $or: [{ status: { $regex: /^active$/i } }, { status: { $exists: false } }],
+        }),
+        usersCollection.countDocuments({
+          createdAt: { $gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) },
+        }),
+        usersCollection
+          .aggregate([
+            {
+              $addFields: {
+                createdAtDate: {
+                  $convert: {
+                    input: "$createdAt",
+                    to: "date",
+                    onError: null,
+                    onNull: null,
+                  },
+                },
+              },
+            },
+            { $match: { createdAtDate: { $ne: null } } },
+            {
+              $group: {
+                _id: { year: { $year: "$createdAtDate" }, month: { $month: "$createdAtDate" } },
+                users: { $sum: 1 },
+              },
+            },
+            { $sort: { "_id.year": 1, "_id.month": 1 } },
+          ])
+          .toArray(),
+      ]);
+
+      const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const userGrowth = userGrowthByMonth.map((entry) => ({
+        month: `${monthLabels[entry._id.month - 1]} ${entry._id.year}`,
+        users: entry.users,
+      }));
+
+      res.json({
+        totalUsers,
+        totalStudents,
+        totalMentors,
+        activeScholarships,
+        newThisMonth: newUsersThisMonth,
+        userGrowthByMonth: userGrowth,
+      });
+    } catch (error) {
+      console.error("Error fetching stats:", error);
+      res.status(500).json({ error: "Failed to fetch statistics" });
+    }
+  });
+
+  // GET /api/admin/users/:id - Fetch a specific user
+  app.get("/api/admin/users/:id", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { id } = req.params;
+      const { ObjectId } = await import("mongodb");
+
+      let user;
+      try {
+        user = await db.collection("users").findOne({ _id: new ObjectId(id) });
+      } catch {
+        // If not a valid ObjectId, try finding by email
+        user = await db.collection("users").findOne({ email: id });
+      }
+
+      if (!user) {
+        return res.status(404).json({ success: false, error: "User not found" });
+      }
+
+      const roleMap = {
+        customer: "Student",
+        student: "Student",
+        provider: "Provider",
+        mentor: "Mentor",
+        admin: "Admin",
+      };
+
+      const transformedUser = {
+        id: user._id?.toString() || "",
+        name: user.fullName || user.userName || "",
+        email: user.email || "",
+        type: roleMap[user.userType?.toLowerCase() || user.role?.toLowerCase()] || "Unknown",
+        phone: user.phone || "",
+        address: user.address || "",
+        joinedDate: user.createdAt
+          ? new Date(user.createdAt).toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "short",
+              day: "numeric",
+            })
+          : "Unknown",
+        profileCompleteness: calculateProfileCompleteness(user),
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(user.email || "")}`,
+      };
+
+      res.json({ success: true, data: transformedUser });
+    } catch (error) {
+      console.error("Error fetching user:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch user" });
+    }
+  });
+
+  // GET /api/admin/analytics - Comprehensive analytics data
+  app.get("/api/admin/analytics", async (req, res) => {
+    try {
+      const db = await getDb();
+      const usersCollection = db.collection("users");
+      const scholarshipsCollection = db.collection("scholarships");
+      const applicationsCollection = db.collection("applications");
+
+      const now = new Date();
+      const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+
+      // 1. User Growth (this month vs last month)
+      const [thisMonthUsers, lastMonthUsers] = await Promise.all([
+        usersCollection.countDocuments({ createdAt: { $gte: thisMonthStart } }),
+        usersCollection.countDocuments({
+          createdAt: { $gte: lastMonthStart, $lt: thisMonthStart },
+        }),
+      ]);
+
+      const userGrowthPercent =
+        lastMonthUsers === 0
+          ? thisMonthUsers > 0
+            ? 100
+            : 0
+          : ((thisMonthUsers - lastMonthUsers) / lastMonthUsers) * 100;
+
+      // 2. Applications this month
+      const applicationsThisMonth = await applicationsCollection.countDocuments({
+        submittedAt: { $gte: thisMonthStart },
+      });
+
+      // 3. Success Rate (approved / (approved + rejected))
+      const [approvedCount, rejectedCount] = await Promise.all([
+        applicationsCollection.countDocuments({ status: "Approved" }),
+        applicationsCollection.countDocuments({ status: "Rejected" }),
+      ]);
+
+      const totalFinalApplications = approvedCount + rejectedCount;
+      const successRate =
+        totalFinalApplications === 0 ? 0 : (approvedCount / totalFinalApplications) * 100;
+
+      // 4. Applications over time (last 6 months)
+      const applicationsByMonth = await applicationsCollection
+        .aggregate([
+          {
+            $match: {
+              submittedAt: { $gte: sixMonthsAgo },
+            },
+          },
+          {
+            $group: {
+              _id: { year: { $year: "$submittedAt" }, month: { $month: "$submittedAt" } },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { "_id.year": 1, "_id.month": 1 } },
+        ])
+        .toArray();
+
+      const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      const applicationsOverTime = applicationsByMonth.map((entry) => ({
+        month: monthLabels[entry._id.month - 1],
+        count: entry.count,
+      }));
+
+      // 5. Scholarship distribution by type
+      const scholarshipTypes = await scholarshipsCollection
+        .aggregate([
+          { $match: { status: "Active" } },
+          {
+            $group: {
+              _id: "$type",
+              count: { $sum: 1 },
+            },
+          },
+        ])
+        .toArray();
+
+      const scholarshipDistribution = scholarshipTypes.map((s) => ({
+        name: s._id || "Other",
+        value: s.count,
+      }));
+
+      // 6. Top 5 scholarships by applications
+      const topScholarships = await scholarshipsCollection
+        .find({ status: "Active" })
+        .sort({ applicationsCount: -1 })
+        .limit(5)
+        .project({ name: 1, applicationsCount: 1 })
+        .toArray();
+
+      const topScholarshipsByApplications = topScholarships.map((s) => ({
+        name: s.name,
+        count: s.applicationsCount || 0,
+      }));
+
+      // 7. User registration trend (last 6 months)
+      const usersByMonth = await usersCollection
+        .aggregate([
+          {
+            $match: {
+              createdAt: { $gte: sixMonthsAgo },
+            },
+          },
+          {
+            $group: {
+              _id: { year: { $year: "$createdAt" }, month: { $month: "$createdAt" } },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { "_id.year": 1, "_id.month": 1 } },
+        ])
+        .toArray();
+
+      const userRegistrationTrend = usersByMonth.map((entry) => ({
+        month: monthLabels[entry._id.month - 1],
+        count: entry.count,
+      }));
+
+      // 8. Quick Stats
+      const [totalScholars, pendingApplications, activeScholarships] = await Promise.all([
+        usersCollection.countDocuments({
+          $or: [
+            { role: { $in: ["student", "customer"] } },
+            { userType: { $in: ["student", "customer"] } },
+          ],
+        }),
+        applicationsCollection.countDocuments({ status: "Pending" }),
+        scholarshipsCollection.countDocuments({ status: "Active" }),
+      ]);
+
+      // 9. Applications by status for breakdown
+      const applicationsByStatus = await applicationsCollection
+        .aggregate([
+          {
+            $group: {
+              _id: "$status",
+              count: { $sum: 1 },
+            },
+          },
+        ])
+        .toArray();
+
+      res.json({
+        stats: {
+          userGrowth: {
+            value: thisMonthUsers,
+            percentChange: Math.round(userGrowthPercent * 10) / 10,
+            isPositive: userGrowthPercent >= 0,
+          },
+          applications: {
+            value: applicationsThisMonth,
+            label: "this month",
+          },
+          successRate: {
+            value: Math.round(successRate * 10) / 10,
+            label: "approval rate",
+          },
+        },
+        charts: {
+          applicationsOverTime,
+          scholarshipDistribution,
+          topScholarshipsByApplications,
+          userRegistrationTrend,
+        },
+        quickStats: {
+          totalScholars,
+          pendingApplications,
+          activeScholarships,
+        },
+        breakdown: {
+          applicationsByStatus: applicationsByStatus.reduce((acc, curr) => {
+            acc[curr._id || "Unknown"] = curr.count;
+            return acc;
+          }, {}),
+          totalUsers: await usersCollection.countDocuments(),
+          totalApplications: await applicationsCollection.countDocuments(),
+          totalScholarships: await scholarshipsCollection.countDocuments(),
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching analytics:", error);
+      res.status(500).json({ error: "Failed to fetch analytics" });
+    }
+  });
+
+  // POST /api/admin/reports/export - Generate CSV report
+  app.post("/api/admin/reports/export", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { from, to } = req.body;
+
+      const fromDate = from ? new Date(from) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      const toDate = to ? new Date(to) : new Date();
+
+      const usersCollection = db.collection("users");
+      const scholarshipsCollection = db.collection("scholarships");
+      const applicationsCollection = db.collection("applications");
+
+      // Gather data
+      const [totalUsers, totalStudents, totalScholarships, applications, scholarships] = await Promise.all([
+        usersCollection.countDocuments(),
+        usersCollection.countDocuments({
+          $or: [{ role: { $in: ["student", "customer"] } }, { userType: { $in: ["student", "customer"] } }],
+        }),
+        scholarshipsCollection.countDocuments(),
+        applicationsCollection.find({ submittedAt: { $gte: fromDate, $lte: toDate } }).toArray(),
+        scholarshipsCollection.find().sort({ applicationsCount: -1 }).toArray(),
+      ]);
+
+      // Applications by status breakdown
+      const applicationsByStatus = applications.reduce((acc, app) => {
+        const status = app.status || "Unknown";
+        acc[status] = (acc[status] || 0) + 1;
+        return acc;
+      }, {});
+
+      // Generate CSV
+      let csv = "# Scholarship Portal Report\n";
+      csv += `# Generated: ${new Date().toLocaleString()}\n`;
+      csv += `# Date Range: ${fromDate.toLocaleDateString()} - ${toDate.toLocaleDateString()}\n\n`;
+
+      // Summary section
+      csv += "## SUMMARY\n";
+      csv += `Total Users,${totalUsers}\n`;
+      csv += `Total Students,${totalStudents}\n`;
+      csv += `Total Scholarships,${totalScholarships}\n`;
+      csv += `Applications in Period,${applications.length}\n\n`;
+
+      // Applications by status
+      csv += "## APPLICATIONS BY STATUS\n";
+      csv += "Status,Count\n";
+      Object.entries(applicationsByStatus).forEach(([status, count]) => {
+        csv += `${status},${count}\n`;
+      });
+      csv += "\n";
+
+      // Scholarships with application counts
+      csv += "## SCHOLARSHIPS (sorted by application count)\n";
+      csv += "Name,Provider,Type,Status,Applications,Amount\n";
+      scholarships.forEach((s) => {
+        csv += `"${s.name || ""}","${s.provider || ""}","${s.type || ""}","${s.status || ""}",${s.applicationsCount || 0},${s.amount || 0}\n`;
+      });
+
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="scholarship-report-${new Date().toISOString().split("T")[0]}.csv"`);
+      res.send(csv);
+    } catch (error) {
+      console.error("Error generating report:", error);
+      res.status(500).json({ error: "Failed to generate report" });
+    }
+  });
+
+  // POST /api/applications - Submit new application with eligibility check
+  app.post("/api/applications", async (req, res) => {
+    try {
+      console.log("[DEBUG] /api/applications body:", req.body);
+      const db = await getDb();
+      const { ObjectId } = await import("mongodb");
+      const {
+        studentId,
+        studentName,
+        studentEmail,
+        scholarshipId,
+        scholarshipName,
+        documents,
+      } = req.body;
+
+      if (!studentId || !scholarshipId) {
+        return res.status(400).json({ error: "Student ID and Scholarship ID are required." });
+      }
+
+      // Get scholarship details
+      const scholarship = await db.collection("scholarships").findOne({
+        _id: new ObjectId(scholarshipId),
+      });
+
+      if (!scholarship) {
+        return res.status(404).json({ error: "Scholarship not found." });
+      }
+
+      // Check if scholarship is still open
+      const now = new Date();
+      const deadline = new Date(scholarship.deadline);
+      const openingDate = scholarship.openingDate ? new Date(scholarship.openingDate) : null;
+
+      if (deadline < now) {
+        return res.status(400).json({ error: "Application period has ended for this scholarship." });
+      }
+
+      if (openingDate && openingDate > now) {
+        return res.status(400).json({ error: "Applications have not opened yet for this scholarship." });
+      }
+
+      // Get student profile
+      const student = await db.collection("users").findOne({
+        _id: new ObjectId(studentId),
+      });
+
+      if (!student) {
+        return res.status(404).json({ error: "Student not found." });
+      }
+
+      // Check if student already applied
+      const existingApplication = await db.collection("applications").findOne({
+        studentId: new ObjectId(studentId),
+        scholarshipId: new ObjectId(scholarshipId),
+      });
+
+      if (existingApplication) {
+        return res.status(409).json({ error: "You have already applied for this scholarship." });
+      }
+
+      // Perform eligibility check
+      const eligibility = eligibilityMatching.checkEligibility(student, scholarship);
+
+      // Only allow submission if student is either fully eligible or may still qualify pending staff review
+      if (!eligibility.isEligible && !eligibility.mayBeEligible) {
+        return res.status(403).json({
+          error: "You do not meet the eligibility criteria for this scholarship.",
+          unmetCriteria: eligibility.unmetCriteria,
+        });
+      }
+
+      // Create application with pre-screening info
+      const application = {
+        studentId: new ObjectId(studentId),
+        studentName: studentName || student.fullName || "",
+        studentEmail: studentEmail || student.email || "",
+        scholarshipId: new ObjectId(scholarshipId),
+        scholarshipName: scholarshipName || scholarship.name || "",
+        submittedAt: new Date(),
+        status: eligibility.isEligible && !eligibility.mayBeEligible ? "System Qualified" : "Pending",
+        matchScore: eligibility.isEligible ? 95 : (eligibility.mayBeEligible ? 75 : 0),
+        documents: documents || [],
+        notes: "",
+        eligibilityCheck: {
+          passed: eligibility.isEligible,
+          checkedAt: new Date(),
+          unmetCriteria: eligibility.unmetCriteria || [],
+          metCriteria: eligibility.reasons || [],
+        },
+        finalReview: {
+          reviewedBy: null,
+          reviewedAt: null,
+          notes: "",
+        },
+      };
+
+      const result = await db.collection("applications").insertOne(application);
+
+      // Increment scholarship applications count
+      await db.collection("scholarships").updateOne(
+        { _id: new ObjectId(scholarshipId) },
+        { $inc: { applicationsCount: 1 } }
+      );
+
+      res.status(201).json({
+        data: { ...application, _id: result.insertedId.toString() },
+        message: eligibility.isEligible && !eligibility.mayBeEligible
+          ? "Application submitted successfully. You have been pre-qualified by the system."
+          : "Application submitted. Your eligibility requires staff verification.",
+      });
+    } catch (error) {
+      console.error("Error submitting application:", error);
+      res.status(500).json({ error: "Failed to submit application." });
+    }
+  });
+
+  // PATCH /api/admin/applications/:id/review - Move to Under Review (staff review)
+  app.patch("/api/admin/applications/:id/review", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { ObjectId } = await import("mongodb");
+      const { reviewerId, notes } = req.body;
+
+      const result = await db.collection("applications").findOneAndUpdate(
+        { _id: new ObjectId(req.params.id) },
+        {
+          $set: {
+            status: "Under Review",
+            "finalReview.reviewedBy": reviewerId ? new ObjectId(reviewerId) : null,
+            "finalReview.reviewedAt": new Date(),
+            "finalReview.notes": notes || "",
+          },
+        },
+        { returnDocument: "after" }
+      );
+
+      if (!result) {
+        return res.status(404).json({ error: "Application not found." });
+      }
+
+      res.json({ data: result, message: "Application moved to Under Review." });
+    } catch (error) {
+      console.error("Error reviewing application:", error);
+      res.status(500).json({ error: "Failed to review application." });
+    }
+  });
+
+  // GET /api/admin/applications - Updated with new status flow
+  app.get("/api/admin/applications", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { status, filter } = req.query;
+
+      // Build query based on status filter
+      let query = {};
+      if (status && status !== "all") {
+        query.status = status;
+      }
+
+      // Special filter for "Needs Review" (System Qualified waiting for staff)
+      if (filter === "needs-review") {
+        query.status = "System Qualified";
+      }
+
+      const applications = await db.collection("applications")
+        .find(query)
+        .sort({ submittedAt: -1 })
+        .toArray();
+
+      // Get counts for each status
+      const stats = await db.collection("applications").aggregate([
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+          },
+        },
+      ]).toArray();
+
+      const statsMap = stats.reduce((acc, curr) => {
+        acc[curr._id] = curr.count;
+        return acc;
+      }, {});
+
+      res.json({
+        data: applications,
+        stats: {
+          pending: statsMap["Pending"] || 0,
+          systemQualified: statsMap["System Qualified"] || 0,
+          needsReview: statsMap["System Qualified"] || 0,
+          underReview: statsMap["Under Review"] || 0,
+          approved: statsMap["Approved"] || 0,
+          rejected: statsMap["Rejected"] || 0,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching applications:", error);
+      res.status(500).json({ error: "Failed to fetch applications." });
+    }
+  });
+
+  // PATCH /api/admin/applications/:id/approve - Updated with final review info
+  app.patch("/api/admin/applications/:id/approve", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { ObjectId } = await import("mongodb");
+      const { reviewerId, notes } = req.body;
+
+      const result = await db.collection("applications").findOneAndUpdate(
+        { _id: new ObjectId(req.params.id) },
+        {
+          $set: {
+            status: "Approved",
+            "finalReview.reviewedBy": reviewerId ? new ObjectId(reviewerId) : null,
+            "finalReview.reviewedAt": new Date(),
+            "finalReview.notes": notes || "",
+          },
+        },
+        { returnDocument: "after" }
+      );
+
+      if (!result) {
+        return res.status(404).json({ error: "Application not found." });
+      }
+
+      res.json({ data: result, message: "Application approved successfully." });
+    } catch (error) {
+      console.error("Error approving application:", error);
+      res.status(500).json({ error: "Failed to approve application." });
+    }
+  });
+
+  // PATCH /api/admin/applications/:id/reject - Updated with final review info
+  app.patch("/api/admin/applications/:id/reject", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { ObjectId } = await import("mongodb");
+      const { reviewerId, notes } = req.body;
+
+      const result = await db.collection("applications").findOneAndUpdate(
+        { _id: new ObjectId(req.params.id) },
+        {
+          $set: {
+            status: "Rejected",
+            "finalReview.reviewedBy": reviewerId ? new ObjectId(reviewerId) : null,
+            "finalReview.reviewedAt": new Date(),
+            "finalReview.notes": notes || "",
+          },
+        },
+        { returnDocument: "after" }
+      );
+
+      if (!result) {
+        return res.status(404).json({ error: "Application not found." });
+      }
+
+      res.json({ data: result, message: "Application rejected successfully." });
+    } catch (error) {
+      console.error("Error rejecting application:", error);
+      res.status(500).json({ error: "Failed to reject application." });
+    }
+  });
+
+  // GET /api/scholarships-with-eligibility - Get scholarships with eligibility check
+  app.get("/api/scholarships-with-eligibility", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { 
+        studentEmail, 
+        type, 
+        fieldOfStudy, 
+        location, 
+        minGPA, 
+        amountMin, 
+        amountMax 
+      } = req.query;
+
+      console.log('[scholarships-with-eligibility] Active filters received:', {
+        studentEmail, type, fieldOfStudy, location, minGPA, amountMin, amountMax
+      });
+
+      // Build filter for scholarships
+      const filter = { status: "Active" };
+
+      // Type filter - null/empty means "open to all types"
+      if (type && type !== 'all') {
+        filter.$or = [
+          { type: { $regex: type, $options: 'i' } },
+          { type: null },
+          { type: '' },
+          { type: 'All Types' },
+          { type: { $exists: false } }
+        ];
+      }
+
+      // Field of Study filter - null/empty means "open to all fields"
+      if (fieldOfStudy && fieldOfStudy !== 'all') {
+        const normalizedField = fieldOfStudy.toLowerCase().replace(/-/g, ' ');
+        console.log(`[scholarships-with-eligibility] Filtering for field of study: "${normalizedField}"`);
+        
+        filter.$or = filter.$or || [];
+        filter.$or.push(
+          { fieldOfStudy: { $regex: normalizedField, $options: 'i' } },
+          { fieldOfStudy: null },
+          { fieldOfStudy: '' },
+          { fieldOfStudy: 'All Fields' },
+          { fieldOfStudy: { $exists: false } }
+        );
+      }
+
+      // Location filter - null/empty means "open to all locations"
+      if (location && location !== 'all') {
+        filter.$or = filter.$or || [];
+        filter.$or.push(
+          { location: { $regex: location, $options: 'i' } },
+          { location: null },
+          { location: '' },
+          { location: 'All Locations' },
+          { location: { $exists: false } }
+        );
+      }
+
+      // GPA filter - only filter if scholarship has a minimumGPA requirement
+      if (minGPA && minGPA !== 'all') {
+        const gpaThreshold = Number(minGPA);
+        if (!isNaN(gpaThreshold)) {
+          filter.$and = filter.$and || [];
+          filter.$and.push({
+            $or: [
+              { minimumGpa: { $lte: gpaThreshold } },
+              { minimumGPA: { $lte: gpaThreshold } },
+              { minimumGpa: { $exists: false } },
+              { minimumGPA: { $exists: false } },
+              { minimumGpa: null },
+              { minimumGPA: null }
+            ]
+          });
+        }
+      }
+
+      // Amount range filter
+      if (amountMin || amountMax) {
+        const min = Number(amountMin) || 0;
+        const max = Number(amountMax) || 100000;
+        filter.$and = filter.$and || [];
+        filter.$and.push({
+          amount: { $gte: min, $lte: max }
+        });
+      }
+
+      console.log('[scholarships-with-eligibility] Final MongoDB filter:', JSON.stringify(filter, null, 2));
+
+      // Get filtered scholarships
+      const scholarships = await db.collection("scholarships")
+        .find(filter)
+        .toArray();
+
+      // Log fieldOfStudy values for debugging
+      scholarships.forEach(s => {
+        console.log(`[scholarships-with-eligibility] Scholarship "${s.name}": fieldOfStudy = "${s.fieldOfStudy}", type = "${s.type}", location = "${s.location}"`);
+      });
+
+      if (!studentEmail) {
+        // Return scholarships without eligibility check
+        return res.json({ data: scholarships.map(s => ({ ...s, eligibilityStatus: "unknown" })) });
+      }
+
+      // Get student profile
+      const normalizedEmail = String(studentEmail).trim().toLowerCase();
+      console.log("[scholarships-with-eligibility] Looking up user with email:", normalizedEmail);
+      
+      const student = await db.collection("users").findOne({ email: normalizedEmail });
+
+      if (!student) {
+        console.log("[scholarships-with-eligibility] User not found for email:", normalizedEmail);
+        return res.status(404).json({ error: "Student not found." });
+      }
+
+      // Debug logging - log FULL user object for debugging
+      console.log("[scholarships-with-eligibility] FULL Student object from DB:", JSON.stringify(student, null, 2));
+      console.log("[scholarships-with-eligibility] Student profile fields:", {
+        email: student?.email,
+        educationLevel: student?.educationLevel || student?.education_level,
+        location: student?.location,
+        address: student?.address,
+        city: student?.city,
+        gwa: student?.gwa || student?.GWA,
+        fieldOfStudy: student?.fieldOfStudy || student?.field_of_study || student?.course,
+        is_qc_resident: student?.is_qc_resident,
+      });
+
+      const now = new Date();
+
+      // Check eligibility for each scholarship
+      const scholarshipsWithEligibility = scholarships.map(scholarship => {
+        const deadline = new Date(scholarship.deadline);
+        const openingDate = scholarship.openingDate ? new Date(scholarship.openingDate) : null;
+
+        // Check deadline status
+        let deadlineStatus = "open";
+        if (deadline < now) {
+          deadlineStatus = "closed";
+        } else if (openingDate && openingDate > now) {
+          deadlineStatus = "not-yet-open";
+        } else {
+          const daysUntil = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
+          if (daysUntil <= 7) {
+            deadlineStatus = "closing-soon";
+          }
+        }
+
+        // Check eligibility
+        const eligibility = eligibilityMatching.checkEligibility(student, scholarship);
+        const matchScore = eligibilityMatching.calculateMatchScore(student, scholarship, eligibility);
+
+        return {
+          ...scholarship,
+          eligibilityStatus: eligibility.isEligible ? "eligible" : (eligibility.mayBeEligible ? "may-be-eligible" : "not-eligible"),
+          eligibility,
+          deadlineStatus,
+          canApply: eligibility.isEligible && !eligibility.mayBeEligible && deadlineStatus === "open",
+          matchScore,
+        };
+      });
+
+      // Sort: eligible first, then may-be-eligible, then not-eligible
+      scholarshipsWithEligibility.sort((a, b) => {
+        const statusOrder = { eligible: 0, "may-be-eligible": 1, "not-eligible": 2, unknown: 3 };
+        const aOrder = statusOrder[a.eligibilityStatus] || 3;
+        const bOrder = statusOrder[b.eligibilityStatus] || 3;
+
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return (b.matchScore || 0) - (a.matchScore || 0);
+      });
+
+      res.json({ data: scholarshipsWithEligibility });
+    } catch (error) {
+      console.error("Error fetching scholarships with eligibility:", error);
+      res.status(500).json({ error: "Failed to fetch scholarships." });
+    }
+  });
+
+  // Cron-like endpoint to auto-close expired scholarships (can be called by scheduler)
+  app.post("/api/admin/close-expired-scholarships", async (req, res) => {
+    try {
+      const db = await getDb();
+      const now = new Date();
+
+      // Find and update expired scholarships
+      const result = await db.collection("scholarships").updateMany(
+        {
+          status: "Active",
+          deadline: { $lt: now },
+        },
+        {
+          $set: { status: "Closed" },
+        }
+      );
+
+      res.json({
+        message: "Expired scholarships closed successfully.",
+        closedCount: result.modifiedCount,
+      });
+    } catch (error) {
+      console.error("Error closing expired scholarships:", error);
+      res.status(500).json({ error: "Failed to close expired scholarships." });
+    }
+  });
+
+  // POST /api/admin/update-deadlines - Bulk update scholarship deadlines
+  app.post("/api/admin/update-deadlines", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { deadline } = req.body;
+
+      // Default to December 31, 2026 if not specified
+      const newDeadline = deadline ? new Date(deadline) : new Date("2026-12-31");
+
+      // Update all scholarships with the new deadline
+      const result = await db.collection("scholarships").updateMany(
+        {},
+        {
+          $set: { deadline: newDeadline },
+        }
+      );
+
+      res.json({
+        message: "Scholarship deadlines updated successfully.",
+        newDeadline: newDeadline.toISOString(),
+        updatedCount: result.modifiedCount,
+      });
+    } catch (error) {
+      console.error("Error updating deadlines:", error);
+      res.status(500).json({ error: "Failed to update deadlines." });
+    }
+  });
+
+  // POST /api/applications/submit - Submit scholarship application with documents
+  app.post("/api/applications/submit", upload.array("documents", 10), async (req, res) => {
+    try {
+      const db = await getDb();
+      const { studentEmail, scholarshipId, declaration } = req.body;
+      const files = req.files || [];
+      
+      console.log("[Application Submit] Request received:", {
+        studentEmail,
+        scholarshipId,
+        declaration,
+        fileCount: files.length
+      });
+
+      if (!studentEmail) {
+        return res.status(400).json({ error: "Student email is required." });
+      }
+
+      if (!scholarshipId) {
+        return res.status(400).json({ error: "Scholarship ID is required." });
+      }
+
+      if (declaration !== "true") {
+        return res.status(400).json({ error: "Declaration must be accepted." });
+      }
+
+      // Get student profile
+      const student = await db.collection("users").findOne({ email: studentEmail.toLowerCase() });
+      if (!student) {
+        return res.status(404).json({ error: "Student not found." });
+      }
+
+      // Import ObjectId
+      const { ObjectId } = await import("mongodb");
+      
+      // Get scholarship details
+      const scholarship = await db.collection("scholarships").findOne({ 
+        _id: new ObjectId(scholarshipId) 
+      });
+      if (!scholarship) {
+        return res.status(404).json({ error: "Scholarship not found." });
+      }
+
+      // Check if already applied
+      const existingApplication = await db.collection("applications").findOne({
+        studentId: student._id.toString(),
+        scholarshipId: scholarshipId,
+      });
+      
+      if (existingApplication) {
+        return res.status(400).json({ error: "You have already applied for this scholarship." });
+      }
+
+      // Process uploaded files
+      const documentTypes = req.body.documentTypes || [];
+      const submittedDocuments = files.map((file, index) => ({
+        documentType: Array.isArray(documentTypes) ? documentTypes[index] : documentTypes,
+        fileName: file.originalname,
+        filePath: file.path,
+        fileSize: file.size,
+        mimeType: file.mimetype,
+        uploadedAt: new Date(),
+        status: "uploaded"
+      }));
+
+      // Check eligibility
+      const eligibilityResult = eligibilityMatching.checkEligibility(student, scholarship);
+      
+      // Create application
+      const application = {
+        studentId: student._id.toString(),
+        studentEmail: studentEmail.toLowerCase(),
+        scholarshipId: scholarshipId,
+        scholarshipName: scholarship.name,
+        status: eligibilityResult.isEligible ? "System Qualified" : "Needs Review",
+        submittedAt: new Date(),
+        submittedDocuments,
+        eligibilityCheck: {
+          isEligible: eligibilityResult.isEligible,
+          reasons: eligibilityResult.reasons,
+          unmetCriteria: eligibilityResult.unmetCriteria,
+          criteriaChecks: eligibilityResult.criteriaChecks
+        },
+        matchScore: eligibilityResult.isEligible ? 95 : (eligibilityResult.mayBeEligible ? 75 : 0),
+        declaration: true,
+        finalReview: null,
+        updatedAt: new Date()
+      };
+
+      const result = await db.collection("applications").insertOne(application);
+      
+      // Create notification for student
+      await db.collection("notifications").insertOne({
+        userEmail: studentEmail.toLowerCase(),
+        type: "application_submitted",
+        title: "Application Submitted",
+        message: `Your application for ${scholarship.name} has been submitted successfully. Reference: ${result.insertedId.toString().slice(-8).toUpperCase()}`,
+        read: false,
+        createdAt: new Date()
+      });
+
+      console.log("[Application Submit] Success:", result.insertedId);
+
+      res.status(201).json({
+        message: "Application submitted successfully.",
+        applicationId: result.insertedId.toString(),
+        status: application.status,
+        matchScore: application.matchScore
+      });
+    } catch (error) {
+      console.error("[Application Submit] Error:", error);
+      
+      // Clean up uploaded files on error
+      if (req.files) {
+        req.files.forEach(file => {
+          try {
+            fs.unlinkSync(file.path);
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+        });
+      }
+      
+      res.status(500).json({ error: "Failed to submit application: " + error.message });
+    }
+  });
+
+  // PATCH /api/admin/applications/:id/documents - Update document status
+  app.patch("/api/admin/applications/:id/documents", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { ObjectId } = await import("mongodb");
+      const { documentType, status, rejectionReason } = req.body;
+      const applicationId = req.params.id;
+
+      if (!documentType || !status) {
+        return res.status(400).json({ error: "documentType and status are required" });
+      }
+
+      // Find the application
+      const application = await db.collection("applications").findOne({
+        _id: new ObjectId(applicationId),
+      });
+
+      if (!application) {
+        return res.status(404).json({ error: "Application not found" });
+      }
+
+      // Update the specific document's status
+      const result = await db.collection("applications").updateOne(
+        { _id: new ObjectId(applicationId) },
+        {
+          $set: {
+            "submittedDocuments.$[doc].status": status,
+            "submittedDocuments.$[doc].rejectionReason": rejectionReason || "",
+            updatedAt: new Date(),
+          },
+        },
+        {
+          arrayFilters: [{ "doc.documentType": documentType }],
+        }
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ error: "Document not found in application" });
+      }
+
+      // If any document is rejected, update application status to Needs Resubmission
+      if (status === "rejected") {
+        await db.collection("applications").updateOne(
+          { _id: new ObjectId(applicationId) },
+          {
+            $set: {
+              status: "Needs Resubmission",
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        // Create notification for student
+        await db.collection("notifications").insertOne({
+          userEmail: application.studentEmail,
+          type: "document_rejected",
+          title: "Document Rejected",
+          message: `Your "${documentType}" was rejected. Reason: ${rejectionReason || "No reason provided"}. Please re-upload the correct document.`,
+          read: false,
+          createdAt: new Date(),
+        });
+      }
+
+      // If all documents are verified, create notification for student
+      if (status === "verified") {
+        const updatedApp = await db.collection("applications").findOne({
+          _id: new ObjectId(applicationId),
+        });
+
+        const allVerified = updatedApp.submittedDocuments?.every(
+          (doc) => doc.status === "verified"
+        );
+
+        if (allVerified) {
+          await db.collection("notifications").insertOne({
+            userEmail: application.studentEmail,
+            type: "documents_verified",
+            title: "Documents Verified",
+            message: "All your documents have been verified. Your application is now Under Review.",
+            read: false,
+            createdAt: new Date(),
+          });
+        }
+      }
+
+      res.json({ message: "Document status updated successfully" });
+    } catch (error) {
+      console.error("[Update Document Status] Error:", error);
+      res.status(500).json({ error: "Failed to update document status: " + error.message });
+    }
+  });
+
+  app.use("/api", (req, res) => {
+    res.status(404).json({ error: "API route not found" });
+  });
+
+  // ===== END ADMIN DASHBOARD ROUTES =====
+
+
 const port = Number(process.env.PORT || 4000);
 app.listen(port, () => {
   console.log(`API listening on ${port}`);
-  // Seed demo account after server is listening so failures don't prevent server from starting
-  seedDemoAccount().catch(err => {
-    console.error('Seed demo account failed (non-fatal):', err);
-  });
 });

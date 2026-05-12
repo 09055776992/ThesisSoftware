@@ -7,9 +7,10 @@ import { Dashboard } from "./pages/dashboard";
 import { Profile } from "./pages/profile";
 import { Scholarships } from "./pages/scholarships";
 import { Messages } from "./pages/messages";
-import { Network } from "./pages/network";
+import { Matches } from "./pages/matches";
 import { SavedItems } from "./pages/saved";
 import { Settings } from "./pages/settings";
+import { ProviderDashboard } from "./pages/provider-dashboard";
 import { AdminDashboard } from "./pages/admin/dashboard";
 import { AdminUsers } from "./pages/admin/users";
 import { AdminScholarships } from "./pages/admin/scholarships";
@@ -55,8 +56,8 @@ export const router = createBrowserRouter([
           { index: true, Component: Dashboard },
           { path: "profile", Component: Profile },
           { path: "scholarships", Component: Scholarships },
+          { path: "matches", Component: Matches },
           { path: "messages", Component: Messages },
-          { path: "network", Component: Network },
           { path: "saved", Component: SavedItems },
           { path: "settings", Component: Settings },
         ],
@@ -74,6 +75,16 @@ export const router = createBrowserRouter([
           { path: "notifications", Component: AdminNotifications },
           { path: "settings", Component: AdminSettings },
         ],
+      },
+      {
+        path: "provider",
+        children: [
+          { path: "dashboard", Component: ProviderDashboard },
+        ],
+      },
+      {
+        path: "*",
+        Component: RedirectToSignIn,
       },
     ],
   },

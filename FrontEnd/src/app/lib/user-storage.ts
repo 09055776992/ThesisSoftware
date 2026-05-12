@@ -10,20 +10,54 @@ export type UserProfile = {
   gpa?: string;
   gpaScale?: string;
   educationLevel?: string;
+  yearLevel?: string;
   fieldOfStudy?: string;
   graduationYear?: string;
   netWorth?: string;
   currency?: string;
   incomeCategory?: string;
   financialNeed?: number[];
+  schoolName?: string;
+  schoolCampus?: string;
+  schoolType?: string;
+  schoolLocation?: string;
+  enrolledInQCSchool?: boolean;
+  
+  // Special categories for scholarship eligibility
+  isAthlete?: boolean;
+  isArtist?: boolean;
+  isSKOfficial?: boolean;
+  isStudentLeader?: boolean;
+  isIndigent?: boolean;
+  isPWD?: boolean;
+  isSoloParent?: boolean;
+  
   profileImage?: string;
   joinDate?: string;
   about?: string;
   skills?: string[];
+  notificationSettings?: {
+    scholarshipRecommendations: boolean;
+    deadlineReminders: boolean;
+    approvalUpdates: boolean;
+    newAnnouncements: boolean;
+    promotionalEmails: boolean;
+  };
+  privacySettings?: {
+    profileVisibility: string;
+    showAcademicAchievements: boolean;
+    showFinancialInformation: boolean;
+    showContactInformation: boolean;
+  };
+  preferences?: {
+    language?: string;
+    theme?: string;
+  };
 };
 
 const USER_STORAGE_KEY = "scholarship-portal-users";
 const ACTIVE_USER_KEY = "scholarship-portal-active-email";
+const AUTH_TOKEN_KEY = "scholarship-portal-auth-token";
 
 function normalizeEmail(email?: string | null): string {
   return String(email ?? "").trim().toLowerCase();
@@ -129,4 +163,21 @@ export function buildNameFromEmail(email: string): string {
 export function clearStoredUser(): void {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(ACTIVE_USER_KEY);
+  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+export function saveAuthToken(token?: string | null): void {
+  if (typeof window === "undefined") return;
+
+  if (!token) {
+    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(AUTH_TOKEN_KEY, token);
+}
+
+export function getAuthToken(): string {
+  if (typeof window === "undefined") return "";
+  return String(window.localStorage.getItem(AUTH_TOKEN_KEY) ?? "");
 }

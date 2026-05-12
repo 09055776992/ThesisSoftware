@@ -5,11 +5,10 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Checkbox } from "../components/ui/checkbox";
-import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
 import { Separator } from "../components/ui/separator";
 import { Progress } from "../components/ui/progress";
 import { Eye, EyeOff } from "lucide-react";
-import { clearStoredUser, saveStoredUser } from "../lib/user-storage";
+import { clearStoredUser, saveAuthToken, saveStoredUser } from "../lib/user-storage";
 import { signUp } from "../lib/api-client";
 
 export function SignUp() {
@@ -70,6 +69,7 @@ export function SignUp() {
       };
 
       clearStoredUser();
+      saveAuthToken((result as { token?: string }).token ?? null);
       saveStoredUser({
         fullName: user.fullName,
         email: user.email,
@@ -179,26 +179,7 @@ export function SignUp() {
             />
           </div>
 
-          <div className="space-y-3">
-            <Label>User Type *</Label>
-            <RadioGroup
-              value={formData.userType}
-              onValueChange={(value) => setFormData({ ...formData, userType: value })}
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="student" id="student" />
-                <Label htmlFor="student" className="font-normal cursor-pointer">Student</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="provider" id="provider" />
-                <Label htmlFor="provider" className="font-normal cursor-pointer">Scholarship Provider</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="mentor" id="mentor" />
-                <Label htmlFor="mentor" className="font-normal cursor-pointer">Mentor</Label>
-              </div>
-            </RadioGroup>
-          </div>
+          {/* User Type is fixed to student, hidden field */}
 
           <div className="flex items-start space-x-2">
             <Checkbox

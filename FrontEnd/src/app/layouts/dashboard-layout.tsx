@@ -1,43 +1,46 @@
+import { useEffect, useState } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
-import { Home, User, Award, MessageSquare, Users, Bookmark, Settings } from "lucide-react";
+import { Home, User, Award, MessageSquare, Users, Bookmark, Settings, Star } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { clearStoredUser, getDisplayName, getInitials, getStoredUser } from "../lib/user-storage";
 import { Button } from "../components/ui/button";
-
-function countCompletedProfileFields(user: ReturnType<typeof getStoredUser>) {
-  if (!user) return 0;
-
-  const fields = [
-    user.fullName,
-    user.email,
-    user.phone,
-    user.headline,
-    user.location,
-    user.dateOfBirth,
-    user.gpa,
-    user.gpaScale,
-    user.educationLevel,
-    user.fieldOfStudy,
-    user.graduationYear,
-    user.netWorth,
-    user.currency,
-    user.incomeCategory,
-    user.profileImage,
-  ];
-
-  return fields.filter((value) => String(value ?? "").trim().length > 0).length;
-}
+import { Redirect } from "../pages/redirect";
+import { fetchScholarshipsWithEligibility } from "../lib/api-client";
+import { calculateCompleteness } from "../lib/profileCompleteness";
 
 export function DashboardLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const user = getStoredUser();
+  // FIX 7: State for actual scholarship match count
+  const [matchCount, setMatchCount] = useState(0);
+
+  // FIX 7: Fetch actual scholarship matches
+  useEffect(() => {
+    if (!user?.email) return;
+    
+    fetchScholarshipsWithEligibility(user.email)
+      .then((result: any) => {
+        const scholarships = result.data || [];
+        // Count scholarships with 100% match (or eligible status)
+        const fullMatches = scholarships.filter((s: any) => 
+          s.matchScore === 100 || s.eligibilityStatus === "eligible"
+        ).length;
+        setMatchCount(fullMatches);
+      })
+      .catch(() => {
+        setMatchCount(0);
+      });
+  }, [user?.email]);
+
+  if (!user?.email) {
+    return <Redirect to="/auth/signin" />;
+  }
+
   const displayName = getDisplayName(user);
   const displayHeadline = user?.fieldOfStudy || user?.educationLevel || user?.userType || "Complete your profile";
-  const completedFields = countCompletedProfileFields(user);
-  const totalTrackedFields = 15;
-  const profileCompleteness = Math.round((completedFields / totalTrackedFields) * 100);
+  const profileCompleteness = calculateCompleteness(user);
   const scholarshipMatchSignals = [user?.gpa, user?.fieldOfStudy, user?.educationLevel, user?.financialNeed, user?.location].filter(Boolean).length;
   const socialSignals = [user?.skills?.length || 0, user?.headline, user?.about].filter((value) => Boolean(value)).length;
   const isProfileEmpty = !user || (
@@ -54,9 +57,9 @@ export function DashboardLayout() {
     { href: "/dashboard", label: "Home", icon: Home },
     { href: "/dashboard/profile", label: "My Profile", icon: User },
     { href: "/dashboard/scholarships", label: "Scholarships", icon: Award },
+    { href: "/dashboard/matches", label: "Scholarship Matches", icon: Star },
     { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
-    { href: "/dashboard/network", label: "Network", icon: Users },
-    { href: "/dashboard/saved", label: "Saved Items", icon: Bookmark },
+    { href: "/dashboard/saved", label: "Saved Scholarships", icon: Bookmark },
     { href: "/dashboard/settings", label: "Settings", icon: Settings },
   ];
 
@@ -143,7 +146,7 @@ export function DashboardLayout() {
                   <div className="flex items-center justify-between px-3 py-1.5">
                     <span className="text-sm text-gray-600">Scholarship Matches</span>
                     <Badge className="bg-green-600 hover:bg-green-600 text-white px-2.5 py-0.5 text-xs font-semibold">
-                      {scholarshipMatchSignals}
+                      {matchCount}
                     </Badge>
                   </div>
                 </>

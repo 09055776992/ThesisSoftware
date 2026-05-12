@@ -1,20 +1,20 @@
-import { Pool } from "pg";
+import { MongoClient } from "mongodb";
 
-const connectionString =
-  process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || process.env.POSTGRES_URL;
+const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URL || process.env.DATABASE_URL;
+const databaseName = process.env.MONGODB_DB || process.env.MONGO_DB || "thesis_software";
 
-if (!connectionString) {
-  throw new Error("Missing DATABASE_URL in environment.");
+if (!mongoUri) {
+  throw new Error("Missing MONGODB_URI in environment.");
 }
 
-const sslMode = String(process.env.DATABASE_SSL || "require").toLowerCase();
-const pool = new Pool({
-  connectionString,
-  ssl: sslMode === "disable" ? false : { rejectUnauthorized: false },
-  max: Number(process.env.DATABASE_POOL_SIZE || 10),
+if (!String(mongoUri).startsWith("mongodb://") && !String(mongoUri).startsWith("mongodb+srv://")) {
+  throw new Error("MONGODB_URI must be a MongoDB connection string.");
+}
+
+const client = new MongoClient(mongoUri, {
+  maxPoolSize: Number(process.env.DATABASE_POOL_SIZE || 10),
 });
 
-let schemaReady = false;
 let dbInstance;
 
 function previewConnectionString(value) {
@@ -25,95 +25,60 @@ function toRecord(input) {
   return input && typeof input === "object" ? input : {};
 }
 
-function toJson(query) {
-  return JSON.stringify(toRecord(query));
-}
+function createCollection(db, collectionName) {
+  const collection = db.collection(collectionName);
 
-function mapRow(row) {
-  if (!row) {
-    return null;
-  }
-
-  const data = row.data && typeof row.data === "object" ? row.data : {};
-  return { id: row.id, ...data };
-}
-
-async function ensureSchema() {
-  if (schemaReady) {
-    return;
-  }
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS documents (
-      id BIGSERIAL PRIMARY KEY,
-      collection TEXT NOT NULL,
-      data JSONB NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-
-    CREATE INDEX IF NOT EXISTS documents_collection_idx
-      ON documents (collection);
-
-    CREATE INDEX IF NOT EXISTS documents_collection_data_gin_idx
-      ON documents USING GIN (data);
-  `);
-
-  schemaReady = true;
-}
-
-function buildWhere(collectionName, query) {
-  const filters = toRecord(query);
-  const values = [collectionName];
-  const clauses = ["collection = $1"];
-
-  if (Object.keys(filters).length > 0) {
-    values.push(toJson(filters));
-    clauses.push(`data @> $${values.length}::jsonb`);
-  }
-
-  return { values, where: clauses.join(" AND ") };
-}
-
-function createCollection(collectionName) {
   return {
     find(query = {}) {
-      return {
-        async toArray() {
-          await ensureSchema();
-          const { values, where } = buildWhere(collectionName, query);
-          const result = await pool.query(
-            `SELECT id, data FROM documents WHERE ${where} ORDER BY id ASC`,
-            values,
-          );
-          return result.rows.map(mapRow).filter(Boolean);
-        },
-      };
+      return collection.find(toRecord(query));
     },
 
-    async findOne(query = {}) {
-      await ensureSchema();
-      const { values, where } = buildWhere(collectionName, query);
-      const result = await pool.query(
-        `SELECT id, data FROM documents WHERE ${where} ORDER BY id ASC LIMIT 1`,
-        values,
-      );
-      return mapRow(result.rows[0] || null);
+    aggregate(pipeline = []) {
+      return collection.aggregate(Array.isArray(pipeline) ? pipeline : []);
     },
 
-    async insertOne(document) {
-      await ensureSchema();
-      const result = await pool.query(
-        "INSERT INTO documents (collection, data) VALUES ($1, $2::jsonb) RETURNING id",
-        [collectionName, JSON.stringify(toRecord(document))],
-      );
-      return { insertedId: result.rows[0].id };
+    countDocuments(query = {}) {
+      return collection.countDocuments(toRecord(query));
     },
 
-    async deleteMany(query = {}) {
-      await ensureSchema();
-      const { values, where } = buildWhere(collectionName, query);
-      const result = await pool.query(`DELETE FROM documents WHERE ${where}`, values);
-      return { deletedCount: result.rowCount };
+    findOne(query = {}) {
+      return collection.findOne(toRecord(query));
+    },
+
+    insertOne(document) {
+      return collection.insertOne(toRecord(document));
+    },
+
+    insertMany(documents) {
+      return collection.insertMany(Array.isArray(documents) ? documents.map(toRecord) : []);
+    },
+
+    updateOne(query = {}, update = {}, options = {}) {
+      return collection.updateOne(toRecord(query), update, options);
+    },
+
+    updateMany(query = {}, update = {}, options = {}) {
+      return collection.updateMany(toRecord(query), update, options);
+    },
+
+    findOneAndUpdate(query = {}, update = {}, options = {}) {
+      return collection.findOneAndUpdate(toRecord(query), update, options);
+    },
+
+    deleteOne(query = {}) {
+      return collection.deleteOne(toRecord(query));
+    },
+
+    findOneAndDelete(query = {}, options = {}) {
+      return collection.findOneAndDelete(toRecord(query), options);
+    },
+
+    replaceOne(query = {}, document = {}) {
+      return collection.replaceOne(toRecord(query), toRecord(document), { upsert: true });
+    },
+
+    deleteMany(query = {}) {
+      return collection.deleteMany(toRecord(query));
     },
   };
 }
@@ -121,17 +86,18 @@ function createCollection(collectionName) {
 export async function getDb() {
   if (!dbInstance) {
     try {
-      console.log("Connecting to Supabase/Postgres...", {
-        uriPreview: previewConnectionString(connectionString),
-        sslMode,
+      console.log("Connecting to MongoDB...", {
+        uriPreview: previewConnectionString(mongoUri),
+        databaseName,
       });
 
-      await ensureSchema();
+      await client.connect();
+      const db = client.db(databaseName);
       dbInstance = {
-        collection: createCollection,
+        collection: (name) => createCollection(db, name),
       };
     } catch (err) {
-      console.error("Supabase/Postgres connection error:", err);
+      console.error("MongoDB connection error:", err);
       throw err;
     }
   }

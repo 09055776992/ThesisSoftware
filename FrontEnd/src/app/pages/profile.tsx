@@ -22,10 +22,12 @@ export function Profile() {
   const navigate = useNavigate();
   const user = getStoredUser();
   const educationSummary =
-    user?.educationLevel || user?.fieldOfStudy || user?.graduationYear || user?.gpa
+    user?.educationLevel || user?.fieldOfStudy || user?.graduationYear || user?.gpa || user?.schoolName
       ? [
           {
-            institution: user?.educationLevel ? titleCase(user.educationLevel) : "Current Education",
+            institution: user?.schoolName 
+              ? `${user.schoolName}${user?.schoolCampus ? ` (${user.schoolCampus})` : ""}`
+              : (user?.educationLevel ? titleCase(user.educationLevel) : "Current Education"),
             degree: user?.fieldOfStudy || "No field of study provided",
             dates: user?.graduationYear ? `Expected graduation ${user.graduationYear}` : "Graduation year not provided",
             gpa:
@@ -34,6 +36,8 @@ export function Profile() {
                 : user?.gpa
                   ? String(user.gpa)
                   : "Not provided",
+            schoolType: user?.schoolType || null,
+            schoolLocation: user?.schoolLocation || null,
             honors: user?.headline ? [user.headline] : [],
           },
         ]
@@ -41,10 +45,19 @@ export function Profile() {
 
   const achievements = [];
   const eligibilityBadges = [
-    user?.fieldOfStudy ? `${user.fieldOfStudy} Scholarships` : null,
+    user?.schoolName ? `${user.schoolName}${user?.schoolCampus ? ` (${user.schoolCampus})` : ""}` : null,
+    user?.fieldOfStudy ? `${user.fieldOfStudy}` : null,
     user?.educationLevel ? titleCase(user.educationLevel) : null,
     user?.gpa ? `GPA ${user.gpa}` : null,
     (user?.financialNeed?.[0] ?? 0) >= 4 ? "Need-Based Support" : null,
+    // Special category badges
+    user?.isAthlete ? "🏃 Athlete" : null,
+    user?.isArtist ? "🎨 Artist" : null,
+    user?.isSKOfficial ? "🌟 SK Official" : null,
+    user?.isStudentLeader ? "📢 Student Leader" : null,
+    user?.isIndigent ? "💚 Indigent/Low-income" : null,
+    user?.isPWD ? "♿ PWD" : null,
+    user?.isSoloParent ? "👨‍👩‍👧 Solo Parent" : null,
   ].filter(Boolean) as string[];
 
   const profileData = {
@@ -183,6 +196,16 @@ export function Profile() {
                             <p className="text-sm text-muted-foreground mb-2">{edu.dates}</p>
                             <p className="text-sm font-semibold mb-2">GPA: {edu.gpa}</p>
                             <div className="flex flex-wrap gap-2">
+                              {edu.schoolType && (
+                                <Badge className="bg-blue-100 text-blue-800">
+                                  {edu.schoolType}
+                                </Badge>
+                              )}
+                              {edu.schoolLocation && (
+                                <Badge className={edu.schoolLocation === "Quezon City" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}>
+                                  {edu.schoolLocation === "Quezon City" ? "Quezon City ✓" : edu.schoolLocation}
+                                </Badge>
+                              )}
                               {edu.honors.map((honor, idx) => (
                                 <Badge key={idx} variant="outline">
                                   {honor}
@@ -307,7 +330,7 @@ export function Profile() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground mb-2">
-                  Financial Need ({user?.currency || "USD"})
+                  Financial Need ({user?.currency || "PHP"})
                 </p>
                 <div className="flex items-center gap-2">
                   <Progress value={Math.min(100, Math.max(0, ((user?.financialNeed?.[0] ?? 0) / 5) * 100))} className="flex-1 h-2" />

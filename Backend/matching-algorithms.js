@@ -207,7 +207,7 @@ export function rankScholarships(scholarships, profile = {}, studentId = "curren
       textMatchScore(scholarship.eligibility, studentProfile.educationLevel),
     );
     const locationScore = textMatchScore(scholarship.location, studentProfile.location);
-    const deadlineDate = new Date(scholarshicap.deadline);
+    const deadlineDate = new Date(scholarship.deadline);
     const diffMs = Number.isNaN(deadlineDate.getTime()) ? Number.POSITIVE_INFINITY : deadlineDate.getTime() - Date.now();
     const deadlineUrgencyDays = Number.isFinite(diffMs)
       ? Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)))
