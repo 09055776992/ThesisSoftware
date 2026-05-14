@@ -74,10 +74,28 @@ app.get("/health", (_, res) => {
   res.json({ ok: true });
 });
 
+// Helper: remove duplicate scholarships by name (keep first occurrence)
+function dedupeScholarshipsByName(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const result = [];
+  for (const item of list) {
+    const name = String(item?.name || "").trim();
+    if (!name) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    result.push(item);
+  }
+  return result;
+}
+
 app.get("/api/scholarships", async (req, res) => {
   try {
+    console.log('[API] /api/scholarships called, attempting to getDb()');
     const db = await getDb();
-    const scholarships = await db.collection("scholarships").find({ status: "Active" }).toArray();
+    const scholarships = dedupeScholarshipsByName(
+      await db.collection("scholarships").find({ status: "Active" }).toArray(),
+    );
     
     // Get student email from query parameter for eligibility filtering
     const studentEmail = req.query.studentEmail || req.query.email;
@@ -105,6 +123,7 @@ app.get("/api/scholarships", async (req, res) => {
     // No student profile provided or not found - return all active scholarships
     res.json({ data: scholarships });
   } catch (error) {
+    console.error('[API] Error in /api/scholarships:', error);
     res.status(500).json({ error: "Failed to fetch scholarships." });
   }
 });
@@ -325,7 +344,9 @@ app.get("/api/users/:email/screening-appointments", async (req, res) => {
 app.get("/api/scholarships/recommendations", async (req, res) => {
   try {
     const db = await getDb();
-    const scholarships = await db.collection("scholarships").find({ status: "Active" }).toArray();
+    const scholarships = dedupeScholarshipsByName(
+      await db.collection("scholarships").find({ status: "Active" }).toArray(),
+    );
     const studentId = String(req.query.studentId || "current-student");
     const ranked = rankScholarships(scholarships, {}, studentId);
     res.json({ data: ranked });
@@ -337,7 +358,9 @@ app.get("/api/scholarships/recommendations", async (req, res) => {
 app.post("/api/scholarships/recommendations", async (req, res) => {
   try {
     const db = await getDb();
-    const scholarships = await db.collection("scholarships").find({ status: "Active" }).toArray();
+    const scholarships = dedupeScholarshipsByName(
+      await db.collection("scholarships").find({ status: "Active" }).toArray(),
+    );
     const payload = req.body ?? {};
     const profile = payload.profile ?? payload;
     const studentId = String(payload.studentId || profile.email || "current-student");
@@ -362,7 +385,9 @@ app.post("/api/scholarships", async (req, res) => {
 app.get("/api/admin/scholarships", async (_, res) => {
   try {
     const db = await getDb();
-    const scholarships = await db.collection("scholarships").find({}).sort({ createdAt: -1 }).toArray();
+    const scholarships = dedupeScholarshipsByName(
+      await db.collection("scholarships").find({}).sort({ createdAt: -1 }).toArray(),
+    );
     res.json({ data: scholarships });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch scholarships." });
@@ -996,11 +1021,41 @@ app.post("/api/provider/scholarships", async (req, res) => {
   }
 });
 
-// PUT /api/users/profile - Update user profile (location, gpa, education, etc.)
-app.put("/api/users/profile", async (req, res) => {
+// PUT/POST /api/users/profile - Update user profile (location, gpa, education, etc.)
+const handleUserProfileUpdate = async (req, res) => {
   try {
     const db = await getDb();
-    const { email, fullName, phone, location, gpa, gwa, educationLevel, yearLevel, fieldOfStudy, incomeCategory, financialNeed, school, schoolName, schoolCampus, schoolType, schoolLocation, enrolledInQCSchool, isAthlete, isArtist, isSKOfficial, isStudentLeader, isIndigent, isPWD, isSoloParent } = req.body;
+    const {
+      email,
+      fullName,
+      phone,
+      location,
+      gpa,
+      gwa,
+      educationLevel,
+      yearLevel,
+      fieldOfStudy,
+      incomeCategory,
+      financialNeed,
+      school,
+      schoolName,
+      schoolCampus,
+      schoolType,
+      schoolLocation,
+      enrolledInQCSchool,
+      isAthlete,
+      isArtist,
+      isSKOfficial,
+      isStudentLeader,
+      isIndigent,
+      isPWD,
+      isSoloParent,
+      graduationYear,
+      dateOfBirth,
+      netWorth,
+      currency,
+      specialCategories,
+    } = req.body;
 
     console.log("[Profile Update] Request body:", req.body);
 
@@ -1036,15 +1091,46 @@ app.put("/api/users/profile", async (req, res) => {
     if (schoolType !== undefined) updatedUser.schoolType = String(schoolType);
     if (schoolLocation !== undefined) updatedUser.schoolLocation = String(schoolLocation);
     if (enrolledInQCSchool !== undefined) updatedUser.enrolledInQCSchool = enrolledInQCSchool === true || enrolledInQCSchool === "true";
+    if (graduationYear !== undefined) updatedUser.graduationYear = String(graduationYear);
+    if (dateOfBirth !== undefined) updatedUser.dateOfBirth = String(dateOfBirth);
+    if (netWorth !== undefined) updatedUser.netWorth = String(netWorth);
+    if (currency !== undefined) updatedUser.currency = String(currency);
     
     // Special category fields for scholarship eligibility
-    if (isAthlete !== undefined) updatedUser.isAthlete = isAthlete === true || isAthlete === "true";
-    if (isArtist !== undefined) updatedUser.isArtist = isArtist === true || isArtist === "true";
-    if (isSKOfficial !== undefined) updatedUser.isSKOfficial = isSKOfficial === true || isSKOfficial === "true";
-    if (isStudentLeader !== undefined) updatedUser.isStudentLeader = isStudentLeader === true || isStudentLeader === "true";
-    if (isIndigent !== undefined) updatedUser.isIndigent = isIndigent === true || isIndigent === "true";
-    if (isPWD !== undefined) updatedUser.isPWD = isPWD === true || isPWD === "true";
-    if (isSoloParent !== undefined) updatedUser.isSoloParent = isSoloParent === true || isSoloParent === "true";
+    const existingSpecialCategories = existingUser.specialCategories || {};
+    const updatedSpecialCategories = {
+      isAthlete: existingSpecialCategories.isAthlete === true,
+      isArtist: existingSpecialCategories.isArtist === true,
+      isSKOfficial: existingSpecialCategories.isSKOfficial === true,
+      isStudentLeader: existingSpecialCategories.isStudentLeader === true,
+      isIndigent: existingSpecialCategories.isIndigent === true,
+      isPWD: existingSpecialCategories.isPWD === true,
+      isSoloParent: existingSpecialCategories.isSoloParent === true,
+    };
+
+    if (isAthlete !== undefined) updatedSpecialCategories.isAthlete = isAthlete === true || isAthlete === "true";
+    if (isArtist !== undefined) updatedSpecialCategories.isArtist = isArtist === true || isArtist === "true";
+    if (isSKOfficial !== undefined) updatedSpecialCategories.isSKOfficial = isSKOfficial === true || isSKOfficial === "true";
+    if (isStudentLeader !== undefined) updatedSpecialCategories.isStudentLeader = isStudentLeader === true || isStudentLeader === "true";
+    if (isIndigent !== undefined) updatedSpecialCategories.isIndigent = isIndigent === true || isIndigent === "true";
+    if (isPWD !== undefined) updatedSpecialCategories.isPWD = isPWD === true || isPWD === "true";
+    if (isSoloParent !== undefined) updatedSpecialCategories.isSoloParent = isSoloParent === true || isSoloParent === "true";
+
+    if (specialCategories && typeof specialCategories === "object") {
+      const nested = specialCategories;
+      if (nested.isFromIndigenousFamily === true || nested.isFromIndigenousFamily === "true") {
+        updatedSpecialCategories.isIndigent = true;
+      }
+    }
+
+    updatedUser.specialCategories = updatedSpecialCategories;
+    updatedUser.isAthlete = updatedSpecialCategories.isAthlete;
+    updatedUser.isArtist = updatedSpecialCategories.isArtist;
+    updatedUser.isSKOfficial = updatedSpecialCategories.isSKOfficial;
+    updatedUser.isStudentLeader = updatedSpecialCategories.isStudentLeader;
+    updatedUser.isIndigent = updatedSpecialCategories.isIndigent;
+    updatedUser.isPWD = updatedSpecialCategories.isPWD;
+    updatedUser.isSoloParent = updatedSpecialCategories.isSoloParent;
 
     console.log("[Profile Update] Updating fields:", Object.keys(updatedUser).filter(k => k !== '_id' && k !== 'password'));
 
@@ -1083,13 +1169,17 @@ app.put("/api/users/profile", async (req, res) => {
         isIndigent: updatedUser.isIndigent || false,
         isPWD: updatedUser.isPWD || false,
         isSoloParent: updatedUser.isSoloParent || false,
+        specialCategories: updatedUser.specialCategories,
       },
     });
   } catch (error) {
     console.error("[Profile Update] Error:", error);
     return res.status(500).json({ error: "Failed to update profile: " + error.message });
   }
-});
+};
+
+app.put("/api/users/profile", handleUserProfileUpdate);
+app.post("/api/users/profile", handleUserProfileUpdate);
 
   // ===== ADMIN DASHBOARD ROUTES =====
 
@@ -1980,9 +2070,9 @@ app.put("/api/users/profile", async (req, res) => {
       console.log('[scholarships-with-eligibility] Final MongoDB filter:', JSON.stringify(filter, null, 2));
 
       // Get filtered scholarships
-      const scholarships = await db.collection("scholarships")
-        .find(filter)
-        .toArray();
+      const scholarships = dedupeScholarshipsByName(
+        await db.collection("scholarships").find(filter).toArray(),
+      );
 
       // Log fieldOfStudy values for debugging
       scholarships.forEach(s => {
@@ -2040,7 +2130,8 @@ app.put("/api/users/profile", async (req, res) => {
 
         // Check eligibility
         const eligibility = eligibilityMatching.checkEligibility(student, scholarship);
-        const matchScore = eligibilityMatching.calculateMatchScore(student, scholarship, eligibility);
+        // NOTE: Match score is now calculated on the frontend using unified calculateMatchScore function
+        // This ensures consistency across all pages
 
         return {
           ...scholarship,
@@ -2048,7 +2139,7 @@ app.put("/api/users/profile", async (req, res) => {
           eligibility,
           deadlineStatus,
           canApply: eligibility.isEligible && !eligibility.mayBeEligible && deadlineStatus === "open",
-          matchScore,
+          // matchScore is NOT returned - calculated on frontend
         };
       });
 
@@ -2102,8 +2193,8 @@ app.put("/api/users/profile", async (req, res) => {
       const db = await getDb();
       const { deadline } = req.body;
 
-      // Default to December 31, 2026 if not specified
-      const newDeadline = deadline ? new Date(deadline) : new Date("2026-12-31");
+      // Default to December 31, 2027 if not specified
+      const newDeadline = deadline ? new Date(deadline) : new Date("2027-12-31");
 
       // Update all scholarships with the new deadline
       const result = await db.collection("scholarships").updateMany(

@@ -12,6 +12,7 @@ import { Search, Calendar, MapPin, Award, Bookmark, ExternalLink, FileText, Chec
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { fetchSavedScholarships, saveSavedScholarships, fetchScholarshipsWithEligibility, checkEligibility, applyForScholarship } from "../lib/api-client";
 import { getStoredUser } from "../lib/user-storage";
+import { calculateMatchScore } from "../lib/calculateMatchScore";
 
 // Toast notification function
 const toast = {
@@ -240,32 +241,57 @@ export function Scholarships() {
 
   const loadScholarships = async () => {
     try {
+      // Always use the public scholarships endpoint - show all active scholarships
+      // regardless of profile completion status
+      const result = await fetch("/api/scholarships").then(r => r.json());
+      console.log('Scholarships fetched:', result.data?.length || 0);
+      
       const user = getStoredUser();
-      // Use the eligibility-aware API if user is logged in
-      const result = user?.email 
-        ? await fetchScholarshipsWithEligibility(user.email)
-        : await fetch("/api/scholarships").then(r => r.json());
+      console.log('Current user:', user);
       
-      const normalized = (result.data || []).map((item: any) => ({
-        ...item,
-        id: item._id,
-        amount: Number(item.amount || 0),
-        deadline: new Date(item.deadline).toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        }),
-        matchScore: typeof item.matchScore === 'number' ? item.matchScore : 
-                    (item.eligibilityStatus === "eligible" ? 95 : item.eligibilityStatus === "may-be-eligible" ? 75 : 0),
-        image: item.imageUrl || `https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=800&q=80`,
-        minimumGpa: item.eligibilityCriteria?.minGPA ?? item.eligibilityCriteria?.minGpa,
-        eligibilityStatus: item.eligibilityStatus || "unknown",
-        eligibility: item.eligibility,
-        deadlineStatus: item.deadlineStatus,
-        canApply: item.canApply,
-        daysUntilDeadline: item.daysUntilDeadline,
-      }));
+      const normalized = (result.data || []).map((item: any) => {
+        // Calculate match score using unified function
+        let matchScore = 0;
+        let matchQualified = false;
+        
+        if (user) {
+          try {
+            const match = calculateMatchScore(user, item);
+            matchScore = match.score;
+            matchQualified = match.qualified;
+            console.log(`${item.name}: ${match.score}%`, match.qualified ? 'QUALIFIED' : 'NOT QUALIFIED');
+          } catch (err) {
+            console.error(`Error calculating match for ${item.name}:`, err);
+            matchScore = 0;
+            matchQualified = false;
+          }
+        } else {
+          // If no user profile, use basic eligibility status
+          matchScore = item.eligibilityStatus === "eligible" ? 95 : item.eligibilityStatus === "may-be-eligible" ? 75 : 0;
+        }
+        
+        return {
+          ...item,
+          id: item._id,
+          amount: Number(item.amount || 0),
+          deadline: new Date(item.deadline).toLocaleDateString("en-US", {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          }),
+          matchScore,
+          matchQualified,
+          image: item.imageUrl || `https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=800&q=80`,
+          minimumGpa: item.eligibilityCriteria?.minGPA ?? item.eligibilityCriteria?.minGpa,
+          eligibilityStatus: item.eligibilityStatus || "unknown",
+          eligibility: item.eligibility,
+          deadlineStatus: item.deadlineStatus,
+          canApply: item.canApply,
+          daysUntilDeadline: item.daysUntilDeadline,
+        };
+      });
       
+      console.log('Normalized scholarships:', normalized.length);
       setScholarshipsData(normalized);
     } catch (error) {
       console.error("Error fetching scholarships:", error);

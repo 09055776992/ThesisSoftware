@@ -243,7 +243,7 @@ const run = async () => {
     console.log("\n=== DATABASE INTEGRITY CHECKS ===");
     const dbSummary = [];
     const now = new Date();
-    const futureDate = new Date("2026-06-30T00:00:00Z");
+    const futureDate = new Date("2027-06-30T00:00:00Z");
 
     const scholarshipsCollection = db.collection("scholarships");
     const usersCollection = db.collection("users");
@@ -251,9 +251,9 @@ const run = async () => {
 
     const pastDeadlines = await scholarshipsCollection.find({ deadline: { $lt: futureDate } }).toArray();
     if (pastDeadlines.length === 0) {
-      console.log(`✅ PASS — All scholarship deadlines are June 30, 2026 or later`);
+      console.log(`✅ PASS — All scholarship deadlines are June 30, 2027 or later`);
     } else {
-      console.log(`❌ FAIL — ${pastDeadlines.length} scholarships have deadlines before June 30, 2026:`);
+      console.log(`❌ FAIL — ${pastDeadlines.length} scholarships have deadlines before June 30, 2027:`);
       pastDeadlines.slice(0, 10).forEach((s) => console.log(`   - ${s.name} (${s.deadline})`));
       summary.failed += 1;
     }

@@ -40,7 +40,7 @@ import {
   forgotPassword,
   resetPassword,
 } from "../controller/auth.controller.js";
-import { getMe, updateMe, getUsers, updateUser } from "../controller/user.controller.js";
+import { getMe, updateMe, getUsers, updateUser, completeProfile } from "../controller/user.controller.js";
 import { getInventory, updateStock, syncInventoryWithProducts } from "../controller/inventory.controller.js";
 import { topsisRank, galeShapleyAssign } from "../controller/scholarship.controller.js";
 import {
@@ -115,6 +115,7 @@ router.post("/auth/reset-password", resetPassword);
 // User/profile routes
 router.get("/users/me", getMe);
 router.put("/users/me", updateMe);
+router.post("/users/profile", completeProfile);
 router.get("/users", getUsers); // admin
 router.patch("/users/:id", updateUser); // admin
 

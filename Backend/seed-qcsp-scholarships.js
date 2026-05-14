@@ -37,7 +37,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: 89,
     maxGWA: 100,
     amount: 15000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "",
     location: "Quezon City",
@@ -61,7 +61,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: 89,
     maxGWA: 100,
     amount: 18000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "STEM, ABM, HUMSS, TVL",
     location: "Quezon City",
@@ -85,7 +85,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: 85,
     maxGWA: 100,
     amount: 12000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "",
     location: "Quezon City",
@@ -111,7 +111,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: 85,
     maxGWA: 100,
     amount: 12000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "",
     location: "Quezon City",
@@ -138,7 +138,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: null, // holistic evaluation
     maxGWA: null,
     amount: 50000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "Priority Courses",
     location: "Quezon City",
@@ -164,7 +164,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: 1.75,
     maxGWA: 1.0,
     amount: 30000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "",
     location: "Quezon City",
@@ -188,7 +188,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: 3.0,
     maxGWA: 1.0,
     amount: 25000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "",
     location: "Quezon City",
@@ -214,7 +214,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: 2.5,
     maxGWA: 1.0,
     amount: 20000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "",
     location: "Quezon City",
@@ -240,7 +240,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: 2.5,
     maxGWA: 1.0,
     amount: 20000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "",
     location: "Quezon City",
@@ -265,7 +265,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: 1.75,
     maxGWA: 1.0,
     amount: 35000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "CHED Priority Courses",
     location: "Quezon City",
@@ -291,7 +291,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: 2.5,
     maxGWA: 1.0,
     amount: 80000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "",
     location: "Quezon City",
@@ -318,7 +318,7 @@ const QCSP_SCHOLARSHIPS = [
     minGWA: null,
     maxGWA: null,
     amount: 15000,
-    deadline: "2024-12-31",
+    deadline: "2027-12-31",
     status: "Active",
     fieldOfStudy: "TESDA Courses",
     location: "Quezon City",
@@ -366,7 +366,15 @@ async function seedQCSPPScholarships() {
     const newScholarships = QCSP_SCHOLARSHIPS.filter(scholarship => !existingNames.has(scholarship.name));
 
     if (newScholarships.length > 0) {
-      const result = await db.collection("scholarships").insertMany(newScholarships);
+      for (const scholarship of newScholarships) {
+        await db.collection("scholarships").updateOne(
+          { name: scholarship.name },
+          { $set: scholarship },
+          { upsert: true }
+        );
+      }
+
+      const result = { insertedCount: newScholarships.length };
       console.log(`✅ Seeded ${result.insertedCount} new QCSP scholarships`);
       
       // Log seeded scholarships

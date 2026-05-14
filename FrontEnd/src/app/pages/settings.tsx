@@ -261,9 +261,14 @@ export function Settings() {
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(
     user?.notificationSettings ?? notificationDefaults,
   );
-  const [privacySettings, setPrivacySettings] = useState<PrivacySettings>(
-    user?.privacySettings ?? privacyDefaults,
-  );
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettings>(() => {
+    const storedSettings = user?.privacySettings;
+    return {
+      ...privacyDefaults,
+      ...(storedSettings ?? {}),
+      profileVisibility: (storedSettings?.profileVisibility ?? privacyDefaults.profileVisibility) as VisibilityOption,
+    };
+  });
   const [language, setLanguage] = useState(user?.preferences?.language ?? "English");
   const [theme, setTheme] = useState(user?.preferences?.theme ?? "Light");
   const [bioSaved, setBioSaved] = useState(false);
@@ -567,28 +572,9 @@ export function Settings() {
           </div>
 
           <div className="rounded-xl border border-gray-200 bg-white p-6">
-            <form onSubmit={saveBio} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="bio">Bio</Label>
-                <Textarea
-                  id="bio"
-                  value={bio}
-                  onChange={(event) => setBio(event.target.value)}
-                  placeholder="Write a short bio about your background, interests, and goals"
-                  rows={6}
-                />
-              </div>
-              <div className="flex items-center gap-3">
-                <Button type="submit">Save Bio</Button>
-                {bioSaved && <p className="text-sm text-green-600">Bio updated</p>}
-              </div>
-            </form>
-          </div>
-
-          <div className="rounded-xl border border-gray-200 bg-white p-6">
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="gpa">GPA</Label>
+                <Label htmlFor="gpa" className="block text-sm font-medium text-gray-700 mb-1.5">GPA</Label>
                 <Input
                   id="gpa"
                   type="number"
@@ -600,16 +586,16 @@ export function Settings() {
                   onChange={(event) => setGpa(sanitizeGpaInput(event.target.value))}
                   onBlur={handleGpaBlur}
                   placeholder="1.00"
-                  className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none transition-all"
                 />
-                <p className="text-xs text-gray-600">
+                <p className="text-xs text-gray-600 mt-1.5">
                   Philippine GPA scale: 1.00 = Highest (Excellent), 3.00 = Minimum Passing, 5.00 = Failing.
                 </p>
               </div>
-              <form onSubmit={saveAcademicAndFinancial} className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
+              <form onSubmit={saveAcademicAndFinancial} className="space-y-6">
+                <div className="grid gap-6 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="educationLevel">Education Level</Label>
+                    <Label htmlFor="educationLevel" className="block text-sm font-medium text-gray-700 mb-1.5">Education Level</Label>
                     <Select
                       value={educationLevel}
                       onValueChange={(value) => {
@@ -618,7 +604,7 @@ export function Settings() {
                         setYearLevel("");
                       }}
                     >
-                      <SelectTrigger id="educationLevel">
+                      <SelectTrigger id="educationLevel" className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] transition-all">
                         <SelectValue placeholder="Select your education level" />
                       </SelectTrigger>
                       <SelectContent>
@@ -631,13 +617,13 @@ export function Settings() {
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="yearLevel">Year Level</Label>
+                    <Label htmlFor="yearLevel" className="block text-sm font-medium text-gray-700 mb-1.5">Year Level</Label>
                     <Select
                       value={yearLevel}
                       onValueChange={setYearLevel}
                       disabled={!educationLevel}
                     >
-                      <SelectTrigger id="yearLevel">
+                      <SelectTrigger id="yearLevel" className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] transition-all">
                         <SelectValue placeholder={educationLevel ? "Select your year level" : "Select education level first"} />
                       </SelectTrigger>
                       <SelectContent>
@@ -658,35 +644,37 @@ export function Settings() {
                     School / Institution Information
                   </h3>
                   
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-6 md:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="schoolName">School / Institution Name</Label>
+                      <Label htmlFor="schoolName" className="block text-sm font-medium text-gray-700 mb-1.5">School / Institution Name</Label>
                       <Input
                         id="schoolName"
                         value={schoolName}
                         onChange={(event) => setSchoolName(event.target.value)}
                         placeholder="e.g. University of the Philippines, Quezon City"
+                        className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] transition-all"
                       />
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-gray-600 mt-1.5">
                         Enter the full name of your current school
                       </p>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="schoolCampus">Campus / Branch (Optional)</Label>
+                      <Label htmlFor="schoolCampus" className="block text-sm font-medium text-gray-700 mb-1.5">Campus / Branch (Optional)</Label>
                       <Input
                         id="schoolCampus"
                         value={schoolCampus}
                         onChange={(event) => setSchoolCampus(event.target.value)}
                         placeholder="e.g. Diliman, Main Campus"
+                        className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] transition-all"
                       />
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2 mt-4">
+                  <div className="grid gap-6 md:grid-cols-2 mt-6">
                     <div className="space-y-2">
-                      <Label htmlFor="schoolType">School Type</Label>
+                      <Label htmlFor="schoolType" className="block text-sm font-medium text-gray-700 mb-1.5">School Type</Label>
                       <Select value={schoolType} onValueChange={setSchoolType}>
-                        <SelectTrigger id="schoolType">
+                        <SelectTrigger id="schoolType" className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] transition-all">
                           <SelectValue placeholder="Select school type" />
                         </SelectTrigger>
                         <SelectContent>
@@ -699,9 +687,9 @@ export function Settings() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="schoolLocation">School Location</Label>
+                      <Label htmlFor="schoolLocation" className="block text-sm font-medium text-gray-700 mb-1.5">School Location</Label>
                       <Select value={schoolLocation} onValueChange={setSchoolLocation}>
-                        <SelectTrigger id="schoolLocation">
+                        <SelectTrigger id="schoolLocation" className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] transition-all">
                           <SelectValue placeholder="Select school location" />
                         </SelectTrigger>
                         <SelectContent>
@@ -712,7 +700,7 @@ export function Settings() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-gray-600 mt-1.5">
                         Schools in Quezon City are auto-verified for QC scholarships
                       </p>
                     </div>
@@ -737,6 +725,7 @@ export function Settings() {
                         checked={isAthlete}
                         onChange={(e) => setIsAthlete(e.target.checked)}
                         className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        aria-label="Athlete (for Athletic Scholarships)"
                       />
                       <Label htmlFor="isAthlete" className="text-sm font-normal cursor-pointer">
                         Athlete (for Athletic Scholarships)
@@ -749,6 +738,7 @@ export function Settings() {
                         checked={isArtist}
                         onChange={(e) => setIsArtist(e.target.checked)}
                         className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        aria-label="Artist (for Arts & Culture Scholarships)"
                       />
                       <Label htmlFor="isArtist" className="text-sm font-normal cursor-pointer">
                         Artist (for Arts & Culture Scholarships)
@@ -761,6 +751,7 @@ export function Settings() {
                         checked={isSKOfficial}
                         onChange={(e) => setIsSKOfficial(e.target.checked)}
                         className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        aria-label="SK Official / Youth Leader"
                       />
                       <Label htmlFor="isSKOfficial" className="text-sm font-normal cursor-pointer">
                         SK Official / Youth Leader
@@ -773,6 +764,7 @@ export function Settings() {
                         checked={isStudentLeader}
                         onChange={(e) => setIsStudentLeader(e.target.checked)}
                         className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        aria-label="Student Council / Government Leader"
                       />
                       <Label htmlFor="isStudentLeader" className="text-sm font-normal cursor-pointer">
                         Student Council / Government Leader
@@ -785,6 +777,7 @@ export function Settings() {
                         checked={isIndigent}
                         onChange={(e) => setIsIndigent(e.target.checked)}
                         className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        aria-label="From Indigent / Low-income Family"
                       />
                       <Label htmlFor="isIndigent" className="text-sm font-normal cursor-pointer">
                         From Indigent / Low-income Family
@@ -797,6 +790,7 @@ export function Settings() {
                         checked={isPWD}
                         onChange={(e) => setIsPWD(e.target.checked)}
                         className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        aria-label="Person with Disability (PWD)"
                       />
                       <Label htmlFor="isPWD" className="text-sm font-normal cursor-pointer">
                         Person with Disability (PWD)
@@ -809,6 +803,7 @@ export function Settings() {
                         checked={isSoloParent}
                         onChange={(e) => setIsSoloParent(e.target.checked)}
                         className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        aria-label="Solo Parent"
                       />
                       <Label htmlFor="isSoloParent" className="text-sm font-normal cursor-pointer">
                         Solo Parent
@@ -817,27 +812,29 @@ export function Settings() {
                   </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-6 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="fieldOfStudy">Field of Study</Label>
+                    <Label htmlFor="fieldOfStudy" className="block text-sm font-medium text-gray-700 mb-1.5">Field of Study</Label>
                     <Input
                       id="fieldOfStudy"
                       value={fieldOfStudy}
                       onChange={(event) => setFieldOfStudy(event.target.value)}
                       placeholder="Computer Science"
+                      className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] transition-all"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="graduationYear">Graduation Year</Label>
+                    <Label htmlFor="graduationYear" className="block text-sm font-medium text-gray-700 mb-1.5">Graduation Year</Label>
                     <Input
                       id="graduationYear"
                       value={graduationYear}
                       onChange={(event) => setGraduationYear(event.target.value)}
                       placeholder="2026"
+                      className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] transition-all"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="financialNeed">Financial Need (1-5)</Label>
+                    <Label htmlFor="financialNeed" className="block text-sm font-medium text-gray-700 mb-1.5">Financial Need (1-5)</Label>
                     <Input
                       id="financialNeed"
                       type="number"
@@ -845,15 +842,16 @@ export function Settings() {
                       max="5"
                       value={financialNeed}
                       onChange={(event) => setFinancialNeed(event.target.value)}
+                      className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] transition-all"
                     />
                   </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-6 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="netWorth">Net Worth</Label>
+                    <Label htmlFor="netWorth" className="block text-sm font-medium text-gray-700 mb-1.5">Net Worth</Label>
                     <div className="relative">
-                      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-gray-500">
+                      <span className="pointer-events-none absolute inset-y-0 left-3.5 flex items-center text-sm text-gray-500 font-medium">
                         ₱
                       </span>
                       <Input
@@ -864,22 +862,27 @@ export function Settings() {
                         value={netWorth}
                         onChange={(event) => setNetWorth(event.target.value)}
                         placeholder="50000"
-                        className="pl-8"
+                        className="w-full pl-8 pr-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] transition-all"
                       />
                     </div>
-                    <p className="text-xs text-gray-600">Current value: {formatPeso(netWorth)}</p>
+                    <p className="text-xs text-gray-600 mt-1.5">Current value: {formatPeso(netWorth)}</p>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="currency">Currency</Label>
-                    <Input id="currency" value="PHP (₱)" readOnly />
+                    <Label htmlFor="currency" className="block text-sm font-medium text-gray-700 mb-1.5">Currency</Label>
+                    <Input 
+                      id="currency" 
+                      value="PHP (₱)" 
+                      readOnly 
+                      className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-gray-50 text-gray-900 cursor-not-allowed"
+                    />
                   </div>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-6 md:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="incomeCategory">Income Category</Label>
+                    <Label htmlFor="incomeCategory" className="block text-sm font-medium text-gray-700 mb-1.5">Income Category</Label>
                     <Select value={incomeCategory} onValueChange={setIncomeCategory}>
-                      <SelectTrigger id="incomeCategory">
+                      <SelectTrigger id="incomeCategory" className="w-full px-3.5 py-2.5 border border-gray-300 rounded-md bg-white text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-0 focus:shadow-[0_0_0_3px_rgba(59,130,246,0.1)] transition-all">
                         <SelectValue placeholder="Select a peso-based bracket" />
                       </SelectTrigger>
                       <SelectContent>

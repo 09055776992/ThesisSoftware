@@ -1,10 +1,10 @@
 import { MongoClient } from "mongodb";
 
-const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URL || process.env.DATABASE_URL;
+const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGO_URL || process.env.DATABASE_URL;
 const databaseName = process.env.MONGODB_DB || process.env.MONGO_DB || "thesis_software";
 
 if (!mongoUri) {
-  throw new Error("Missing MONGODB_URI in environment.");
+  throw new Error("Missing MongoDB connection string in environment. Set one of: MONGODB_URI, MONGO_URI, MONGO_URL, or DATABASE_URL.");
 }
 
 if (!String(mongoUri).startsWith("mongodb://") && !String(mongoUri).startsWith("mongodb+srv://")) {

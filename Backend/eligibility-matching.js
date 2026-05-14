@@ -1,4 +1,5 @@
 // Eligibility Matching Logic for QCSP Scholarships
+const DEBUG_ELIGIBILITY = process.env.DEBUG_ELIGIBILITY === "1";
 
 // CHED Priority Courses (reference)
 const CHED_PRIORITY_COURSES = [
@@ -9,6 +10,136 @@ const CHED_PRIORITY_COURSES = [
   "Public Administration", "Social Work", "Development Communication",
   "Environmental Science", "Statistics"
 ];
+
+function normalizeBoolean(value) {
+  return value === true || value === "true" || value === "True" || value === 1 || value === "1";
+}
+
+function getStudentSpecialCategories(student) {
+  const nested = student.specialCategories || {};
+  return {
+    isAthlete: normalizeBoolean(nested.isAthlete) || normalizeBoolean(student.isAthlete) || normalizeBoolean(student.is_athlete),
+    isArtist: normalizeBoolean(nested.isArtist) || normalizeBoolean(student.isArtist) || normalizeBoolean(student.is_artist),
+    isSKOfficial: normalizeBoolean(nested.isSKOfficial) || normalizeBoolean(student.isSKOfficial) || normalizeBoolean(student.is_sk_official),
+    isStudentLeader: normalizeBoolean(nested.isStudentLeader) || normalizeBoolean(student.isStudentLeader) || !!student.is_student_leader || !!student.student_council_position || !!student.studentGovernmentPosition,
+    // UI historically saved "From Indigent / Low-income" as isFromIndigenousFamily; treat as indigent for need-based matching
+    isIndigent:
+      normalizeBoolean(nested.isIndigent) ||
+      normalizeBoolean(nested.isFromIndigenousFamily) ||
+      normalizeBoolean(student.isIndigent) ||
+      normalizeBoolean(student.is_indigent),
+    isPWD: normalizeBoolean(nested.isPWD) || normalizeBoolean(student.isPWD) || normalizeBoolean(student.is_pwd),
+    isSoloParent: normalizeBoolean(nested.isSoloParent) || normalizeBoolean(student.isSoloParent) || normalizeBoolean(student.is_solo_parent),
+    isFromIndigenousFamily: normalizeBoolean(nested.isFromIndigenousFamily) || normalizeBoolean(student.isFromIndigenousFamily) || normalizeBoolean(student.is_from_indigenous_family),
+  };
+}
+
+function isPovertyIncomeCategory(incomeCategory) {
+  const normalized = String(incomeCategory || "").trim().toLowerCase();
+  if (normalized === "under-25000" || normalized === "under_25000") return true;
+  return (
+    normalized === "₱10,000 – ₱25,000" ||
+    normalized === "₱10,000 - ₱25,000" ||
+    normalized === "₱10,000–₱25,000" ||
+    normalized === "₱10,000-₱25,000" ||
+    normalized === "10,000 – 25,000" ||
+    normalized === "10,000 - 25,000" ||
+    normalized === "10,000–25,000" ||
+    normalized === "10,000-25,000" ||
+    normalized === "under ₱25,000"
+  );
+}
+
+function isQuezonCityText(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return (
+    normalized === "quezon-city" ||
+    normalized === "quezon city" ||
+    normalized.includes("quezon city") ||
+    normalized === "qc" ||
+    normalized === "q.c." ||
+    /^qc[,.]?$/.test(normalized) ||
+    normalized.includes("qc,") ||
+    normalized.endsWith(" qc") ||
+    normalized.startsWith("qc ")
+  );
+}
+
+function getStudentGradeValue(student) {
+  const values = [student.gpa, student.GPA, student.gwa, student.GWA]
+    .map((value) => parseFloat(value))
+    .filter((value) => Number.isFinite(value));
+  return values.length > 0 ? values[0] : null;
+}
+
+function getStudentPercentageValue(student) {
+  const values = [student.percentage, student.percentageGrade]
+    .map((value) => parseFloat(value))
+    .filter((value) => Number.isFinite(value));
+  return values.length > 0 ? values[0] : null;
+}
+
+function getEconomicPass(student) {
+  const studentCategories = getStudentSpecialCategories(student);
+  const incomeCategory = String(student.incomeCategory || student.income_category || "").trim();
+  const incomeLower = incomeCategory.toLowerCase();
+  return (
+    ["Under ₱25,000", "₱10,000 – ₱25,000", "₱10,000 - ₱25,000", "under-25000", "under_25000"].includes(incomeCategory) ||
+    incomeLower === "under ₱25,000" ||
+    studentCategories.isFromIndigenousFamily ||
+    studentCategories.isPWD ||
+    studentCategories.isSoloParent ||
+    studentCategories.isIndigent ||
+    isPovertyIncomeCategory(incomeCategory) ||
+    parseInt(student.financialNeed, 10) >= 4 ||
+    parseInt(student.financial_need, 10) >= 4
+  );
+}
+
+function evaluateSpecialCategoryRequirement(student, criteria) {
+  const studentCategories = getStudentSpecialCategories(student);
+  const requiresAthlete = criteria.isAthlete === true;
+  const requiresArtist = criteria.isArtist === true;
+  const requiresSKOfficial = criteria.isSKOfficial === true;
+  const requiresStudentLeader = criteria.isStudentLeader === true;
+  const requiresIndigent = criteria.isIndigent === true;
+  const requiresPWD = criteria.isPWD === true;
+  const requiresSoloParent = criteria.isSoloParent === true;
+
+  const athleteOrArtistRequired = requiresAthlete && requiresArtist;
+  const athleticArtsPassed = athleteOrArtistRequired
+    ? studentCategories.isAthlete || studentCategories.isArtist
+    : (requiresAthlete ? studentCategories.isAthlete : (requiresArtist ? studentCategories.isArtist : true));
+
+  const leaderRequired = requiresSKOfficial && requiresStudentLeader;
+  const leaderPassed = leaderRequired
+    ? studentCategories.isSKOfficial || studentCategories.isStudentLeader
+    : (requiresSKOfficial ? studentCategories.isSKOfficial : (requiresStudentLeader ? studentCategories.isStudentLeader : true));
+
+  const economicRequired = requiresIndigent || requiresPWD || requiresSoloParent;
+  const economicPassed = economicRequired ? getEconomicPass(student) : true;
+
+  const specialRequirementPassed = (athleteOrArtistRequired ? athleticArtsPassed : true)
+    && (leaderRequired ? leaderPassed : true)
+    && (economicRequired ? economicPassed : true);
+
+  return {
+    studentCategories,
+    requiresAthlete,
+    requiresArtist,
+    athleteOrArtistRequired,
+    athleticArtsPassed,
+    requiresSKOfficial,
+    requiresStudentLeader,
+    leaderRequired,
+    leaderPassed,
+    requiresIndigent,
+    requiresPWD,
+    requiresSoloParent,
+    economicPassed,
+    specialRequirementPassed,
+  };
+}
 
 /**
  * Check if a student is eligible for a scholarship based on their profile
@@ -38,17 +169,7 @@ function checkEligibility(student, scholarship) {
   const isQCResident = student.is_qc_resident === true || 
                        student.isQCResident === true ||
                        student.qcResident === true ||
-                       locationLower === "quezon city" ||
-                       locationLower.includes("quezon city") ||
-                       locationLower === "qc" ||
-                       locationLower === "q.c." ||
-                       /^qc[,.]?$/.test(locationLower) ||
-                       locationLower.includes("qc,") ||
-                       locationLower.includes("quezon city, metro manila") ||
-                       locationLower.includes("quezon city, ncr") ||
-                       locationLower.includes("quezon city philippines") ||
-                       locationLower.endsWith(" qc") ||
-                       locationLower.startsWith("qc ");
+                       isQuezonCityText(locationLower);
   
   eligibility.criteriaChecks.qcResident = {
     passed: isQCResident,
@@ -84,7 +205,7 @@ function checkEligibility(student, scholarship) {
   const hasSchoolName = student.schoolName && student.schoolName.trim().length > 0;
   const schoolLocation = student.schoolLocation || student.school_location || student.schoolCity || "";
   const schoolLocationProvided = String(schoolLocation).trim().length > 0;
-  const schoolInQC = String(schoolLocation).trim() === "Quezon City";
+  const schoolInQC = isQuezonCityText(schoolLocation) || isQuezonCityText(student.schoolCampus);
   const legacyEnrolledCheck = student.enrolled_in_qc_school === true || 
                                student.enrolledInQCRecognized === true ||
                                student.enrolledInQCSchool === true ||
@@ -227,8 +348,8 @@ function checkEligibility(student, scholarship) {
   
   if (minimumGPA !== null && minimumGPA !== undefined) {
     // Check for percentage-based grades (SHS uses 0-100 scale)
-    const studentPercentage = parseFloat(student.percentage) || parseFloat(student.percentageGrade);
-    const studentGPA = parseFloat(student.gpa) || parseFloat(student.GPA) || parseFloat(student.gwa) || parseFloat(student.GWA);
+    const studentPercentage = getStudentPercentageValue(student);
+    const studentGPA = getStudentGradeValue(student);
     
     // Determine which scale the requirement uses
     const isPercentage = minimumGPA > 50; // Percentage grades (e.g., 85, 89)
@@ -252,11 +373,11 @@ function checkEligibility(student, scholarship) {
       actualValue = studentPercentageValue?.toFixed(2) || studentGPA?.toString() || "Not provided";
       label = "Percentage Grade";
       
-      if (!studentPercentageValue && !studentGPA) {
+      if (studentPercentageValue === null && studentGPA === null) {
         passed = false;
         message = `Grade not provided. Minimum required: ${minimumGPA}%`;
       } else {
-        const gradeToCheck = studentPercentageValue || (studentGPA * 20); // Rough conversion
+        const gradeToCheck = studentPercentageValue !== null ? studentPercentageValue : (studentGPA * 20); // Rough conversion
         passed = gradeToCheck >= minimumGPA;
         message = passed 
           ? `Grade: ${actualValue}% (meets minimum ${minimumGPA}%)`
@@ -265,9 +386,9 @@ function checkEligibility(student, scholarship) {
     } else if (isGWA) {
       // GWA scale: 1.0 (best) to 5.0 (worst), lower is better
       label = "General Weighted Average (GWA)";
-      actualValue = studentGPA?.toString() || "Not provided";
+      actualValue = studentGPA !== null ? studentGPA.toString() : "Not provided";
       
-      if (!studentGPA) {
+      if (studentGPA === null) {
         passed = false;
         message = `GWA not provided. Minimum required: ${minimumGPA}`;
       } else {
@@ -277,19 +398,28 @@ function checkEligibility(student, scholarship) {
           : `GWA requirement not met. Maximum: ${minimumGPA}, Yours: ${studentGPA}`;
       }
     } else {
-      // GPA scale: 0-4.0, higher is better
+      // Philippine GPA/GWA scale: lower is better
       label = "Grade Point Average (GPA)";
-      actualValue = studentGPA?.toString() || "Not provided";
+      actualValue = studentGPA !== null ? studentGPA.toString() : "Not provided";
       
-      if (!studentGPA) {
+      if (studentGPA === null) {
         passed = false;
         message = `GPA not provided. Minimum required: ${minimumGPA}`;
       } else {
-        passed = studentGPA >= minimumGPA;
+        passed = studentGPA <= minimumGPA;
         message = passed 
-          ? `GPA: ${studentGPA} (meets minimum ${minimumGPA})`
-          : `GPA requirement not met. Minimum: ${minimumGPA}, Yours: ${studentGPA}`;
+          ? `GPA: ${studentGPA} (meets maximum ${minimumGPA})`
+          : `GPA requirement not met. Maximum: ${minimumGPA}, Yours: ${studentGPA}`;
       }
+    }
+
+    if (DEBUG_ELIGIBILITY) {
+      console.log('GPA Check:', {
+        studentGPA,
+        requiredMinimum: minimumGPA,
+        comparisonUsed: 'student.gpa <= scholarship.minimumGPA',
+        passed: studentGPA !== null ? studentGPA <= minimumGPA : false,
+      });
     }
     
     eligibility.criteriaChecks.gpa = {
@@ -309,9 +439,9 @@ function checkEligibility(student, scholarship) {
 
   // 3. GPA/GWA Check (if specified - supports both GPA and GWA scales)
   if (criteria.minGWA !== null && criteria.minGWA !== undefined) {
-    const studentGWA = parseFloat(student.gwa) || parseFloat(student.GWA) || parseFloat(student.gpa);
+    const studentGWA = getStudentGradeValue(student);
     // GWA scale: 1.0 (best) to 5.0 (worst), lower is better
-    if (!studentGWA || studentGWA > criteria.minGWA) {
+    if (studentGWA === null || studentGWA > criteria.minGWA) {
       eligibility.isEligible = false;
       eligibility.unmetCriteria.push(`GWA requirement not met. Minimum: ${criteria.minGWA}, Yours: ${studentGWA || 'Not provided'}`);
       return eligibility; // Early exit - GWA too low
@@ -319,11 +449,11 @@ function checkEligibility(student, scholarship) {
   }
 
   if (criteria.minGPA !== null && criteria.minGPA !== undefined) {
-    const studentGPA = parseFloat(student.gpa) || parseFloat(student.GPA);
-    // GPA scale: 0-4.0, higher is better
-    if (!studentGPA || studentGPA < criteria.minGPA) {
+    const studentGPA = getStudentGradeValue(student);
+    // Philippine GPA/GWA scale: lower is better
+    if (studentGPA === null || studentGPA > criteria.minGPA) {
       eligibility.isEligible = false;
-      eligibility.unmetCriteria.push(`GPA requirement not met. Minimum: ${criteria.minGPA}, Yours: ${studentGPA || 'Not provided'}`);
+      eligibility.unmetCriteria.push(`GPA requirement not met. Maximum: ${criteria.minGPA}, Yours: ${studentGPA || 'Not provided'}`);
       return eligibility; // Early exit - GPA too low
     }
   }
@@ -400,7 +530,6 @@ function checkEligibility(student, scholarship) {
     // Specialized Track (SHS Specialized Track Scholarship)
     requiresSpecializedTrack: () => {
       if (criteria.requiresSpecializedTrack) {
-        // Check if school type is Public Senior High School
         const isPublicSHS = student.schoolType === "Public Senior High School";
         const hasSpecialized = student.specialized_track || student.hasSpecializedTrack || isPublicSHS;
         
@@ -452,32 +581,35 @@ function checkEligibility(student, scholarship) {
 
     // Athletic/Arts - Handle as OR logic when both are present
     isAthlete: () => {
-      // If both isAthlete and isArtist are required, use OR logic
-      const needsAthlete = criteria.isAthlete;
-      const needsArtist = criteria.isArtist;
+      const studentCategories = getStudentSpecialCategories(student);
+      const needsAthlete = criteria.isAthlete === true;
+      const needsArtist = criteria.isArtist === true;
       
       if (needsAthlete && needsArtist) {
-        // Combined Athletic and Arts scholarship - OR logic
-        const isAthlete = student.is_athlete || student.isAthlete;
-        const isArtist = student.is_artist || student.isArtist;
-        
-        if (!isAthlete && !isArtist) {
-          eligibility.mayBeEligible = true;
-          eligibility.unmetCriteria.push("Must be an athlete OR an artist (requires verification)");
+        const passed = studentCategories.isAthlete || studentCategories.isArtist;
+        eligibility.criteriaChecks.specialCategory = {
+          passed,
+          label: "Recent sports/arts award recipient or QC-recognized program member",
+          message: passed
+            ? (studentCategories.isAthlete ? "Athlete status confirmed" : "Artist status confirmed")
+            : "Must be a recent recipient of a major sports/arts award or member of a QC-recognized sports/arts program"
+        };
+        if (!passed) {
+          eligibility.isEligible = false;
+          eligibility.unmetCriteria.push("Must be a recent recipient of a major sports/arts award or member of a QC-recognized sports/arts program");
         } else {
-          eligibility.criteriaChecks.athleteOrArtist = {
-            passed: true,
-            label: "Athlete / Artist Status",
-            message: isAthlete ? "Athlete status confirmed" : "Artist status confirmed"
-          };
-          eligibility.reasons.push(isAthlete ? "Athlete status confirmed" : "Artist status confirmed");
+          eligibility.reasons.push(studentCategories.isAthlete ? "Athlete status confirmed" : "Artist status confirmed");
         }
       } else if (needsAthlete) {
-        // Athletic-only scholarship
-        const isAthlete = student.is_athlete || student.isAthlete;
-        if (!isAthlete) {
-          eligibility.mayBeEligible = true;
-          eligibility.unmetCriteria.push("Must be an athlete (requires verification)");
+        const passed = studentCategories.isAthlete;
+        eligibility.criteriaChecks.specialCategory = {
+          passed,
+          label: "Athlete status required",
+          message: passed ? "Athlete status confirmed" : "Must be an athlete"
+        };
+        if (!passed) {
+          eligibility.isEligible = false;
+          eligibility.unmetCriteria.push("Must be an athlete");
         } else {
           eligibility.reasons.push("Athlete status confirmed");
         }
@@ -485,15 +617,19 @@ function checkEligibility(student, scholarship) {
     },
 
     isArtist: () => {
-      // Skip if both athlete and artist are required (handled above)
-      const needsBoth = criteria.isAthlete && criteria.isArtist;
-      
-      if (criteria.isArtist && !needsBoth) {
-        // Arts-only scholarship
-        const isArtist = student.is_artist || student.isArtist;
-        if (!isArtist) {
-          eligibility.mayBeEligible = true;
-          eligibility.unmetCriteria.push("Must be an artist (requires verification)");
+      const studentCategories = getStudentSpecialCategories(student);
+      const needsAthlete = criteria.isAthlete === true;
+      const needsArtist = criteria.isArtist === true;
+      if (needsArtist && !(needsAthlete && needsArtist)) {
+        const passed = studentCategories.isArtist;
+        eligibility.criteriaChecks.specialCategory = {
+          passed,
+          label: "Artist status required",
+          message: passed ? "Artist status confirmed" : "Must be an artist"
+        };
+        if (!passed) {
+          eligibility.isEligible = false;
+          eligibility.unmetCriteria.push("Must be an artist");
         } else {
           eligibility.reasons.push("Artist status confirmed");
         }
@@ -502,11 +638,35 @@ function checkEligibility(student, scholarship) {
 
     // Youth Leadership
     isSKOfficial: () => {
-      if (criteria.isSKOfficial) {
-        const isSKOfficial = student.is_sk_official || student.isSKOfficial;
-        if (!isSKOfficial) {
-          eligibility.mayBeEligible = true;
-          eligibility.unmetCriteria.push("Must be an SK official (requires verification)");
+      const studentCategories = getStudentSpecialCategories(student);
+      const needsSKOfficial = criteria.isSKOfficial === true;
+      const needsStudentLeader = criteria.isStudentLeader === true;
+      
+      if (needsSKOfficial && needsStudentLeader) {
+        const passed = studentCategories.isSKOfficial || studentCategories.isStudentLeader;
+        eligibility.criteriaChecks.specialCategory = {
+          passed,
+          label: "SK official or student council/government leader",
+          message: passed
+            ? (studentCategories.isSKOfficial ? "SK official status confirmed" : "Student leader status confirmed")
+            : "Must be an SK/SSG official or recipient of a recognized leadership award"
+        };
+        if (!passed) {
+          eligibility.isEligible = false;
+          eligibility.unmetCriteria.push("Must be an SK/SSG official or recipient of a recognized leadership award");
+        } else {
+          eligibility.reasons.push(studentCategories.isSKOfficial ? "SK official status confirmed" : "Student leader status confirmed");
+        }
+      } else if (needsSKOfficial) {
+        const passed = studentCategories.isSKOfficial;
+        eligibility.criteriaChecks.specialCategory = {
+          passed,
+          label: "SK official status required",
+          message: passed ? "SK official status confirmed" : "Must be an SK official"
+        };
+        if (!passed) {
+          eligibility.isEligible = false;
+          eligibility.unmetCriteria.push("Must be an SK official");
         } else {
           eligibility.reasons.push("SK official status confirmed");
         }
@@ -514,12 +674,19 @@ function checkEligibility(student, scholarship) {
     },
 
     isStudentLeader: () => {
-      if (criteria.isStudentLeader) {
-        const isStudentLeader = student.is_student_leader || student.isStudentLeader || 
-                               student.student_council_position || student.studentGovernmentPosition;
-        if (!isStudentLeader) {
-          eligibility.mayBeEligible = true;
-          eligibility.unmetCriteria.push("Must be a student leader (requires verification)");
+      const studentCategories = getStudentSpecialCategories(student);
+      const needsSKOfficial = criteria.isSKOfficial === true;
+      const needsStudentLeader = criteria.isStudentLeader === true;
+      if (needsStudentLeader && !(needsSKOfficial && needsStudentLeader)) {
+        const passed = studentCategories.isStudentLeader;
+        eligibility.criteriaChecks.specialCategory = {
+          passed,
+          label: "Student leader status required",
+          message: passed ? "Student leader status confirmed" : "Must be a student leader"
+        };
+        if (!passed) {
+          eligibility.isEligible = false;
+          eligibility.unmetCriteria.push("Must be a student leader");
         } else {
           eligibility.reasons.push("Student leadership confirmed");
         }
@@ -528,25 +695,46 @@ function checkEligibility(student, scholarship) {
 
     // Need-based
     isIndigent: () => {
-      if (criteria.isIndigent) {
-        const isIndigent = student.is_indigent || student.isIndigent || 
-                          student.income_category === "Low" || student.incomeCategory === "Low";
-        if (!isIndigent) {
-          eligibility.mayBeEligible = true;
-          eligibility.unmetCriteria.push("Must be from indigent/marginalized group (requires verification)");
+      const studentCategories = getStudentSpecialCategories(student);
+      const needsIndigent = criteria.isIndigent === true;
+      const needsPWD = criteria.isPWD === true;
+      const needsSoloParent = criteria.isSoloParent === true;
+      const anyEconomicRequired = needsIndigent || needsPWD || needsSoloParent;
+      if (anyEconomicRequired) {
+        const passed = getEconomicPass(student);
+        eligibility.criteriaChecks.specialCategory = {
+          passed,
+          label: "Indigent / PWD / Solo parent / poverty-income requirement",
+          message: passed
+            ? (studentCategories.isIndigent ? "Indigent status confirmed" : studentCategories.isPWD ? "PWD status confirmed" : studentCategories.isSoloParent ? "Solo parent status confirmed" : studentCategories.isFromIndigenousFamily ? "Indigenous family status confirmed" : parseInt(student.financialNeed, 10) >= 4 ? "Financial need confirms eligibility" : "Income category qualifies")
+            : "Must be from indigent/marginalized group or within the poverty income threshold"
+        };
+        if (!passed) {
+          eligibility.isEligible = false;
+          eligibility.unmetCriteria.push("Must be from indigent/marginalized group or within the poverty income threshold");
         } else {
-          eligibility.reasons.push("Indigent status confirmed");
+          if (studentCategories.isIndigent) eligibility.reasons.push("Indigent status confirmed");
+          if (studentCategories.isPWD) eligibility.reasons.push("PWD status confirmed");
+          if (studentCategories.isSoloParent) eligibility.reasons.push("Solo parent status confirmed");
+          if (studentCategories.isFromIndigenousFamily) eligibility.reasons.push("Indigenous family status confirmed");
+          if (!studentCategories.isIndigent && !studentCategories.isPWD && !studentCategories.isSoloParent) eligibility.reasons.push("Income category qualifies");
         }
       }
     },
 
     // PWD
     isPWD: () => {
-      if (criteria.isPWD) {
-        const isPWD = student.is_pwd || student.isPWD;
-        if (!isPWD) {
-          eligibility.mayBeEligible = true;
-          eligibility.unmetCriteria.push("Must be a PWD (requires verification)");
+      if (criteria.isPWD && !criteria.isIndigent && !criteria.isSoloParent) {
+        const studentCategories = getStudentSpecialCategories(student);
+        const passed = studentCategories.isPWD;
+        eligibility.criteriaChecks.specialCategory = {
+          passed,
+          label: "PWD status required",
+          message: passed ? "PWD status confirmed" : "Must be a PWD"
+        };
+        if (!passed) {
+          eligibility.isEligible = false;
+          eligibility.unmetCriteria.push("Must be a PWD");
         } else {
           eligibility.reasons.push("PWD status confirmed");
         }
@@ -555,11 +743,17 @@ function checkEligibility(student, scholarship) {
 
     // Solo Parent
     isSoloParent: () => {
-      if (criteria.isSoloParent) {
-        const isSoloParent = student.is_solo_parent || student.isSoloParent;
-        if (!isSoloParent) {
-          eligibility.mayBeEligible = true;
-          eligibility.unmetCriteria.push("Must be a solo parent (requires verification)");
+      if (criteria.isSoloParent && !criteria.isIndigent && !criteria.isPWD) {
+        const studentCategories = getStudentSpecialCategories(student);
+        const passed = studentCategories.isSoloParent;
+        eligibility.criteriaChecks.specialCategory = {
+          passed,
+          label: "Solo parent status required",
+          message: passed ? "Solo parent status confirmed" : "Must be a solo parent"
+        };
+        if (!passed) {
+          eligibility.isEligible = false;
+          eligibility.unmetCriteria.push("Must be a solo parent");
         } else {
           eligibility.reasons.push("Solo parent status confirmed");
         }
@@ -626,6 +820,36 @@ function checkEligibility(student, scholarship) {
     }
   });
 
+  const specialReport = evaluateSpecialCategoryRequirement(student, criteria);
+  if (DEBUG_ELIGIBILITY && String(scholarship.name || "").toLowerCase().includes("economic")) {
+    console.log('Income Check:', {
+      incomeCategory: student.incomeCategory,
+      isIndigenous: specialReport.studentCategories.isFromIndigenousFamily,
+      financialNeed: student.financialNeed,
+      passed: specialReport.economicPassed || getEconomicPass(student)
+    });
+  }
+  if (DEBUG_ELIGIBILITY) {
+    console.log('Special Categories Check:', {
+      scholarship: scholarship.name,
+      requiresAthlete: specialReport.requiresAthlete,
+      studentIsAthlete: specialReport.studentCategories.isAthlete,
+      requiresArtist: specialReport.requiresArtist,
+      studentIsArtist: specialReport.studentCategories.isArtist,
+      requiresSKOfficial: specialReport.requiresSKOfficial,
+      studentIsSKOfficial: specialReport.studentCategories.isSKOfficial,
+      requiresStudentLeader: specialReport.requiresStudentLeader,
+      studentIsStudentLeader: specialReport.studentCategories.isStudentLeader,
+      requiresIndigent: specialReport.requiresIndigent,
+      studentIsIndigent: specialReport.studentCategories.isIndigent,
+      requiresPWD: specialReport.requiresPWD,
+      studentIsPWD: specialReport.studentCategories.isPWD,
+      requiresSoloParent: specialReport.requiresSoloParent,
+      studentIsSoloParent: specialReport.studentCategories.isSoloParent,
+      passed: specialReport.specialRequirementPassed
+    });
+  }
+
   // Final eligibility determination
   if (eligibility.isEligible && eligibility.mayBeEligible) {
     eligibility.mayBeEligible = true; // Some criteria need verification
@@ -660,8 +884,7 @@ function calculateMatchScore(student, scholarship, eligibility) {
   if (criteria.qcResident) {
     maxPoints += 25;
     const studentLocation = String(student.location || student.address || student.city || "").toLowerCase().trim();
-    const isQC = studentLocation.includes("quezon city") || studentLocation === "qc" || 
-                 studentLocation.includes("quezon") || student.is_qc_resident === true;
+    const isQC = student.is_qc_resident === true || isQuezonCityText(studentLocation);
     if (isQC) {
       points += 25;
       breakdown.locationMatch = true;
@@ -723,8 +946,8 @@ function calculateMatchScore(student, scholarship, eligibility) {
   // 3. GPA/GWA (25% weight)
   if (criteria.minGWA !== null && criteria.minGWA !== undefined) {
     maxPoints += 25;
-    const studentGWA = parseFloat(student.gwa) || parseFloat(student.GWA) || parseFloat(student.gpa);
-    if (studentGWA && studentGWA <= criteria.minGWA) {
+    const studentGWA = getStudentGradeValue(student);
+    if (studentGWA !== null && studentGWA <= criteria.minGWA) {
       points += 25;
       breakdown.gpaMatch = true;
     }
@@ -737,8 +960,8 @@ function calculateMatchScore(student, scholarship, eligibility) {
     });
   } else if (criteria.minGPA !== null && criteria.minGPA !== undefined) {
     maxPoints += 25;
-    const studentGPA = parseFloat(student.gpa) || parseFloat(student.GPA);
-    if (studentGPA && studentGPA >= criteria.minGPA) {
+    const studentGPA = getStudentGradeValue(student);
+    if (studentGPA !== null && studentGPA <= criteria.minGPA) {
       points += 25;
       breakdown.gpaMatch = true;
     }
@@ -775,16 +998,17 @@ function calculateMatchScore(student, scholarship, eligibility) {
   }
   
   // 5. Income/Financial Need (10% weight)
-  if (criteria.incomeCategory || criteria.maxIncome !== null) {
-    maxPoints += 10;
-    const incomeMatches = !!student.incomeCategory || !!(student.financialNeed && student.financialNeed.length > 0);
+  const needsEconomicWeight = criteria.incomeCategory || criteria.maxIncome !== null || criteria.isIndigent || criteria.isPWD || criteria.isSoloParent || String(scholarship.name || "").toLowerCase().includes("economic");
+  if (needsEconomicWeight) {
+    maxPoints += 25;
+    const incomeMatches = getEconomicPass(student) || !!student.incomeCategory || !!(student.financialNeed && student.financialNeed.length > 0);
     if (incomeMatches) {
-      points += 10;
+      points += 25;
       breakdown.incomeMatch = true;
     }
     breakdown.criteriaDetails.push({ 
       name: "Income/Financial Need", 
-      weight: 10, 
+      weight: 25, 
       matched: incomeMatches 
     });
   }
@@ -809,24 +1033,35 @@ function calculateMatchScore(student, scholarship, eligibility) {
   }
   
   // Log detailed breakdown
-  console.log("[Match Score Calculation]", {
-    studentEmail: student.email,
-    scholarship: scholarship.name,
-    scholarshipId: scholarship._id,
-    breakdown: {
-      locationMatch: breakdown.locationMatch,
-      gpaMatch: breakdown.gpaMatch,
-      educationMatch: breakdown.educationMatch,
-      fieldMatch: breakdown.fieldMatch,
-      incomeMatch: breakdown.incomeMatch
-    },
-    criteriaDetails: breakdown.criteriaDetails,
-    points: points,
-    maxPoints: maxPoints,
-    rawPercentage: maxPoints > 0 ? Math.round((points / maxPoints) * 100) : 50,
-    finalScore: finalScore,
-    eligibilityStatus: eligibility.isEligible ? "eligible" : (eligibility.mayBeEligible ? "may_be_eligible" : "not_eligible")
-  });
+  if (DEBUG_ELIGIBILITY) {
+    console.log("[Match Score Calculation]", {
+      studentEmail: student.email,
+      scholarship: scholarship.name,
+      scholarshipId: scholarship._id,
+      breakdown: {
+        locationMatch: breakdown.locationMatch,
+        gpaMatch: breakdown.gpaMatch,
+        educationMatch: breakdown.educationMatch,
+        fieldMatch: breakdown.fieldMatch,
+        incomeMatch: breakdown.incomeMatch
+      },
+      criteriaDetails: breakdown.criteriaDetails,
+      points: points,
+      maxPoints: maxPoints,
+      rawPercentage: maxPoints > 0 ? Math.round((points / maxPoints) * 100) : 50,
+      finalScore: finalScore,
+      eligibilityStatus: eligibility.isEligible ? "eligible" : (eligibility.mayBeEligible ? "may_be_eligible" : "not_eligible")
+    });
+
+    if (String(scholarship.name || "").toLowerCase().includes("economic")) {
+      console.log('Income Check:', {
+        incomeCategory: student.incomeCategory,
+        isIndigenous: getStudentSpecialCategories(student).isFromIndigenousFamily,
+        financialNeed: student.financialNeed,
+        passed: getEconomicPass(student)
+      });
+    }
+  }
   
   return Math.min(100, Math.max(0, finalScore));
 }

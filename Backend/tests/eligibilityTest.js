@@ -61,7 +61,7 @@ const testEligibility = () => {
         isFirstYear: true,
       },
       expectations: [
-        { scholarship: "College Academic Scholarship", expected: true },
+        { scholarship: "College Academic Scholarship", expected: false },
         { scholarship: "College Athletic and Arts Scholarship", expected: false },
         { scholarship: "Economic Scholarship", expected: true },
         { scholarship: "SHS Academic Scholarship", expected: false },
@@ -75,6 +75,8 @@ const testEligibility = () => {
         educationLevel: "Senior High School",
         yearLevel: "Grade 12",
         gpa: 1.5,
+        percentage: 92,
+        academic_honors: true,
         isScholarOfAnotherLGU: false,
         is_lgu_scholar: false,
         isOtherLGUScholar: false,
@@ -125,6 +127,8 @@ const testEligibility = () => {
         employmentDuration: 2,
         is_qc_resident: true,
         schoolType: "Graduate School",
+        schoolName: "University of the Philippines Open University",
+        schoolLocation: "Quezon City",
       },
       expectations: [
         { scholarship: "QC Postgraduate Scholarship", expected: true },

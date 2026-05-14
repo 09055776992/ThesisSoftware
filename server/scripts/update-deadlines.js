@@ -1,4 +1,4 @@
-// MongoDB script to update all scholarship deadlines to December 31, 2026
+// MongoDB script to update all scholarship deadlines to December 31, 2027
 // Run with: node update-deadlines.js
 
 const { MongoClient } = require('mongodb');
@@ -20,14 +20,8 @@ async function updateDeadlines() {
     const count = await scholarships.countDocuments();
     console.log(`Found ${count} scholarships in database`);
     
-    // Find scholarships with expired deadlines
-    const expiredCount = await scholarships.countDocuments({
-      deadline: { $lt: new Date() }
-    });
-    console.log(`Found ${expiredCount} scholarships with expired deadlines`);
-    
-    // Update all scholarships to December 31, 2026
-    const newDeadline = new Date('2026-12-31T23:59:59.000Z');
+    // Update all scholarships to December 31, 2027
+    const newDeadline = new Date('2027-12-31T23:59:59.000Z');
     
     const result = await scholarships.updateMany(
       {}, // All scholarships

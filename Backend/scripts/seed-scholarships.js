@@ -13,7 +13,7 @@ const scholarships = [
     provider: "Quezon City Youth Development Office",
     organization: "QCYDO",
     amount: 10000,
-    deadline: new Date("2026-06-30"),
+    deadline: new Date("2027-06-30"),
     status: "Active",
     type: "Merit-Based",
     fieldOfStudy: "All Fields",
@@ -31,7 +31,7 @@ const scholarships = [
     provider: "Quezon City Government",
     organization: "QC Government",
     amount: 15000,
-    deadline: new Date("2026-07-15"),
+    deadline: new Date("2027-07-15"),
     status: "Active",
     type: "Merit-Based",
     fieldOfStudy: "All Fields",
@@ -49,7 +49,7 @@ const scholarships = [
     provider: "Quezon City Barangay Office",
     organization: "Barangay Office",
     amount: 5000,
-    deadline: new Date("2026-08-31"),
+    deadline: new Date("2027-08-31"),
     status: "Active",
     type: "Need-Based",
     fieldOfStudy: "All Fields",
@@ -67,7 +67,7 @@ const scholarships = [
     provider: "Quezon City Persons with Disability Affairs Office",
     organization: "PDAO",
     amount: 12000,
-    deadline: new Date("2026-09-30"),
+    deadline: new Date("2027-09-30"),
     status: "Active",
     type: "Need-Based",
     fieldOfStudy: "All Fields",
@@ -85,7 +85,7 @@ const scholarships = [
     provider: "Quezon City Social Services Development Department",
     organization: "SSDD",
     amount: 8000,
-    deadline: new Date("2026-10-31"),
+    deadline: new Date("2027-10-31"),
     status: "Active",
     type: "Need-Based",
     fieldOfStudy: "All Fields",
@@ -103,7 +103,7 @@ const scholarships = [
     provider: "Quezon City Indigenous Peoples Office",
     organization: "IP Office",
     amount: 10000,
-    deadline: new Date("2026-11-30"),
+    deadline: new Date("2027-11-30"),
     status: "Active",
     type: "Need-Based",
     fieldOfStudy: "All Fields",
@@ -123,13 +123,17 @@ async function seedScholarships() {
     await mongoose.connect(MONGODB_URI);
     console.log("Connected to MongoDB");
 
-    // Clear existing scholarships
-    await Scholarship.deleteMany({});
-    console.log("Cleared existing scholarships");
+    let upserts = 0;
+    for (const scholarship of scholarships) {
+      const result = await Scholarship.updateOne(
+        { name: scholarship.name },
+        { $set: scholarship },
+        { upsert: true }
+      );
+      if (result.upsertedCount || result.modifiedCount) upserts += 1;
+    }
 
-    // Insert new scholarships
-    const result = await Scholarship.insertMany(scholarships);
-    console.log(`Seeded ${result.length} scholarships`);
+    console.log(`Seeded or updated ${upserts} scholarships`);
 
     await mongoose.disconnect();
     console.log("Disconnected from MongoDB");

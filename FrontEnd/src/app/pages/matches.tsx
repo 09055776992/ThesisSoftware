@@ -6,6 +6,7 @@ import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { Bookmark, Award, Calendar, MapPin, ExternalLink } from "lucide-react";
 import { fetchScholarshipsWithEligibility } from "../lib/api-client";
 import { getStoredUser } from "../lib/user-storage";
+import { calculateMatchScore } from "../lib/calculateMatchScore";
 
 // Scholarship cover images mapping (FIX 5)
 const scholarshipImages: Record<string, string> = {
@@ -40,40 +41,54 @@ export function Matches() {
       financialNeed: user?.financialNeed,
     });
 
-    // Fetch scholarships with eligibility (includes proper matchScore from backend)
+    // Fetch scholarships - use regular endpoint since we'll calculate scores client-side
     fetchScholarshipsWithEligibility(user?.email || "")
       .then((result: any) => {
         const raw = result.data || [];
-        console.debug("Matches: fetched scholarships count:", raw.length, raw);
+        console.log("Matches: fetched scholarships count:", raw.length);
 
-        const normalized = raw.map((item: any, idx: number) => ({
-          id: Number(item.id) || idx + 1,
-          name: String(item.name || ""),
-          provider: String(item.provider || ""),
-          image: String(item.imageUrl || item.image || ""),
-          amount: typeof item.amount === "string" ? item.amount : `₱${Number(item.amount || 0).toLocaleString()}`,
-          deadline: item.deadline ? new Date(item.deadline).toLocaleDateString("en-US", {
-            year: "numeric",
-            month: "long",
-            day: "numeric",
-          }) : "December 31, 2030",
-          type: String(item.type || "Merit-Based"),
-          // Use backend-calculated matchScore for consistency
-          matchPercent: typeof item.matchScore === 'number' ? item.matchScore : 
-                       (item.eligibilityStatus === "eligible" ? 95 : 
-                        item.eligibilityStatus === "may-be-eligible" ? 75 : 30),
-          location: String(item.location || ""),
-          fieldOfStudy: String(item.fieldOfStudy || ""),
-          minimumGpa: item.minimumGpa !== undefined ? Number(item.minimumGpa) : undefined,
-          targetIncomeCategory: item.targetIncomeCategory ?? item.incomeCategory ?? null,
-          requiresFinancialNeed: !!item.requiresFinancialNeed,
-          eligibility: String(item.eligibility || ""),
-          requirements: Array.isArray(item.requirements) ? item.requirements.map((v: any) => String(v)) : [],
-          description: String(item.description || ""),
-          eligibilityStatus: item.eligibilityStatus || "unknown",
-        }));
+        // Calculate match scores using unified function
+        const withMatchScores = raw.map((item: any, idx: number) => {
+          let match = { score: 0, qualified: false, failedReasons: [] };
+          
+          if (user) {
+            try {
+              match = calculateMatchScore(user, item);
+              console.log(`${item.name}: ${match.score}%,`, match.qualified ? 'QUALIFIED' : 'NOT QUALIFIED', match.failedReasons);
+            } catch (err) {
+              console.error(`Error calculating match for ${item.name}:`, err);
+              match = { score: 0, qualified: false, failedReasons: ['Error calculating match'] };
+            }
+          }
+          
+          return {
+            id: Number(item.id) || Number(item._id) || idx + 1,
+            name: String(item.name || ""),
+            provider: String(item.provider || ""),
+            image: String(item.imageUrl || item.image || ""),
+            amount: typeof item.amount === "string" ? item.amount : `₱${Number(item.amount || 0).toLocaleString()}`,
+            deadline: item.deadline ? new Date(item.deadline).toLocaleDateString("en-US", {
+              year: "numeric",
+              month: "long",
+              day: "numeric",
+            }) : "December 31, 2030",
+            type: String(item.type || "Merit-Based"),
+            matchPercent: match.score,
+            qualified: match.qualified,
+            failedReasons: match.failedReasons,
+            location: String(item.location || ""),
+            fieldOfStudy: String(item.fieldOfStudy || ""),
+            minimumGpa: item.minimumGpa !== undefined ? Number(item.minimumGpa) : undefined,
+            targetIncomeCategory: item.targetIncomeCategory ?? item.incomeCategory ?? null,
+            requiresFinancialNeed: !!item.requiresFinancialNeed,
+            eligibility: String(item.eligibility || ""),
+            requirements: Array.isArray(item.requirements) ? item.requirements.map((v: any) => String(v)) : [],
+            description: String(item.description || ""),
+            eligibilityStatus: item.eligibilityStatus || "unknown",
+          };
+        });
 
-        setScholarships(normalized);
+        setScholarships(withMatchScores);
       })
       .catch((err: any) => {
         console.error("Failed to fetch scholarships for matches:", err);
@@ -95,17 +110,12 @@ export function Matches() {
       if (!user.incomeCategory && !(user.financialNeed && user.financialNeed.length)) missing.push("Financial need / Income");
     }
 
-    // Use pre-calculated matchPercent from backend (set during normalization)
-    // This ensures consistency between card view and detail modal
-    const evaluated = scholarships.map((s) => ({ ...s }));
+    // Filter to ONLY show scholarships where user is fully qualified
+    // Sort by match score (highest first)
+    const qualified = scholarships.filter((s) => s.qualified === true);
+    qualified.sort((a, b) => (b.matchPercent || 0) - (a.matchPercent || 0));
 
-    // Sort: higher matchPercent first
-    evaluated.sort((a, b) => (b.matchPercent || 0) - (a.matchPercent || 0));
-
-    const matchedArr = evaluated.filter((s) => (s.matchPercent || 0) >= 50);
-    const lowArr = evaluated.filter((s) => (s.matchPercent || 0) < 50 && s.eligibilityStatus !== "not-eligible");
-
-    return { matches: matchedArr, lowMatches: lowArr, userMissingFields: missing, userHasProfileFields };
+    return { matches: qualified, lowMatches: [], userMissingFields: missing, userHasProfileFields };
   }, [scholarships]);
 
   return (
@@ -136,78 +146,47 @@ export function Matches() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {matches.map((s) => (
-                <Card key={s.id} className="hover:shadow-lg transition-shadow">
-                  <div className="relative h-36">
-                    <img
-                      src={scholarshipImages[s.name] || defaultScholarshipImage}
-                      alt={s.name}
-                      className="w-full h-full object-cover rounded-t-lg"
-                    />
-                    {/* Dark gradient overlay for badge readability */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent rounded-t-lg" />
-                    <div className="absolute top-2 right-2">
-                      <Badge className="bg-accent">{s.matchPercent}% Match</Badge>
-                    </div>
-                  </div>
-                  <CardHeader>
-                    <CardTitle className="text-base line-clamp-2">{s.name}</CardTitle>
-                    <CardDescription className="line-clamp-1">{s.provider}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm text-muted-foreground">Due: {s.deadline}</span>
-                        <Button size="sm" variant="ghost">
-                          <Bookmark className="h-4 w-4" />
-                          <span className="ml-2">Save</span>
-                        </Button>
-                      </div>
-                      <Button className="w-full" size="sm">View Details</Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-
-            {lowMatches.length > 0 && (
-              <div className="mt-8">
-                <h3 className="text-xl font-semibold mb-4">Lower-match scholarships</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {lowMatches.map((s) => (
-                    <Card key={s.id} className="hover:shadow-lg transition-shadow">
-                      <div className="relative h-36">
-                        <img
-                          src={scholarshipImages[s.name] || defaultScholarshipImage}
-                          alt={s.name}
-                          className="w-full h-full object-cover rounded-t-lg"
-                        />
-                        {/* Dark gradient overlay for badge readability */}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent rounded-t-lg" />
-                        <div className="absolute top-2 right-2">
-                          <Badge className="bg-gray-200 text-gray-800">Low Match</Badge>
-                        </div>
-                      </div>
-                      <CardHeader>
-                        <CardTitle className="text-base line-clamp-2">{s.name}</CardTitle>
-                        <CardDescription className="line-clamp-1">{s.provider}</CardDescription>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">Due: {s.deadline}</span>
-                            <Button size="sm" variant="ghost">
-                              <Bookmark className="h-4 w-4" />
-                              <span className="ml-2">Save</span>
-                            </Button>
-                          </div>
-                          <Button className="w-full" size="sm">View Details</Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
+            {matches.length === 0 ? (
+              <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+                <div className="max-w-md mx-auto">
+                  <h2 className="text-xl font-semibold text-gray-900 mb-2">No scholarships match your profile yet</h2>
+                  <p className="text-gray-600">Try updating your profile or check back for new scholarships that match your qualifications.</p>
                 </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {matches.map((s) => (
+                  <Card key={s.id} className="hover:shadow-lg transition-shadow">
+                    <div className="relative h-36">
+                      <img
+                        src={scholarshipImages[s.name] || defaultScholarshipImage}
+                        alt={s.name}
+                        className="w-full h-full object-cover rounded-t-lg"
+                      />
+                      {/* Dark gradient overlay for badge readability */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent rounded-t-lg" />
+                      <div className="absolute top-2 right-2">
+                        <Badge className="bg-accent">{s.matchPercent}% Match</Badge>
+                      </div>
+                    </div>
+                    <CardHeader>
+                      <CardTitle className="text-base line-clamp-2">{s.name}</CardTitle>
+                      <CardDescription className="line-clamp-1">{s.provider}</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-muted-foreground">Due: {s.deadline}</span>
+                          <Button size="sm" variant="ghost">
+                            <Bookmark className="h-4 w-4" />
+                            <span className="ml-2">Save</span>
+                          </Button>
+                        </div>
+                        <Button className="w-full" size="sm">View Details</Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
             )}
           </>
@@ -216,3 +195,4 @@ export function Matches() {
     </div>
   );
 }
+
