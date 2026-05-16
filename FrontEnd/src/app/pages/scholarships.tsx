@@ -11,9 +11,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/toolti
 import { Separator } from "../components/ui/separator";
 import { Search, Calendar, MapPin, Award, Bookmark, ExternalLink, FileText, CheckCircle, ListChecks, GraduationCap } from "lucide-react";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
-import { fetchSavedScholarships, saveSavedScholarships, fetchScholarshipsWithEligibility, checkEligibility, applyForScholarship } from "../lib/api-client";
+import {
+  fetchSavedScholarships,
+  saveSavedScholarships,
+  fetchScholarshipsWithEligibility,
+  checkEligibility,
+  applyForScholarship,
+  resolveDisplayMatchScore,
+} from "../lib/api-client";
 import { getStoredUser } from "../lib/user-storage";
-import { calculateMatchScore } from "../lib/calculateMatchScore";
 import { toast } from "sonner";
 
 const SAVED_SCHOLARSHIPS_KEY_PREFIX = "scholarship-portal-saved-scholarships";
@@ -312,34 +318,12 @@ export function Scholarships() {
       
       const normalized = (result.data || []).map((item: any) => {
         const serverStatus = item.eligibilityStatus as string | undefined;
-        let matchScore = 0;
-        let matchQualified = serverStatus === "eligible" || serverStatus === "may-be-eligible";
-        
-        if (user) {
-          try {
-            const match = calculateMatchScore(user, item);
-            matchScore = match.score;
-            // Prefer server eligibility when available; fall back to client score
-            if (serverStatus === "eligible") {
-              matchScore = Math.max(matchScore, 95);
-              matchQualified = true;
-            } else if (serverStatus === "may-be-eligible") {
-              matchScore = Math.max(matchScore, 75);
-              matchQualified = true;
-            } else if (serverStatus === "not-eligible") {
-              matchQualified = false;
-            } else {
-              matchQualified = match.qualified;
-            }
-            console.log(`${item.name}: status=${serverStatus || "unknown"}, score=${matchScore}%`, matchQualified ? 'QUALIFIED' : 'NOT QUALIFIED');
-          } catch (err) {
-            console.error(`Error calculating match for ${item.name}:`, err);
-            matchScore = serverStatus === "eligible" ? 95 : serverStatus === "may-be-eligible" ? 75 : 0;
-            matchQualified = serverStatus === "eligible" || serverStatus === "may-be-eligible";
-          }
-        } else {
-          matchScore = serverStatus === "eligible" ? 95 : serverStatus === "may-be-eligible" ? 75 : 0;
-        }
+        const matchScore = resolveDisplayMatchScore(
+          typeof item.matchScore === "number" ? item.matchScore : Number(item.matchScore),
+          serverStatus,
+        );
+        const matchQualified =
+          serverStatus === "eligible" || serverStatus === "may-be-eligible";
         
         return {
           ...item,
@@ -436,8 +420,10 @@ export function Scholarships() {
           month: "long",
           day: "numeric",
         }),
-        matchScore: typeof item.matchScore === 'number' ? item.matchScore : 
-                    (item.eligibilityStatus === "eligible" ? 95 : item.eligibilityStatus === "may-be-eligible" ? 75 : 0),
+        matchScore: resolveDisplayMatchScore(
+          typeof item.matchScore === "number" ? item.matchScore : Number(item.matchScore),
+          item.eligibilityStatus,
+        ),
         image: item.imageUrl || `https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=800&q=80`,
         minimumGpa: item.minimumGPA ?? item.minimumGpa ?? item.minGWA ?? item.eligibilityCriteria?.minGPA ?? item.eligibilityCriteria?.minGwa ?? item.eligibilityCriteria?.minGWA,
         minimumGPA: item.minimumGPA ?? item.minimumGpa ?? item.minGWA ?? item.eligibilityCriteria?.minGPA ?? item.eligibilityCriteria?.minGwa ?? item.eligibilityCriteria?.minGWA,
@@ -1034,10 +1020,20 @@ export function Scholarships() {
                     <p className="text-sm text-muted-foreground mt-2">Application Deadline</p>
                   </div>
                   <div className="text-center">
-                    <Badge className="bg-accent text-lg px-4 py-1.5">
+                    <Badge
+                      className={`text-lg px-4 py-1.5 ${
+                        selectedScholarship.eligibilityStatus === "not-eligible"
+                          ? "bg-gray-500 hover:bg-gray-500"
+                          : "bg-accent"
+                      }`}
+                    >
                       {selectedScholarship.matchScore}% Match
                     </Badge>
-                    <p className="text-sm text-muted-foreground mt-2">Your Match Score</p>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      {selectedScholarship.eligibilityStatus === "not-eligible"
+                        ? "Profile fit (not eligible to apply)"
+                        : "Your Match Score"}
+                    </p>
                   </div>
                 </div>
 

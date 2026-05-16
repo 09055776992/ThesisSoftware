@@ -56,6 +56,19 @@ export function signIn(payload: Pick<AuthPayload, "email" | "password">) {
   });
 }
 
+/** Match % from API, capped when the student is not eligible (safety net for UI). */
+export function resolveDisplayMatchScore(
+  matchScore: number | undefined | null,
+  eligibilityStatus?: string,
+): number {
+  const raw = Number(matchScore);
+  const score = Number.isFinite(raw) ? Math.round(raw) : 0;
+  if (eligibilityStatus === "not-eligible") {
+    return Math.min(score, 79);
+  }
+  return Math.min(100, Math.max(0, score));
+}
+
 export function pickProfileImageUrl(user: Record<string, unknown> | null | undefined): string {
   const raw = String(user?.profilePicture || user?.profileImage || user?.avatar || "").trim();
   if (!raw || raw.startsWith("data:")) return "";
@@ -128,6 +141,9 @@ export function updateUserProfile(payload: {
   isIndigent?: boolean;
   isPWD?: boolean;
   isSoloParent?: boolean;
+  hasAcademicHonors?: boolean;
+  academic_rank?: number | string;
+  academicRank?: number | string;
 }) {
   return request<{ user: Record<string, unknown>; message: string }>("/api/users/profile", {
     method: "PUT",

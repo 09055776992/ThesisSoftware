@@ -4,9 +4,8 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { Bookmark, Award, Calendar, MapPin, ExternalLink } from "lucide-react";
-import { fetchScholarshipsWithEligibility } from "../lib/api-client";
+import { fetchScholarshipsWithEligibility, resolveDisplayMatchScore } from "../lib/api-client";
 import { getStoredUser } from "../lib/user-storage";
-import { calculateMatchScore } from "../lib/calculateMatchScore";
 
 // Scholarship cover images mapping (FIX 5)
 const scholarshipImages: Record<string, string> = {
@@ -49,17 +48,13 @@ export function Matches() {
 
         // Calculate match scores using unified function
         const withMatchScores = raw.map((item: any, idx: number) => {
-          let match = { score: 0, qualified: false, failedReasons: [] };
-          
-          if (user) {
-            try {
-              match = calculateMatchScore(user, item);
-              console.log(`${item.name}: ${match.score}%,`, match.qualified ? 'QUALIFIED' : 'NOT QUALIFIED', match.failedReasons);
-            } catch (err) {
-              console.error(`Error calculating match for ${item.name}:`, err);
-              match = { score: 0, qualified: false, failedReasons: ['Error calculating match'] };
-            }
-          }
+          const status = String(item.eligibilityStatus || "");
+          const score = resolveDisplayMatchScore(
+            typeof item.matchScore === "number" ? item.matchScore : Number(item.matchScore),
+            status,
+          );
+          const qualified = status === "eligible" || status === "may-be-eligible";
+          const failedReasons = item.eligibility?.unmetCriteria || [];
           
           return {
             id: Number(item.id) || Number(item._id) || idx + 1,
@@ -73,9 +68,10 @@ export function Matches() {
               day: "numeric",
             }) : "December 31, 2030",
             type: String(item.type || "Merit-Based"),
-            matchPercent: match.score,
-            qualified: match.qualified,
-            failedReasons: match.failedReasons,
+            matchPercent: score,
+            qualified,
+            failedReasons,
+            eligibilityStatus: status,
             location: String(item.location || ""),
             fieldOfStudy: String(item.fieldOfStudy || ""),
             minimumGpa: item.minimumGpa !== undefined ? Number(item.minimumGpa) : undefined,
@@ -84,7 +80,6 @@ export function Matches() {
             eligibility: String(item.eligibility || ""),
             requirements: Array.isArray(item.requirements) ? item.requirements.map((v: any) => String(v)) : [],
             description: String(item.description || ""),
-            eligibilityStatus: item.eligibilityStatus || "unknown",
           };
         });
 

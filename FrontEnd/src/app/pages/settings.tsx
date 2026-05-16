@@ -265,6 +265,12 @@ export function Settings() {
   const [isIndigent, setIsIndigent] = useState(user?.isIndigent ?? false);
   const [isPWD, setIsPWD] = useState(user?.isPWD ?? false);
   const [isSoloParent, setIsSoloParent] = useState(user?.isSoloParent ?? false);
+  const [hasAcademicHonors, setHasAcademicHonors] = useState(
+    user?.hasAcademicHonors === true || user?.academic_honors === true,
+  );
+  const [academicRank, setAcademicRank] = useState(
+    user?.academic_rank ? String(user.academic_rank) : "",
+  );
   
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(
     user?.notificationSettings ?? notificationDefaults,
@@ -423,6 +429,8 @@ export function Settings() {
       isIndigent,
       isPWD,
       isSoloParent,
+      hasAcademicHonors,
+      academic_rank: academicRank ? Number(academicRank) : "",
     });
     
     // Sync to backend API
@@ -450,6 +458,8 @@ export function Settings() {
         isPWD,
         isSoloParent,
         currency: "PHP",
+        hasAcademicHonors,
+        academic_rank: academicRank ? Number(academicRank) : "",
       });
       toast.success("Academic & financial details saved.");
     } catch (error) {
@@ -775,6 +785,58 @@ export function Settings() {
                       <p className="text-xs text-gray-600 mt-1.5">
                         Schools in Quezon City are auto-verified for QC scholarships
                       </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-200 pt-6 mt-6">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-4">Academic honors</h3>
+                  <p className="text-xs text-gray-500 mb-4">
+                    Required for merit scholarships such as College Academic (Rank 1–10 or honors graduate).
+                  </p>
+                  <div className="grid gap-4 md:grid-cols-2 mb-6">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="hasAcademicHonors"
+                        checked={hasAcademicHonors}
+                        onChange={(e) => {
+                          setHasAcademicHonors(e.target.checked);
+                          if (!e.target.checked) setAcademicRank("");
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                      />
+                      <Label htmlFor="hasAcademicHonors" className="text-sm font-normal cursor-pointer">
+                        Graduated with academic honors
+                      </Label>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="academicRank" className="block text-sm font-medium text-gray-700">
+                        Class rank (optional)
+                      </Label>
+                      <Select
+                        value={academicRank || "none"}
+                        onValueChange={(v) => {
+                          if (v === "none") {
+                            setAcademicRank("");
+                          } else {
+                            setAcademicRank(v);
+                            setHasAcademicHonors(true);
+                          }
+                        }}
+                      >
+                        <SelectTrigger id="academicRank">
+                          <SelectValue placeholder="Select rank" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Not applicable</SelectItem>
+                          {Array.from({ length: 10 }, (_, i) => (
+                            <SelectItem key={i + 1} value={String(i + 1)}>
+                              Rank {i + 1}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                 </div>

@@ -1012,6 +1012,23 @@ function calculateMatchScore(student, scholarship, eligibility) {
       matched: incomeMatches 
     });
   }
+
+  // 6. Academic honors (same rule as checkEligibility — College Academic, SHS Academic, etc.)
+  if (criteria.requiresAcademicHonors) {
+    maxPoints += 20;
+    const hasHonors =
+      student.academic_honors === true ||
+      student.hasAcademicHonors === true ||
+      (Number(student.academic_rank) >= 1 && Number(student.academic_rank) <= 10);
+    if (hasHonors) {
+      points += 20;
+    }
+    breakdown.criteriaDetails.push({
+      name: "Academic Honors (Rank 1–10)",
+      weight: 20,
+      matched: hasHonors,
+    });
+  }
   
   // Calculate final percentage
   let finalScore;
@@ -1030,6 +1047,19 @@ function calculateMatchScore(student, scholarship, eligibility) {
   // Override: If QC residency is required and not met, score should be 0%
   if (criteria.qcResident && !breakdown.locationMatch) {
     finalScore = 0;
+  }
+
+  // Align displayed match % with eligibility outcome (never 100% when not eligible)
+  if (eligibility) {
+    if (eligibility.isEligible && !eligibility.mayBeEligible) {
+      finalScore = Math.max(finalScore, 90);
+    } else if (eligibility.mayBeEligible) {
+      finalScore = Math.min(finalScore, 85);
+    } else {
+      const unmetCount = (eligibility.unmetCriteria || []).length;
+      const cap = unmetCount > 0 ? Math.max(0, 100 - unmetCount * 25) : 50;
+      finalScore = Math.min(finalScore, cap);
+    }
   }
   
   // Log detailed breakdown

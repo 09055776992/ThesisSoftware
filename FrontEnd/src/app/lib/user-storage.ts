@@ -31,6 +31,9 @@ export type UserProfile = {
   isIndigent?: boolean;
   isPWD?: boolean;
   isSoloParent?: boolean;
+  hasAcademicHonors?: boolean;
+  academic_honors?: boolean;
+  academic_rank?: number;
   
   profileImage?: string;
   profilePicture?: string;

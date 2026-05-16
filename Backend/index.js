@@ -1233,6 +1233,9 @@ const handleUserProfileUpdate = async (req, res) => {
       skills,
       profileImage,
       profilePicture,
+      hasAcademicHonors,
+      academic_rank,
+      academicRank,
     } = req.body;
 
     console.log("[Profile Update] Request body:", req.body);
@@ -1334,6 +1337,25 @@ const handleUserProfileUpdate = async (req, res) => {
     updatedUser.isPWD = updatedSpecialCategories.isPWD;
     updatedUser.isSoloParent = updatedSpecialCategories.isSoloParent;
 
+    const honorsFlag = hasAcademicHonors;
+    const rankRaw = academic_rank ?? academicRank;
+    if (honorsFlag !== undefined) {
+      const honors =
+        honorsFlag === true || honorsFlag === "true" || honorsFlag === 1 || honorsFlag === "1";
+      updatedUser.hasAcademicHonors = honors;
+      updatedUser.academic_honors = honors;
+    }
+    if (rankRaw !== undefined && rankRaw !== null && String(rankRaw).trim() !== "") {
+      const rank = Number.parseInt(String(rankRaw), 10);
+      if (Number.isFinite(rank) && rank >= 1 && rank <= 10) {
+        updatedUser.academic_rank = rank;
+        updatedUser.hasAcademicHonors = true;
+        updatedUser.academic_honors = true;
+      }
+    } else if (rankRaw === "" || rankRaw === null) {
+      delete updatedUser.academic_rank;
+    }
+
     console.log("[Profile Update] Updating fields:", Object.keys(updatedUser).filter(k => k !== '_id' && k !== 'password'));
 
     // Use replaceOne since updateOne is not available in the wrapper
@@ -1380,6 +1402,8 @@ const handleUserProfileUpdate = async (req, res) => {
         specialCategories: updatedUser.specialCategories,
         profileImage: updatedUser.profileImage || updatedUser.profilePicture || "",
         profilePicture: updatedUser.profilePicture || updatedUser.profileImage || "",
+        hasAcademicHonors: updatedUser.hasAcademicHonors === true || updatedUser.academic_honors === true,
+        academic_rank: updatedUser.academic_rank ?? null,
       },
     });
   } catch (error) {
@@ -1439,6 +1463,9 @@ app.get("/api/users/profile", async (req, res) => {
         about: safeUser.about || "",
         headline: safeUser.headline || "",
         skills: safeUser.skills || [],
+        hasAcademicHonors:
+          safeUser.hasAcademicHonors === true || safeUser.academic_honors === true,
+        academic_rank: safeUser.academic_rank ?? null,
       },
     });
   } catch (error) {
@@ -2411,10 +2438,13 @@ app.post("/api/users/profile", handleUserProfileUpdate);
           }
         }
 
-        // Check eligibility
+        // Check eligibility + match score (single source of truth on server)
         const eligibility = eligibilityMatching.checkEligibility(student, scholarship);
-        // NOTE: Match score is now calculated on the frontend using unified calculateMatchScore function
-        // This ensures consistency across all pages
+        const matchScore = eligibilityMatching.calculateMatchScore(
+          student,
+          scholarship,
+          eligibility,
+        );
 
         const deadlineAllowsApply =
           deadlineStatus === "open" || deadlineStatus === "closing-soon";
@@ -2426,7 +2456,7 @@ app.post("/api/users/profile", handleUserProfileUpdate);
           eligibility,
           deadlineStatus,
           canApply: eligibleToApply && deadlineAllowsApply,
-          // matchScore is NOT returned - calculated on frontend
+          matchScore,
         };
       });
 
