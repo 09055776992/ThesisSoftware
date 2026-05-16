@@ -1,10 +1,10 @@
-import { useEffect } from 'react';
+import React, { Fragment, useEffect, type ReactNode } from 'react';
 import { RouterProvider } from 'react-router';
 import { router } from './routes';
 import { Toaster } from './components/ui/sonner';
 import { getStoredUser } from './lib/user-storage';
 
-function ThemeProvider({ children }: { children: React.ReactNode }) {
+function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const user = getStoredUser();
     const theme = user?.preferences?.theme || 'Light';
@@ -25,7 +25,7 @@ function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  return <>{children}</>;
+  return <Fragment>{children}</Fragment>;
 }
 
 function App() {

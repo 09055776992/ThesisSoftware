@@ -5,7 +5,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { GraduationCap } from "lucide-react";
 import { buildNameFromEmail, clearStoredUser, getStoredUser, saveAuthToken, saveStoredUser } from "../lib/user-storage";
-import { signIn } from "../lib/api-client";
+import { fetchUserProfile, signIn } from "../lib/api-client";
 
 export function SignIn() {
   const navigate = useNavigate();
@@ -44,14 +44,29 @@ export function SignIn() {
 
       clearStoredUser();
       saveAuthToken((result as { token?: string }).token ?? null);
+
+      let profileFromServer: Record<string, unknown> = {};
+      try {
+        const profileResult = await fetchUserProfile(normalizedEmail);
+        profileFromServer = profileResult.user ?? {};
+      } catch {
+        // Fall back to local profile if server fetch fails
+      }
+
       saveStoredUser({
+        ...existingUser,
+        ...profileFromServer,
         email: user.email || normalizedEmail,
         fullName:
           user.fullName?.trim() ||
+          String(profileFromServer.fullName || "").trim() ||
           existingUser?.fullName?.trim() ||
           buildNameFromEmail(normalizedEmail),
-        phone: user.phone,
-        userType: user.userType || existingUser?.userType || "student",
+        phone: user.phone || String(profileFromServer.phone || ""),
+        userType: user.userType || String(profileFromServer.userType || "") || existingUser?.userType || "student",
+        financialNeed: Array.isArray(profileFromServer.financialNeed)
+          ? (profileFromServer.financialNeed as number[])
+          : existingUser?.financialNeed,
       });
 
       if ((user.userType || "").toLowerCase() === "admin") {

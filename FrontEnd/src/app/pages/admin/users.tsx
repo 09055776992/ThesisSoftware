@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 import { Search, MoreVertical, Eye, Edit, UserX, Download, Loader2 } from "lucide-react";
+import { resolvePublicAssetUrl } from "../../lib/api-client";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu";
 
 interface User {
@@ -20,6 +21,13 @@ interface User {
   status: string;
   joinedDate: string;
   profileCompleteness: number;
+}
+
+function initialsFromName(name: string) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
 }
 
 export function AdminUsers() {
@@ -153,8 +161,8 @@ export function AdminUsers() {
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <Avatar>
-                          <AvatarImage src={user.avatar} />
-                          <AvatarFallback>{user.name[0]}</AvatarFallback>
+                          <AvatarImage src={resolvePublicAssetUrl(user.avatar)} />
+                          <AvatarFallback>{initialsFromName(user.name)}</AvatarFallback>
                         </Avatar>
                         <div>
                           <p className="font-semibold">{user.name}</p>
@@ -223,8 +231,8 @@ export function AdminUsers() {
               <DialogHeader>
                 <div className="flex items-center gap-4 mb-4">
                   <Avatar className="h-20 w-20">
-                    <AvatarImage src={selectedUser.avatar} />
-                    <AvatarFallback>{selectedUser.name[0]}</AvatarFallback>
+                    <AvatarImage src={resolvePublicAssetUrl(selectedUser.avatar)} />
+                    <AvatarFallback>{initialsFromName(selectedUser.name)}</AvatarFallback>
                   </Avatar>
                   <div>
                     <DialogTitle className="text-2xl">{selectedUser.name}</DialogTitle>

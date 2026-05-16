@@ -156,18 +156,28 @@ export const calculateMatchScore = (student, scholarship) => {
   // Economic Scholarship
   if (scholarshipName.includes('economic')) {
     totalCriteria++;
-    const incomeCategory = student?.incomeCategory || '';
-    const hasLowIncome = incomeCategory.includes('₱10,000') || incomeCategory.includes('10,000') || incomeCategory.includes('Under ₱25,000');
+    const incomeCategory = String(student?.incomeCategory || '').toLowerCase();
+    const hasLowIncome =
+      incomeCategory.includes('₱10,000') ||
+      incomeCategory.includes('10,000') ||
+      incomeCategory.includes('under ₱25,000') ||
+      incomeCategory.includes('under-25000') ||
+      incomeCategory.includes('under_25000');
+    const financialNeedValue = Array.isArray(student?.financialNeed)
+      ? student.financialNeed[0]
+      : student?.financialNeed;
     const qualifies = 
       hasLowIncome ||
       specialCategories?.isFromIndigenousFamily ||
+      specialCategories?.isIndigent ||
       specialCategories?.isPersonWithDisability ||
       specialCategories?.isPWD ||
       specialCategories?.isSoloParent ||
       student?.isFromIndigenousFamily ||
+      student?.isIndigent === true ||
       student?.isPWD ||
       student?.isSoloParent ||
-      parseInt(student?.financialNeed) >= 4;
+      parseInt(financialNeedValue, 10) >= 4;
     if (qualifies) {
       metCriteria++;
     } else {

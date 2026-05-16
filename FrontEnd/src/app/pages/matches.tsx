@@ -110,10 +110,20 @@ export function Matches() {
       if (!user.incomeCategory && !(user.financialNeed && user.financialNeed.length)) missing.push("Financial need / Income");
     }
 
-    // Filter to ONLY show scholarships where user is fully qualified
-    // Sort by match score (highest first)
-    const qualified = scholarships.filter((s) => s.qualified === true);
-    qualified.sort((a, b) => (b.matchPercent || 0) - (a.matchPercent || 0));
+    // Prefer server eligibility; fall back to client match score
+    const qualified = scholarships.filter(
+      (s) =>
+        s.eligibilityStatus === "eligible" ||
+        s.eligibilityStatus === "may-be-eligible" ||
+        s.qualified === true,
+    );
+    qualified.sort((a, b) => {
+      const statusOrder: Record<string, number> = { eligible: 0, "may-be-eligible": 1, unknown: 2, "not-eligible": 3 };
+      const aOrder = statusOrder[a.eligibilityStatus || "unknown"] ?? 2;
+      const bOrder = statusOrder[b.eligibilityStatus || "unknown"] ?? 2;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return (b.matchPercent || 0) - (a.matchPercent || 0);
+    });
 
     return { matches: qualified, lowMatches: [], userMissingFields: missing, userHasProfileFields };
   }, [scholarships]);

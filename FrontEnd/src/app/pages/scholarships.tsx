@@ -7,6 +7,7 @@ import { Badge } from "../components/ui/badge";
 import { Slider } from "../components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 import { Separator } from "../components/ui/separator";
 import { Search, Calendar, MapPin, Award, Bookmark, ExternalLink, FileText, CheckCircle, ListChecks, GraduationCap } from "lucide-react";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
@@ -101,6 +102,7 @@ interface EligibilityInfo {
 
 interface Scholarship {
   _id: string;
+  scholarshipName?: string;
   name: string;
   provider: string;
   amount: number;
@@ -120,12 +122,55 @@ interface Scholarship {
   specificCriteria?: string[];
   requiredDocuments?: string[];
   generalDocuments?: string[];
-  eligibilityCriteria?: { minGPA?: number; minGwa?: number; educationLevel?: string[]; qcResident?: boolean };
+  eligibilityCriteria?: {
+    minGPA?: number;
+    minGwa?: number;
+    minGWA?: number;
+    educationLevel?: string[];
+    qcResident?: boolean;
+  };
   eligibilityStatus?: "eligible" | "may-be-eligible" | "not-eligible" | "unknown";
   eligibility?: EligibilityInfo;
   deadlineStatus?: "open" | "closing-soon" | "closed" | "not-yet-open";
   canApply?: boolean;
   daysUntilDeadline?: number;
+}
+
+/** Server sends canApply; keep aligned with deadline + status when merging list vs filters. */
+function mergeCanApplyFlags(item: {
+  canApply?: boolean;
+  eligibilityStatus?: string;
+  deadlineStatus?: string;
+}): boolean {
+  const deadlineOk =
+    item.deadlineStatus !== "closed" && item.deadlineStatus !== "not-yet-open";
+  const statusOk =
+    item.eligibilityStatus === "eligible" || item.eligibilityStatus === "may-be-eligible";
+  if (typeof item.canApply === "boolean") {
+    return item.canApply && deadlineOk && statusOk;
+  }
+  return Boolean(statusOk && deadlineOk);
+}
+
+function deriveStudentApplyAllowed(s: Scholarship | null | undefined): boolean {
+  return mergeCanApplyFlags({
+    canApply: s?.canApply,
+    eligibilityStatus: s?.eligibilityStatus,
+    deadlineStatus: s?.deadlineStatus,
+  });
+}
+
+function eligibilityCriteriaToLines(criteria: Scholarship["eligibilityCriteria"]): string[] {
+  if (!criteria || typeof criteria !== "object") return [];
+  const lines: string[] = [];
+  if (criteria.minGPA != null) lines.push(`Minimum GPA: ${criteria.minGPA}`);
+  if (criteria.minGwa != null) lines.push(`Minimum GWA: ${criteria.minGwa}`);
+  if (criteria.minGWA != null) lines.push(`Minimum GWA: ${criteria.minGWA}`);
+  if (Array.isArray(criteria.educationLevel) && criteria.educationLevel.length > 0) {
+    lines.push(`Education level: ${criteria.educationLevel.join(", ")}`);
+  }
+  if (criteria.qcResident === true) lines.push("Must be a Quezon City resident");
+  return lines;
 }
 
 function savedScholarshipsKey(email?: string): string {
@@ -218,6 +263,33 @@ export function Scholarships() {
 
   useEffect(() => {
     const user = getStoredUser();
+    const id = selectedScholarship?._id;
+    if (!user?.email || !id) return;
+    let cancelled = false;
+    checkEligibility(String(id), user.email)
+      .then((res) => {
+        if (cancelled) return;
+        setSelectedScholarship((prev) =>
+          prev && String(prev._id) === String(id)
+            ? {
+                ...prev,
+                canApply: mergeCanApplyFlags({
+                  canApply: res.canApply,
+                  eligibilityStatus: prev.eligibilityStatus,
+                  deadlineStatus: prev.deadlineStatus,
+                }),
+              }
+            : prev,
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedScholarship?._id]);
+
+  useEffect(() => {
+    const user = getStoredUser();
     loadSavedScholarshipsFromStorage(user?.email);
     loadScholarships();
   }, []);
@@ -241,38 +313,51 @@ export function Scholarships() {
 
   const loadScholarships = async () => {
     try {
-      // Always use the public scholarships endpoint - show all active scholarships
-      // regardless of profile completion status
-      const result = await fetch("/api/scholarships").then(r => r.json());
-      console.log('Scholarships fetched:', result.data?.length || 0);
-      
       const user = getStoredUser();
       console.log('Current user:', user);
+
+      // Use server-side eligibility when logged in (authoritative for QC scholarships)
+      const result = user?.email
+        ? await fetchScholarshipsWithEligibility(user.email)
+        : await fetch("/api/scholarships?status=Active").then((r) => r.json());
+      console.log('Scholarships fetched:', result.data?.length || 0);
       
       const normalized = (result.data || []).map((item: any) => {
-        // Calculate match score using unified function
+        const serverStatus = item.eligibilityStatus as string | undefined;
         let matchScore = 0;
-        let matchQualified = false;
+        let matchQualified = serverStatus === "eligible" || serverStatus === "may-be-eligible";
         
         if (user) {
           try {
             const match = calculateMatchScore(user, item);
             matchScore = match.score;
-            matchQualified = match.qualified;
-            console.log(`${item.name}: ${match.score}%`, match.qualified ? 'QUALIFIED' : 'NOT QUALIFIED');
+            // Prefer server eligibility when available; fall back to client score
+            if (serverStatus === "eligible") {
+              matchScore = Math.max(matchScore, 95);
+              matchQualified = true;
+            } else if (serverStatus === "may-be-eligible") {
+              matchScore = Math.max(matchScore, 75);
+              matchQualified = true;
+            } else if (serverStatus === "not-eligible") {
+              matchQualified = false;
+            } else {
+              matchQualified = match.qualified;
+            }
+            console.log(`${item.name}: status=${serverStatus || "unknown"}, score=${matchScore}%`, matchQualified ? 'QUALIFIED' : 'NOT QUALIFIED');
           } catch (err) {
             console.error(`Error calculating match for ${item.name}:`, err);
-            matchScore = 0;
-            matchQualified = false;
+            matchScore = serverStatus === "eligible" ? 95 : serverStatus === "may-be-eligible" ? 75 : 0;
+            matchQualified = serverStatus === "eligible" || serverStatus === "may-be-eligible";
           }
         } else {
-          // If no user profile, use basic eligibility status
-          matchScore = item.eligibilityStatus === "eligible" ? 95 : item.eligibilityStatus === "may-be-eligible" ? 75 : 0;
+          matchScore = serverStatus === "eligible" ? 95 : serverStatus === "may-be-eligible" ? 75 : 0;
         }
         
         return {
           ...item,
           id: item._id,
+          name: item.name || item.scholarshipName || "Scholarship",
+          scholarshipName: item.scholarshipName || item.name,
           amount: Number(item.amount || 0),
           deadline: new Date(item.deadline).toLocaleDateString("en-US", {
             year: "numeric",
@@ -282,11 +367,17 @@ export function Scholarships() {
           matchScore,
           matchQualified,
           image: item.imageUrl || `https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=800&q=80`,
-          minimumGpa: item.eligibilityCriteria?.minGPA ?? item.eligibilityCriteria?.minGpa,
-          eligibilityStatus: item.eligibilityStatus || "unknown",
+          minimumGpa: item.minimumGPA ?? item.minimumGpa ?? item.minGWA ?? item.eligibilityCriteria?.minGPA ?? item.eligibilityCriteria?.minGwa ?? item.eligibilityCriteria?.minGWA,
+          minimumGPA: item.minimumGPA ?? item.minimumGpa ?? item.minGWA ?? item.eligibilityCriteria?.minGPA ?? item.eligibilityCriteria?.minGwa ?? item.eligibilityCriteria?.minGWA,
+          requiredEducationLevel: item.requiredEducationLevel ?? (item.educationLevel ? (Array.isArray(item.educationLevel) ? item.educationLevel : [item.educationLevel]) : []),
+          eligibilityStatus: serverStatus || "unknown",
           eligibility: item.eligibility,
           deadlineStatus: item.deadlineStatus,
-          canApply: item.canApply,
+          canApply: mergeCanApplyFlags({
+            canApply: item.canApply,
+            eligibilityStatus: serverStatus || "unknown",
+            deadlineStatus: item.deadlineStatus,
+          }),
           daysUntilDeadline: item.daysUntilDeadline,
         };
       });
@@ -349,6 +440,8 @@ export function Scholarships() {
       const normalized = (result.data || []).map((item: any) => ({
         ...item,
         id: item._id,
+        name: item.name || item.scholarshipName || "Scholarship",
+        scholarshipName: item.scholarshipName || item.name,
         amount: Number(item.amount || 0),
         deadline: new Date(item.deadline).toLocaleDateString("en-US", {
           year: "numeric",
@@ -358,11 +451,17 @@ export function Scholarships() {
         matchScore: typeof item.matchScore === 'number' ? item.matchScore : 
                     (item.eligibilityStatus === "eligible" ? 95 : item.eligibilityStatus === "may-be-eligible" ? 75 : 0),
         image: item.imageUrl || `https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=800&q=80`,
-        minimumGpa: item.eligibilityCriteria?.minGPA ?? item.eligibilityCriteria?.minGwa,
+        minimumGpa: item.minimumGPA ?? item.minimumGpa ?? item.minGWA ?? item.eligibilityCriteria?.minGPA ?? item.eligibilityCriteria?.minGwa ?? item.eligibilityCriteria?.minGWA,
+        minimumGPA: item.minimumGPA ?? item.minimumGpa ?? item.minGWA ?? item.eligibilityCriteria?.minGPA ?? item.eligibilityCriteria?.minGwa ?? item.eligibilityCriteria?.minGWA,
+        requiredEducationLevel: item.requiredEducationLevel ?? (item.educationLevel ? (Array.isArray(item.educationLevel) ? item.educationLevel : [item.educationLevel]) : []),
         eligibilityStatus: item.eligibilityStatus || "unknown",
         eligibility: item.eligibility,
         deadlineStatus: item.deadlineStatus,
-        canApply: item.canApply,
+        canApply: mergeCanApplyFlags({
+          canApply: item.canApply,
+          eligibilityStatus: item.eligibilityStatus || "unknown",
+          deadlineStatus: item.deadlineStatus,
+        }),
         daysUntilDeadline: item.daysUntilDeadline,
       }));
       
@@ -835,7 +934,9 @@ export function Scholarships() {
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent rounded-xl" />
                 </div>
-                <DialogTitle className="text-2xl leading-snug">{selectedScholarship.name}</DialogTitle>
+                <DialogTitle className="text-2xl leading-snug">
+                  {selectedScholarship.scholarshipName || selectedScholarship.name}
+                </DialogTitle>
                 <DialogDescription className="text-base">{selectedScholarship.provider}</DialogDescription>
               </DialogHeader>
 
@@ -965,18 +1066,32 @@ export function Scholarships() {
                   <div>
                     <h3 className="font-semibold text-lg mb-4">Type</h3>
                     <div className="flex flex-wrap gap-2">
-                      {selectedScholarship.type?.split(" / ").map((typePart, idx) => (
-                        <Badge key={idx} variant="outline" className="text-base px-3 py-1.5">{typePart.trim()}</Badge>
-                      ))}
+                      {(selectedScholarship.type || "General")
+                        .split(" / ")
+                        .map((typePart, idx) => (
+                          <Badge key={idx} variant="outline" className="text-base px-3 py-1.5">
+                            {typePart.trim()}
+                          </Badge>
+                        ))}
                     </div>
                   </div>
 
-                  {selectedScholarship.fieldOfStudy && (
-                    <div>
-                      <h3 className="font-semibold text-lg mb-4">Field of Study</h3>
-                      <p className="text-muted-foreground leading-[1.7]">{selectedScholarship.fieldOfStudy}</p>
-                    </div>
-                  )}
+                  <div>
+                    <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                      <MapPin className="h-5 w-5 text-primary" />
+                      Location
+                    </h3>
+                    <p className="text-muted-foreground leading-[1.7]">
+                      {selectedScholarship.location?.trim() || "Quezon City"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="font-semibold text-lg mb-4">Field of Study</h3>
+                    <p className="text-muted-foreground leading-[1.7]">
+                      {selectedScholarship.fieldOfStudy?.trim() ? selectedScholarship.fieldOfStudy : "All Fields"}
+                    </p>
+                  </div>
                 </div>
 
                 <hr className="border-gray-300 my-8" />
@@ -1006,6 +1121,25 @@ export function Scholarships() {
                         </ul>
                       </div>
                     )}
+
+                    {eligibilityCriteriaToLines(selectedScholarship.eligibilityCriteria).length > 0 &&
+                      (!selectedScholarship.specificCriteria ||
+                        selectedScholarship.specificCriteria.length === 0) && (
+                        <div className="mb-6">
+                          <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            Eligibility Criteria
+                          </h4>
+                          <ul className="space-y-3">
+                            {eligibilityCriteriaToLines(selectedScholarship.eligibilityCriteria).map((line, idx) => (
+                              <li key={idx} className="text-sm text-gray-600 flex items-start gap-3 leading-relaxed">
+                                <span className="text-green-600 mt-1">•</span>
+                                <span>{line}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
 
                     {/* Education Level */}
                     {selectedScholarship.requiredEducationLevel && selectedScholarship.requiredEducationLevel.length > 0 && (
@@ -1077,7 +1211,7 @@ export function Scholarships() {
 
                 <Separator className="my-8" />
 
-                {/* Action Buttons - FIX 2: Correct eligibility-based button logic */}
+                {/* Action Buttons */}
                 <div className="flex flex-col sm:flex-row gap-4 pt-2">
                   {selectedScholarship.deadlineStatus === "closed" ? (
                     <Button className="flex-1 h-12 text-base" disabled>
@@ -1087,18 +1221,42 @@ export function Scholarships() {
                     <Button className="flex-1 h-12 text-base" disabled>
                       Opens Soon
                     </Button>
-                  ) : selectedScholarship.eligibilityStatus === "eligible" || selectedScholarship.eligibilityStatus === "may-be-eligible" ? (
-                    <Button 
-                      className="flex-1 h-12 text-base bg-blue-600 hover:bg-blue-700"
-                      onClick={openApplicationModal}
-                    >
-                      <FileText className="h-5 w-5 mr-2" />
-                      Submit Requirements
-                    </Button>
+                  ) : selectedScholarship.eligibilityStatus === "eligible" ||
+                    selectedScholarship.eligibilityStatus === "may-be-eligible" ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={`inline-flex flex-1 ${!deriveStudentApplyAllowed(selectedScholarship) ? "cursor-not-allowed" : ""}`}
+                        >
+                          <Button
+                            className={`flex-1 h-12 text-base bg-blue-600 hover:bg-blue-700 ${!deriveStudentApplyAllowed(selectedScholarship) ? "opacity-50 cursor-not-allowed" : ""}`}
+                            disabled={!deriveStudentApplyAllowed(selectedScholarship)}
+                            onClick={openApplicationModal}
+                          >
+                            <FileText className="h-5 w-5 mr-2" />
+                            Submit Requirements
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {!deriveStudentApplyAllowed(selectedScholarship) && (
+                        <TooltipContent side="top" className="max-w-xs text-left">
+                          You cannot submit yet. Confirm eligibility and that applications are open (deadline not passed).
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
                   ) : (
-                    <Button className="flex-1 h-12 text-base bg-gray-400" disabled>
-                      Not Eligible
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex flex-1 cursor-not-allowed">
+                          <Button className="flex-1 h-12 text-base bg-gray-400 opacity-50 cursor-not-allowed" disabled>
+                            Not Eligible
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs text-left">
+                        Your profile does not meet this scholarship&apos;s eligibility requirements.
+                      </TooltipContent>
+                    </Tooltip>
                   )}
                   <Button
                     variant="outline"
@@ -1288,8 +1446,8 @@ export function Scholarships() {
                     </div>
                   </div>
 
-                  <div className="flex justify-end items-center gap-4">
-                    {!selectedScholarship.canApply && (
+                  <div className="flex justify-end items-center gap-4 flex-wrap">
+                    {!deriveStudentApplyAllowed(selectedScholarship) && (
                       <div className="text-right">
                         {selectedScholarship.eligibility?.mayBeEligible ? (
                           <div className="text-sm text-amber-600">
@@ -1308,14 +1466,27 @@ export function Scholarships() {
                         )}
                       </div>
                     )}
-                    <Button 
-                      onClick={() => setApplicationStep(2)}
-                      className="bg-green-600 hover:bg-green-700"
-                      disabled={!selectedScholarship.canApply}
-                    >
-                      Proceed to Documents
-                      <ExternalLink className="h-4 w-4 ml-2" />
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={`inline-flex ${!deriveStudentApplyAllowed(selectedScholarship) ? "cursor-not-allowed" : ""}`}
+                        >
+                          <Button
+                            onClick={() => setApplicationStep(2)}
+                            className={`bg-green-600 hover:bg-green-700 ${!deriveStudentApplyAllowed(selectedScholarship) ? "opacity-50 cursor-not-allowed" : ""}`}
+                            disabled={!deriveStudentApplyAllowed(selectedScholarship)}
+                          >
+                            Proceed to Documents
+                            <ExternalLink className="h-4 w-4 ml-2" />
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {!deriveStudentApplyAllowed(selectedScholarship) && (
+                        <TooltipContent side="top" className="max-w-xs text-left">
+                          Complete eligibility requirements and ensure applications are open before continuing.
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
                   </div>
                 </div>
               )}
@@ -1539,27 +1710,65 @@ export function Scholarships() {
                     </div>
                   </div>
 
-                  <div className="flex justify-between">
+                  <div className="flex justify-between items-center gap-4 flex-wrap">
                     <Button variant="outline" onClick={() => setApplicationStep(2)}>
                       Back
                     </Button>
-                    <Button 
-                      onClick={handleSubmitApplication}
-                      disabled={!declarationChecked || isSubmitting}
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
-                      {isSubmitting ? (
-                        <>
-                          <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                          Submitting...
-                        </>
-                      ) : (
-                        <>
-                          Submit Application
-                          <ExternalLink className="h-4 w-4 ml-2" />
-                        </>
-                      )}
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={`inline-flex ${
+                            declarationChecked &&
+                            !isSubmitting &&
+                            !deriveStudentApplyAllowed(selectedScholarship)
+                              ? "cursor-not-allowed"
+                              : ""
+                          }`}
+                        >
+                          <Button
+                            onClick={handleSubmitApplication}
+                            disabled={
+                              !declarationChecked ||
+                              isSubmitting ||
+                              !deriveStudentApplyAllowed(selectedScholarship)
+                            }
+                            className={`bg-blue-600 hover:bg-blue-700 ${
+                              !declarationChecked ||
+                              isSubmitting ||
+                              !deriveStudentApplyAllowed(selectedScholarship)
+                                ? "opacity-50 cursor-not-allowed"
+                                : ""
+                            }`}
+                          >
+                            {isSubmitting ? (
+                              <>
+                                <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                                Submitting...
+                              </>
+                            ) : (
+                              <>
+                                Submit Application
+                                <ExternalLink className="h-4 w-4 ml-2" />
+                              </>
+                            )}
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {(() => {
+                        const blocked =
+                          !declarationChecked ||
+                          isSubmitting ||
+                          !deriveStudentApplyAllowed(selectedScholarship);
+                        if (!blocked || isSubmitting) return null;
+                        return (
+                          <TooltipContent side="top" className="max-w-xs text-left">
+                            {!declarationChecked
+                              ? "Confirm the declaration checkbox to submit."
+                              : "You are not eligible or applications are closed for this scholarship."}
+                          </TooltipContent>
+                        );
+                      })()}
+                    </Tooltip>
                   </div>
                 </div>
               )}

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Checkbox } from "../components/ui/checkbox";
@@ -23,7 +23,7 @@ import {
 } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { getStoredUser, saveStoredUser, getInitials } from "../lib/user-storage";
-import { updateUserProfile } from "../lib/api-client";
+import { updateUserProfile, API_BASE_URL } from "../lib/api-client";
 
 type VisibilityOption = "public" | "providers-only" | "private";
 
@@ -293,11 +293,15 @@ export function Settings() {
   };
 
   const [profileSaved, setProfileSaved] = useState(false);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [academicSaving, setAcademicSaving] = useState(false);
 
   const handleProfileImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setAvatarFile(file);
     const reader = new FileReader();
     reader.onloadend = () => {
       setProfileImage(String(reader.result ?? ""));
@@ -307,44 +311,74 @@ export function Settings() {
 
   const handleProfileSave = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    
-    // Save to localStorage first
+    setProfileSaving(true);
+
+    let newProfileImage = profileImage;
+
+    // Upload avatar to server if a new file was selected
+    if (avatarFile) {
+      try {
+        const formData = new FormData();
+        formData.append("avatar", avatarFile);
+        formData.append("email", email.trim().toLowerCase());
+        const res = await fetch(`${API_BASE_URL}/api/user/upload-avatar`, { method: "POST", body: formData });
+        if (res.ok) {
+          const data = await res.json();
+          newProfileImage = data.avatarUrl;
+          setProfileImage(data.avatarUrl);
+          setAvatarFile(null);
+        }
+      } catch (err) {
+        console.error("Failed to upload avatar:", err);
+      }
+    }
+
+    const skillList = skills
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    // Save to localStorage
     saveStoredUser({
       fullName: fullName.trim(),
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
       location: location.trim(),
       about: bio.trim(),
-      skills: skills
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
-      profileImage,
+      skills: skillList,
+      profileImage: newProfileImage,
     });
-    
-    // Sync to backend API
+
+    // Sync other profile fields to backend API
     try {
       await updateUserProfile({
         email: email.trim().toLowerCase(),
         fullName: fullName.trim(),
         phone: phone.trim(),
         location: location.trim(),
+        about: bio.trim(),
+        headline: user?.headline ?? "",
+        skills: skillList,
       });
-      toast.success("Profile synced to server");
+      toast.success("Profile saved successfully.");
     } catch (error) {
       console.error("Failed to sync profile to server:", error);
-      toast.error("Profile saved locally but failed to sync to server");
+      toast.error("Profile saved locally but failed to sync to server.");
+    } finally {
+      setProfileSaving(false);
     }
-    
+
     setProfileSaved(true);
     window.setTimeout(() => setProfileSaved(false), 2000);
   };
 
   const saveAcademicAndFinancial = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    
+    setAcademicSaving(true);
+
     // Save to localStorage first
     saveStoredUser({
+      email: email.trim().toLowerCase(),
       gpa: gpa.trim(),
       educationLevel: educationLevel.trim(),
       yearLevel: yearLevel.trim(),
@@ -358,6 +392,7 @@ export function Settings() {
       schoolCampus: schoolCampus.trim(),
       schoolType: schoolType.trim(),
       schoolLocation: schoolLocation.trim(),
+      enrolledInQCSchool: schoolLocation === "Quezon City",
       isAthlete,
       isArtist,
       isSKOfficial,
@@ -375,6 +410,8 @@ export function Settings() {
         educationLevel: educationLevel.trim(),
         yearLevel: yearLevel.trim(),
         fieldOfStudy: fieldOfStudy.trim(),
+        graduationYear: graduationYear.trim(),
+        netWorth: netWorth.trim(),
         incomeCategory: incomeCategory.trim(),
         financialNeed: [Number(financialNeed) || 3],
         schoolName: schoolName.trim(),
@@ -389,11 +426,14 @@ export function Settings() {
         isIndigent,
         isPWD,
         isSoloParent,
+        currency: "PHP",
       });
-      toast.success("Academic & School details synced to server");
+      toast.success("Academic & financial details saved.");
     } catch (error) {
       console.error("Failed to sync academic details to server:", error);
-      toast.error("Details saved locally but failed to sync to server");
+      toast.error("Details saved locally but failed to sync to server.");
+    } finally {
+      setAcademicSaving(false);
     }
   };
 
@@ -565,7 +605,16 @@ export function Settings() {
               </div>
 
               <div className="flex items-center gap-3">
-                <Button type="submit">Save Profile</Button>
+                <Button type="submit" disabled={profileSaving}>
+                  {profileSaving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Saving…
+                    </>
+                  ) : (
+                    "Save Profile"
+                  )}
+                </Button>
                 {profileSaved && <p className="text-sm text-green-600">Profile updated</p>}
               </div>
             </form>
@@ -895,8 +944,15 @@ export function Settings() {
                     </Select>
                   </div>
                   <div className="flex items-end">
-                    <Button type="submit" className="w-full md:w-auto">
-                      Save Academic & Financial
+                    <Button type="submit" className="w-full md:w-auto" disabled={academicSaving}>
+                      {academicSaving ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin inline" />
+                          Saving…
+                        </>
+                      ) : (
+                        "Save Academic & Financial"
+                      )}
                     </Button>
                   </div>
                 </div>

@@ -1,7 +1,17 @@
 import type { UserProfile } from "./user-storage";
 import { getAuthToken } from "./user-storage";
 
-const API_BASE_URL = (import.meta.env as any).VITE_API_BASE_URL || "http://localhost:5000";
+export const API_BASE_URL =
+  String((import.meta.env as any).VITE_API_BASE_URL || "http://localhost:5000").replace(/\/$/, "");
+
+/** Absolute URL for uploaded assets served by the API (avatar, documents). */
+export function resolvePublicAssetUrl(src: string | undefined | null): string {
+  const s = String(src ?? "").trim();
+  if (!s || s.startsWith("data:")) return "";
+  if (/^https?:\/\//i.test(s)) return s;
+  const path = s.startsWith("/") ? s : `/${s}`;
+  return `${API_BASE_URL}${path}`;
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getAuthToken();
@@ -46,17 +56,30 @@ export function signIn(payload: Pick<AuthPayload, "email" | "password">) {
   });
 }
 
+export function fetchUserProfile(email: string) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  return request<{ user: Record<string, unknown> }>(
+    `/api/users/profile?email=${encodeURIComponent(normalizedEmail)}`,
+  );
+}
+
 export function updateUserProfile(payload: {
   email: string;
   fullName?: string;
   phone?: string;
   location?: string;
+  about?: string;
+  headline?: string;
+  skills?: string[] | string;
   gpa?: string;
   educationLevel?: string;
   yearLevel?: string;
   fieldOfStudy?: string;
+  graduationYear?: string;
   incomeCategory?: string;
   financialNeed?: number[];
+  netWorth?: string;
+  currency?: string;
   schoolName?: string;
   schoolCampus?: string;
   schoolType?: string;
@@ -223,5 +246,105 @@ export function updateDocumentStatus(
   return request<{ message: string }>(`/api/admin/applications/${applicationId}/documents`, {
     method: "PATCH",
     body: JSON.stringify({ documentType, status, rejectionReason }),
+  });
+}
+
+// Document status by index
+export function updateDocumentStatusByIndex(
+  applicationId: string,
+  docIndex: number,
+  status: string,
+  rejectionReason?: string
+) {
+  return request<{ message: string }>(`/api/admin/applications/${applicationId}/documents/${docIndex}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status, rejectionReason }),
+  });
+}
+
+// ===== ADVANCED APPLICATION REVIEW API =====
+
+export function fetchScholarshipApplicationSummary() {
+  return request<{ data: Array<Record<string, unknown>> }>("/api/admin/applications/scholarships");
+}
+
+export function fetchScholarshipApplicants(
+  scholarshipId: string,
+  status?: string,
+  search?: string
+) {
+  const params = new URLSearchParams();
+  if (status) params.append("status", status);
+  if (search) params.append("search", search);
+  const qs = params.toString();
+  return request<{ data: Array<Record<string, unknown>>; stats: Record<string, number> }>(
+    `/api/admin/applications/scholarship/${scholarshipId}/applicants${qs ? `?${qs}` : ""}`
+  );
+}
+
+export function fetchApplicationReview(applicationId: string) {
+  return request<{ data: Record<string, unknown> }>(`/api/admin/applications/${applicationId}/review`);
+}
+
+export function qualifyApplication(
+  applicationId: string,
+  screeningData: {
+    scheduledDate: string;
+    scheduledTime: string;
+    meetingPlatform: string;
+    meetingLink: string;
+    notes?: string;
+  }
+) {
+  return request<{ message: string; data: Record<string, unknown> }>(
+    `/api/admin/applications/${applicationId}/qualify`,
+    { method: "PATCH", body: JSON.stringify(screeningData) }
+  );
+}
+
+export function rejectApplicationWithReason(applicationId: string, reason: string) {
+  return request<{ message: string }>(`/api/admin/applications/${applicationId}/reject`, {
+    method: "PATCH",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+export function requestResubmission(
+  applicationId: string,
+  rejectedDocuments: Array<{ index: number; name: string; reason: string }>,
+  reason: string
+) {
+  return request<{ message: string }>(`/api/admin/applications/${applicationId}/resubmit`, {
+    method: "PATCH",
+    body: JSON.stringify({ rejectedDocuments, reason }),
+  });
+}
+
+export function exportApplicants(scholarshipId: string) {
+  window.open(`${API_BASE_URL}/api/admin/applications/scholarship/${scholarshipId}/export`, "_blank");
+}
+
+// ===== NOTIFICATIONS API =====
+
+export function fetchNotifications(email: string) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  return request<{ data: Array<Record<string, unknown>> }>(
+    `/api/notifications/${encodeURIComponent(normalizedEmail)}`
+  );
+}
+
+export function fetchUnreadCount(email: string) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  return request<{ count: number }>(
+    `/api/notifications/${encodeURIComponent(normalizedEmail)}/unread-count`
+  );
+}
+
+export function markNotificationRead(notificationId: string, email?: string) {
+  const normalized = String(email || "").trim().toLowerCase();
+  const qs = normalized ? `?email=${encodeURIComponent(normalized)}` : "";
+  return request<{ message: string }>(`/api/notifications/${notificationId}/read${qs}`, {
+    method: "PATCH",
+    body: JSON.stringify(normalized ? { email: normalized } : {}),
   });
 }
