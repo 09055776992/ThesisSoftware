@@ -5,7 +5,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { GraduationCap } from "lucide-react";
 import { buildNameFromEmail, clearStoredUser, getStoredUser, saveAuthToken, saveStoredUser } from "../lib/user-storage";
-import { fetchUserProfile, signIn } from "../lib/api-client";
+import { fetchUserProfile, pickProfileImageUrl, signIn } from "../lib/api-client";
 
 export function SignIn() {
   const navigate = useNavigate();
@@ -33,14 +33,7 @@ export function SignIn() {
         password: formData.password,
       });
 
-      const existingUser = getStoredUser();
-      const user = result.user as {
-        fullName?: string;
-        email?: string;
-        phone?: string;
-        userType?: string;
-        profileImage?: string;
-      };
+      const user = result.user as Record<string, unknown>;
 
       clearStoredUser();
       saveAuthToken((result as { token?: string }).token ?? null);
@@ -50,28 +43,33 @@ export function SignIn() {
         const profileResult = await fetchUserProfile(normalizedEmail);
         profileFromServer = profileResult.user ?? {};
       } catch {
-        // Fall back to local profile if server fetch fails
+        // Fall back to sign-in payload if profile fetch fails
       }
 
+      const avatarUrl =
+        pickProfileImageUrl(profileFromServer) || pickProfileImageUrl(user);
+
       saveStoredUser({
-        ...existingUser,
         ...profileFromServer,
-        email: user.email || normalizedEmail,
+        email: String(user.email || normalizedEmail),
         fullName:
-          user.fullName?.trim() ||
+          String(user.fullName || "").trim() ||
           String(profileFromServer.fullName || "").trim() ||
-          existingUser?.fullName?.trim() ||
           buildNameFromEmail(normalizedEmail),
-        phone: user.phone || String(profileFromServer.phone || ""),
-        userType: user.userType || String(profileFromServer.userType || "") || existingUser?.userType || "student",
+        phone: String(user.phone || profileFromServer.phone || ""),
+        userType:
+          String(user.userType || profileFromServer.userType || "") || "student",
         financialNeed: Array.isArray(profileFromServer.financialNeed)
           ? (profileFromServer.financialNeed as number[])
-          : existingUser?.financialNeed,
+          : undefined,
+        profileImage: avatarUrl,
+        profilePicture: avatarUrl,
       });
 
-      if ((user.userType || "").toLowerCase() === "admin") {
+      const userType = String(user.userType || profileFromServer.userType || "").toLowerCase();
+      if (userType === "admin") {
         navigate("/admin");
-      } else if ((user.userType || "").toLowerCase() === "provider") {
+      } else if (userType === "provider") {
         navigate("/provider/dashboard");
       } else {
         navigate("/dashboard");

@@ -14,19 +14,7 @@ import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { fetchSavedScholarships, saveSavedScholarships, fetchScholarshipsWithEligibility, checkEligibility, applyForScholarship } from "../lib/api-client";
 import { getStoredUser } from "../lib/user-storage";
 import { calculateMatchScore } from "../lib/calculateMatchScore";
-
-// Toast notification function
-const toast = {
-  success: (message: string) => {
-    console.log(`✅ ${message}`);
-    // In a real implementation, you'd use a toast library like react-hot-toast or sonner
-    alert(message);
-  },
-  error: (message: string) => {
-    console.error(`❌ ${message}`);
-    alert(message);
-  }
-};
+import { toast } from "sonner";
 
 const SAVED_SCHOLARSHIPS_KEY_PREFIX = "scholarship-portal-saved-scholarships";
 
@@ -656,7 +644,6 @@ export function Scholarships() {
       // Close modal and show success
       closeApplicationModal();
       toast.success(`Application submitted successfully! Reference: ${result.applicationId}`);
-      alert(`Application submitted successfully! Reference Number: ${result.applicationId}`);
       
       // Refresh scholarships data
       loadScholarships();
@@ -695,7 +682,7 @@ export function Scholarships() {
               <CardHeader>
                 <CardTitle>Filters</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="max-h-[calc(100vh-180px)] overflow-y-auto space-y-6">
                 {/* Search */}
                 <div className="space-y-2">
                   <Label htmlFor="search">Search</Label>
@@ -801,7 +788,7 @@ export function Scholarships() {
 
                 <Separator />
 
-                <div className="space-y-2">
+                <div className="space-y-2 sticky bottom-0 bg-white pt-4 -mx-6 px-6 -mb-4 pb-4 border-t border-gray-100 mt-4">
                   <Button className="w-full" onClick={handleApplyFilters}>Apply Filters</Button>
                   <Button variant="ghost" className="w-full" onClick={handleClearFilters}>Clear All</Button>
                 </div>

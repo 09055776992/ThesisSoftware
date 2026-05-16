@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { MapPin, Mail, Calendar, Award, BookOpen, DollarSign } from "lucide-react";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { getDisplayName, getInitials, getStoredUser } from "../lib/user-storage";
+import { resolvePublicAssetUrl, pickProfileImageUrl } from "../lib/api-client";
 import { useNavigate } from "react-router";
 
 function titleCase(value: string) {
@@ -91,7 +92,11 @@ export function Profile() {
               {/* Avatar */}
               <div className="flex-shrink-0">
                 <Avatar className="h-40 w-40 border-4 border-card">
-                  <AvatarImage src={user?.profileImage} />
+                  <AvatarImage
+                    src={resolvePublicAssetUrl(
+                      pickProfileImageUrl(user as Record<string, unknown>) || user?.profileImage,
+                    )}
+                  />
                   <AvatarFallback>
                     {getInitials(user)}
                   </AvatarFallback>

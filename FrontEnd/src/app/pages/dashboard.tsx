@@ -8,6 +8,7 @@ import { Heart, MessageCircle, Share2, Bookmark, ImageIcon, FileText } from "luc
 import { Separator } from "../components/ui/separator";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { getInitials, getStoredUser } from "../lib/user-storage";
+import { resolvePublicAssetUrl, pickProfileImageUrl } from "../lib/api-client";
 
 const mockPosts = [
   {
@@ -79,7 +80,11 @@ export function Dashboard() {
         <CardContent className="pt-6">
           <div className="flex gap-3">
             <Avatar>
-              <AvatarImage src={user?.profileImage} />
+              <AvatarImage
+                src={resolvePublicAssetUrl(
+                  pickProfileImageUrl(user as Record<string, unknown>) || user?.profileImage,
+                )}
+              />
               <AvatarFallback>{getInitials(user)}</AvatarFallback>
             </Avatar>
             <div className="flex-1">

@@ -942,6 +942,11 @@ app.post("/api/auth/signin", async (req, res) => {
     const token = createAuthToken({ userId: user._id, email, userType: user.userType || "student" });
     await db.collection("sessions").insertOne({ token, email, createdAt: new Date() });
 
+    const profileImage =
+      user.profileImage || user.profilePicture || user.avatar || "";
+    const profilePicture =
+      user.profilePicture || user.profileImage || user.avatar || "";
+
     return res.json({
       user: {
         fullName: user.fullName || "",
@@ -949,7 +954,9 @@ app.post("/api/auth/signin", async (req, res) => {
         phone: user.phone || "",
         location: user.location || "",
         userType: user.userType || "student",
-        avatar: user.avatar || "",
+        avatar: profileImage,
+        profileImage,
+        profilePicture,
       },
       token,
     });
@@ -1224,6 +1231,8 @@ const handleUserProfileUpdate = async (req, res) => {
       about,
       headline,
       skills,
+      profileImage,
+      profilePicture,
     } = req.body;
 
     console.log("[Profile Update] Request body:", req.body);
@@ -1273,6 +1282,20 @@ const handleUserProfileUpdate = async (req, res) => {
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean);
+    }
+
+    const avatarCandidate = profilePicture ?? profileImage;
+    if (avatarCandidate !== undefined) {
+      const avatarStr = String(avatarCandidate || "").trim();
+      if (avatarStr.startsWith("data:")) {
+        return res.status(400).json({
+          error: "Profile pictures must be uploaded as files, not embedded base64.",
+        });
+      }
+      if (avatarStr) {
+        updatedUser.profileImage = avatarStr;
+        updatedUser.profilePicture = avatarStr;
+      }
     }
     
     // Special category fields for scholarship eligibility
@@ -1355,6 +1378,8 @@ const handleUserProfileUpdate = async (req, res) => {
         isPWD: updatedUser.isPWD || false,
         isSoloParent: updatedUser.isSoloParent || false,
         specialCategories: updatedUser.specialCategories,
+        profileImage: updatedUser.profileImage || updatedUser.profilePicture || "",
+        profilePicture: updatedUser.profilePicture || updatedUser.profileImage || "",
       },
     });
   } catch (error) {
@@ -2827,6 +2852,51 @@ app.post("/api/users/profile", handleUserProfileUpdate);
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch application review data." });
+    }
+  });
+
+  // GET /api/applications/my-applications - Get student's own applications
+  app.get("/api/applications/my-applications", async (req, res) => {
+    try {
+      const db = await getDb();
+      const studentEmail = req.query.email || req.headers.email;
+      
+      if (!studentEmail) {
+        return res.status(400).json({ error: "Student email is required." });
+      }
+
+      const normalizedEmail = String(studentEmail).trim().toLowerCase();
+      
+      // Get all applications for this student
+      const applications = await db.collection("applications")
+        .find({ studentEmail: normalizedEmail })
+        .sort({ submittedAt: -1 })
+        .toArray();
+
+      // Get scholarship details for each application
+      const { ObjectId } = await import("mongodb");
+      const enrichedApplications = await Promise.all(
+        applications.map(async (app) => {
+          let scholarshipData = null;
+          try {
+            scholarshipData = await db.collection("scholarships").findOne(
+              { _id: new ObjectId(app.scholarshipId) },
+              { projection: { name: 1, provider: 1, imageUrl: 1, type: 1, amount: 1 } }
+            );
+          } catch (e) {
+            // Invalid scholarshipId - skip
+          }
+          return {
+            ...app,
+            scholarshipData
+          };
+        })
+      );
+
+      res.json({ data: enrichedApplications });
+    } catch (error) {
+      console.error("Error fetching my applications:", error);
+      res.status(500).json({ error: "Failed to fetch applications." });
     }
   });
 

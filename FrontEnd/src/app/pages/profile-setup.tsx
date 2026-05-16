@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Camera } from "lucide-react";
 import { Checkbox } from "../components/ui/checkbox";
 import { getStoredUser, saveStoredUser } from "../lib/user-storage";
+import { uploadUserAvatar, resolvePublicAssetUrl, pickProfileImageUrl } from "../lib/api-client";
 
 // Reusable component for required field label
 function RequiredLabel({ children, optional = false }: { children: string; optional?: boolean }) {
@@ -62,7 +63,9 @@ export function ProfileSetup() {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
   const storedUser = getStoredUser();
-  const [profileImage, setProfileImage] = useState<string>("");
+  const [profileImage, setProfileImage] = useState<string>(
+    () => pickProfileImageUrl(storedUser as Record<string, unknown>) || "",
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -224,7 +227,6 @@ export function ProfileSetup() {
       const profileData = {
         email: userEmail,
         // Step 1
-        profilePicture: profileImage,
         bio: formData.bio,
         location: formData.location,
         dateOfBirth: formData.dateOfBirth,
@@ -269,6 +271,7 @@ export function ProfileSetup() {
         incomeCategory: incomeCategoryLabel,
         financialNeed: [formData.financialNeed],
         profileImage,
+        profilePicture: profileImage,
         schoolName: formData.schoolName,
         schoolCampus: formData.schoolCampus,
         schoolType: formData.schoolType,
@@ -317,14 +320,33 @@ export function ProfileSetup() {
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProfileImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    const userEmail = getStoredUser()?.email?.trim().toLowerCase();
+    if (!userEmail) {
+      setErrors({ photo: "Sign in again before uploading a profile picture." });
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const avatarUrl = await uploadUserAvatar(file, userEmail);
+      setProfileImage(avatarUrl);
+      saveStoredUser({
+        email: userEmail,
+        profileImage: avatarUrl,
+        profilePicture: avatarUrl,
+      });
+    } catch (error) {
+      console.error("Avatar upload failed:", error);
+      setErrors({
+        photo: error instanceof Error ? error.message : "Failed to upload profile picture.",
+      });
+    } finally {
+      setIsLoading(false);
+      e.target.value = "";
     }
   };
 
@@ -371,7 +393,7 @@ export function ProfileSetup() {
                 <div className="flex flex-col items-center">
                   <div className="relative">
                     <Avatar className="h-32 w-32">
-                      <AvatarImage src={profileImage} />
+                      <AvatarImage src={resolvePublicAssetUrl(profileImage)} />
                       <AvatarFallback className="bg-muted">
                         <Camera className="h-12 w-12 text-muted-foreground" />
                       </AvatarFallback>

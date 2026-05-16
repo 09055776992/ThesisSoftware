@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
-import { Home, User, Award, MessageSquare, Users, Bookmark, Settings, Star, Bell, CheckCheck } from "lucide-react";
+import { Home, User, Award, MessageSquare, Users, Bookmark, Settings, Star, Bell, CheckCheck, FileText } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { Sheet, SheetContent } from "../components/ui/sheet";
@@ -149,6 +149,7 @@ export function DashboardLayout() {
     { href: "/dashboard/profile", label: "My Profile", icon: User },
     { href: "/dashboard/scholarships", label: "Scholarships", icon: Award },
     { href: "/dashboard/matches", label: "Scholarship Matches", icon: Star },
+    { href: "/dashboard/applications", label: "My Applications", icon: FileText },
     { href: "/dashboard/messages", label: "Messages", icon: MessageSquare },
     { href: "/dashboard/saved", label: "Saved Scholarships", icon: Bookmark },
     { href: "/dashboard/settings", label: "Settings", icon: Settings },
@@ -247,9 +248,14 @@ export function DashboardLayout() {
 
           {/* Notifications preview (sidebar) */}
           <div className="mt-6 pt-6 border-t border-gray-200">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 px-3">
-              Notifications
-            </h3>
+            <div className="flex items-center justify-between px-3 mb-3">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Notifications {unreadCount > 0 && `(${unreadCount})`}
+              </h3>
+              {unreadCount > 0 && (
+                <Badge className="bg-red-500 text-white text-xs px-1.5 py-0">{unreadCount}</Badge>
+              )}
+            </div>
             {sidebarNotifications.length === 0 ? (
               <p className="px-3 text-sm text-gray-500">No unread notifications.</p>
             ) : (

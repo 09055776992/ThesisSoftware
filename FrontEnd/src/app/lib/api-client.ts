@@ -56,6 +56,41 @@ export function signIn(payload: Pick<AuthPayload, "email" | "password">) {
   });
 }
 
+export function pickProfileImageUrl(user: Record<string, unknown> | null | undefined): string {
+  const raw = String(user?.profilePicture || user?.profileImage || user?.avatar || "").trim();
+  if (!raw || raw.startsWith("data:")) return "";
+  return raw;
+}
+
+/** Upload profile photo to disk + MongoDB (returns path like /uploads/avatars/...). */
+export async function uploadUserAvatar(file: File, email: string): Promise<string> {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) {
+    throw new Error("Email is required to upload a profile picture.");
+  }
+
+  const formData = new FormData();
+  formData.append("avatar", file);
+  formData.append("email", normalizedEmail);
+
+  const response = await fetch(`${API_BASE_URL}/api/user/upload-avatar`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || "Failed to upload profile picture.");
+  }
+
+  const data = (await response.json()) as { avatarUrl?: string };
+  const url = String(data.avatarUrl || "").trim();
+  if (!url) {
+    throw new Error("Server did not return an avatar URL.");
+  }
+  return url;
+}
+
 export function fetchUserProfile(email: string) {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   return request<{ user: Record<string, unknown> }>(
@@ -347,4 +382,11 @@ export function markNotificationRead(notificationId: string, email?: string) {
     method: "PATCH",
     body: JSON.stringify(normalized ? { email: normalized } : {}),
   });
+}
+
+export function fetchMyApplications(email: string) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  return request<{ data: Array<Record<string, unknown>> }>(
+    `/api/applications/my-applications?email=${encodeURIComponent(normalizedEmail)}`
+  );
 }

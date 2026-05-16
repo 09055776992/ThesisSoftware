@@ -33,6 +33,7 @@ export type UserProfile = {
   isSoloParent?: boolean;
   
   profileImage?: string;
+  profilePicture?: string;
   joinDate?: string;
   about?: string;
   skills?: string[];

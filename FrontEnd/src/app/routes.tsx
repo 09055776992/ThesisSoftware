@@ -10,6 +10,7 @@ import { Messages } from "./pages/messages";
 import { Matches } from "./pages/matches";
 import { SavedItems } from "./pages/saved";
 import { Settings } from "./pages/settings";
+import { MyApplications } from "./pages/my-applications";
 import { ProviderDashboard } from "./pages/provider-dashboard";
 import { AdminDashboard } from "./pages/admin/dashboard";
 import { AdminUsers } from "./pages/admin/users";
@@ -57,6 +58,7 @@ export const router = createBrowserRouter([
           { path: "profile", Component: Profile },
           { path: "scholarships", Component: Scholarships },
           { path: "matches", Component: Matches },
+          { path: "applications", Component: MyApplications },
           { path: "messages", Component: Messages },
           { path: "saved", Component: SavedItems },
           { path: "settings", Component: Settings },

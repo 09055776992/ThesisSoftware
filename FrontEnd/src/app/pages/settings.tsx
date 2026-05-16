@@ -23,7 +23,12 @@ import {
 } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { getStoredUser, saveStoredUser, getInitials } from "../lib/user-storage";
-import { updateUserProfile, API_BASE_URL } from "../lib/api-client";
+import {
+  updateUserProfile,
+  uploadUserAvatar,
+  resolvePublicAssetUrl,
+  pickProfileImageUrl,
+} from "../lib/api-client";
 
 type VisibilityOption = "public" | "providers-only" | "private";
 
@@ -228,7 +233,10 @@ function PasswordField({
 export function Settings() {
   const user = getStoredUser();
   const [bio, setBio] = useState(user?.about ?? "");
-  const [profileImage, setProfileImage] = useState(user?.profileImage ?? "");
+  const [profileImage, setProfileImage] = useState(
+    pickProfileImageUrl(user as Record<string, unknown>) || user?.profileImage || "",
+  );
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const [fullName, setFullName] = useState(user?.fullName ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
   const [phone, setPhone] = useState(user?.phone ?? "");
@@ -297,16 +305,31 @@ export function Settings() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [academicSaving, setAcademicSaving] = useState(false);
 
-  const handleProfileImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleProfileImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setAvatarFile(file);
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setProfileImage(String(reader.result ?? ""));
-    };
-    reader.readAsDataURL(file);
+    setAvatarUploading(true);
+
+    try {
+      const avatarUrl = await uploadUserAvatar(file, email.trim().toLowerCase());
+      setProfileImage(avatarUrl);
+      setAvatarFile(null);
+      saveStoredUser({
+        email: email.trim().toLowerCase(),
+        profileImage: avatarUrl,
+        profilePicture: avatarUrl,
+      });
+      toast.success("Profile picture saved to your account.");
+    } catch (err) {
+      console.error("Failed to upload avatar:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to upload profile picture.");
+      setAvatarFile(null);
+    } finally {
+      setAvatarUploading(false);
+      e.target.value = "";
+    }
   };
 
   const handleProfileSave = async (e: FormEvent<HTMLFormElement>) => {
@@ -315,22 +338,21 @@ export function Settings() {
 
     let newProfileImage = profileImage;
 
-    // Upload avatar to server if a new file was selected
     if (avatarFile) {
       try {
-        const formData = new FormData();
-        formData.append("avatar", avatarFile);
-        formData.append("email", email.trim().toLowerCase());
-        const res = await fetch(`${API_BASE_URL}/api/user/upload-avatar`, { method: "POST", body: formData });
-        if (res.ok) {
-          const data = await res.json();
-          newProfileImage = data.avatarUrl;
-          setProfileImage(data.avatarUrl);
-          setAvatarFile(null);
-        }
+        newProfileImage = await uploadUserAvatar(avatarFile, email.trim().toLowerCase());
+        setProfileImage(newProfileImage);
+        setAvatarFile(null);
       } catch (err) {
         console.error("Failed to upload avatar:", err);
+        toast.error(err instanceof Error ? err.message : "Failed to upload profile picture.");
+        setProfileSaving(false);
+        return;
       }
+    } else if (newProfileImage.startsWith("data:")) {
+      toast.error("Please choose a profile picture again — only uploaded photos are saved.");
+      setProfileSaving(false);
+      return;
     }
 
     const skillList = skills
@@ -347,6 +369,7 @@ export function Settings() {
       about: bio.trim(),
       skills: skillList,
       profileImage: newProfileImage,
+      profilePicture: newProfileImage,
     });
 
     // Sync other profile fields to backend API
@@ -526,7 +549,7 @@ export function Settings() {
                 <Label htmlFor="profileImage">Profile Picture</Label>
                 <div className="flex items-center gap-4">
                   <Avatar className="h-16 w-16">
-                    <AvatarImage src={profileImage} />
+                    <AvatarImage src={resolvePublicAssetUrl(profileImage)} />
                     <AvatarFallback>{getInitials(user)}</AvatarFallback>
                   </Avatar>
                   <Input
