@@ -2533,17 +2533,20 @@ app.post("/api/users/profile", handleUserProfileUpdate);
   });
 
   // POST /api/applications/submit - Submit scholarship application with documents
-  app.post("/api/applications/submit", upload.array("documents", 10), async (req, res) => {
+  app.post("/api/applications/submit", upload.fields([
+    { name: 'documents', maxCount: 10 }
+  ]), async (req, res) => {
     try {
       const db = await getDb();
       const { studentEmail, scholarshipId, declaration } = req.body;
-      const files = req.files || [];
+      const files = req.files?.documents || [];
       
       console.log("[Application Submit] Request received:", {
         studentEmail,
         scholarshipId,
         declaration,
-        fileCount: files.length
+        fileCount: files.length,
+        documentTypes: req.body.documentTypes
       });
 
       if (!studentEmail) {
@@ -2603,8 +2606,8 @@ app.post("/api/users/profile", handleUserProfileUpdate);
       // Block submission if not eligible and not may-be-eligible
       if (!eligibilityResult.isEligible && !eligibilityResult.mayBeEligible) {
         // Clean up uploaded files
-        if (req.files) {
-          req.files.forEach(file => {
+        if (req.files?.documents) {
+          req.files.documents.forEach(file => {
             try { fs.unlinkSync(file.path); } catch (e) {}
           });
         }
