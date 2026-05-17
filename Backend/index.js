@@ -55,6 +55,12 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
+// Always return JSON for /api routes
+app.use('/api', (req, res, next) => {
+  res.setHeader('Content-Type', 'application/json');
+  next();
+});
+
 // Avatar upload configuration
 const avatarStorage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -200,97 +206,6 @@ app.get("/api/scholarships", async (req, res) => {
   } catch (error) {
     console.error('[API] Error in /api/scholarships:', error);
     res.status(500).json({ error: "Failed to fetch scholarships." });
-  }
-});
-
-/** Single scholarship by MongoDB id (for deep links / modal refresh). */
-app.get("/api/scholarships/:id", async (req, res) => {
-  try {
-    const db = await getDb();
-    const { ObjectId } = await import("mongodb");
-    const rawId = String(req.params.id || "").trim();
-    let scholarship = null;
-    if (ObjectId.isValid(rawId)) {
-      scholarship = await db.collection("scholarships").findOne({ _id: new ObjectId(rawId) });
-    }
-    if (!scholarship) {
-      scholarship = await db.collection("scholarships").findOne({ _id: rawId });
-    }
-    if (!scholarship) {
-      return res.status(404).json({ error: "Scholarship not found." });
-    }
-    res.json({ data: scholarship });
-  } catch (error) {
-    console.error("[API] GET /api/scholarships/:id", error);
-    res.status(500).json({ error: "Failed to fetch scholarship." });
-  }
-});
-
-/** Per-student eligibility for modal / Apply flow (authoritative canApply + deadline). */
-app.get("/api/scholarships/:id/check-eligibility", async (req, res) => {
-  try {
-    const db = await getDb();
-    const { ObjectId } = await import("mongodb");
-    const rawId = String(req.params.id || "").trim();
-    const studentEmail = normalizeEmail(req.query.studentEmail);
-    if (!studentEmail) {
-      return res.status(400).json({ error: "Query parameter studentEmail is required." });
-    }
-
-    let scholarship = null;
-    if (ObjectId.isValid(rawId)) {
-      scholarship = await db.collection("scholarships").findOne({ _id: new ObjectId(rawId) });
-    }
-    if (!scholarship) {
-      scholarship = await db.collection("scholarships").findOne({ _id: rawId });
-    }
-    if (!scholarship) {
-      return res.status(404).json({ error: "Scholarship not found." });
-    }
-
-    const student = await db.collection("users").findOne({ email: studentEmail });
-    if (!student) {
-      return res.status(404).json({ error: "Student not found." });
-    }
-
-    const eligibility = eligibilityMatching.checkEligibility(student, scholarship);
-    const deadline = new Date(scholarship.deadline);
-    const openingDate = scholarship.openingDate ? new Date(scholarship.openingDate) : null;
-    const now = new Date();
-
-    let deadlineStatus = "open";
-    if (deadline < now) {
-      deadlineStatus = "closed";
-    } else if (openingDate && openingDate > now) {
-      deadlineStatus = "not-yet-open";
-    } else {
-      const daysUntil = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
-      if (daysUntil <= 7) {
-        deadlineStatus = "closing-soon";
-      }
-    }
-
-    const deadlineAllowsApply =
-      deadlineStatus === "open" || deadlineStatus === "closing-soon";
-    const eligibleToApply = eligibility.isEligible || eligibility.mayBeEligible;
-    const canApply = Boolean(eligibleToApply && deadlineAllowsApply);
-
-    const daysUntilDeadline = Math.ceil((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-
-    res.json({
-      eligible: eligibility.isEligible,
-      mayBeEligible: eligibility.mayBeEligible,
-      unmetCriteria: eligibility.unmetCriteria || [],
-      metCriteria: eligibility.reasons || [],
-      canApply,
-      deadline: scholarship.deadline,
-      daysUntilDeadline,
-      isClosingSoon: deadlineStatus === "closing-soon",
-      preScreenedAt: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("[API] GET /api/scholarships/:id/check-eligibility", error);
-    res.status(500).json({ error: "Failed to check eligibility." });
   }
 });
 
@@ -537,6 +452,99 @@ app.post("/api/scholarships/recommendations", async (req, res) => {
   }
 });
 
+/** Single scholarship by MongoDB id (for deep links / modal refresh). */
+/** NOTE: This must stay AFTER all specific /api/scholarships/* named routes to avoid /:id swallowing them. */
+app.get("/api/scholarships/:id", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const rawId = String(req.params.id || "").trim();
+    let scholarship = null;
+    if (ObjectId.isValid(rawId)) {
+      scholarship = await db.collection("scholarships").findOne({ _id: new ObjectId(rawId) });
+    }
+    if (!scholarship) {
+      scholarship = await db.collection("scholarships").findOne({ _id: rawId });
+    }
+    if (!scholarship) {
+      return res.status(404).json({ error: "Scholarship not found." });
+    }
+    res.json({ data: scholarship });
+  } catch (error) {
+    console.error("[API] GET /api/scholarships/:id", error);
+    res.status(500).json({ error: "Failed to fetch scholarship." });
+  }
+});
+
+/** Per-student eligibility for modal / Apply flow (authoritative canApply + deadline). */
+/** NOTE: This must stay AFTER all specific /api/scholarships/* named routes. */
+app.get("/api/scholarships/:id/check-eligibility", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const rawId = String(req.params.id || "").trim();
+    const studentEmail = normalizeEmail(req.query.studentEmail);
+    if (!studentEmail) {
+      return res.status(400).json({ error: "Query parameter studentEmail is required." });
+    }
+
+    let scholarship = null;
+    if (ObjectId.isValid(rawId)) {
+      scholarship = await db.collection("scholarships").findOne({ _id: new ObjectId(rawId) });
+    }
+    if (!scholarship) {
+      scholarship = await db.collection("scholarships").findOne({ _id: rawId });
+    }
+    if (!scholarship) {
+      return res.status(404).json({ error: "Scholarship not found." });
+    }
+
+    const student = await db.collection("users").findOne({ email: studentEmail });
+    if (!student) {
+      return res.status(404).json({ error: "Student not found." });
+    }
+
+    const eligibility = eligibilityMatching.checkEligibility(student, scholarship);
+    const deadline = new Date(scholarship.deadline);
+    const openingDate = scholarship.openingDate ? new Date(scholarship.openingDate) : null;
+    const now = new Date();
+
+    let deadlineStatus = "open";
+    if (deadline < now) {
+      deadlineStatus = "closed";
+    } else if (openingDate && openingDate > now) {
+      deadlineStatus = "not-yet-open";
+    } else {
+      const daysUntil = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
+      if (daysUntil <= 7) {
+        deadlineStatus = "closing-soon";
+      }
+    }
+
+    const deadlineAllowsApply =
+      deadlineStatus === "open" || deadlineStatus === "closing-soon";
+    const eligibleToApply = eligibility.isEligible || eligibility.mayBeEligible;
+    const canApply = Boolean(eligibleToApply && deadlineAllowsApply);
+
+    const daysUntilDeadline = Math.ceil((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+    res.json({
+      eligible: eligibility.isEligible,
+      mayBeEligible: eligibility.mayBeEligible,
+      unmetCriteria: eligibility.unmetCriteria || [],
+      metCriteria: eligibility.reasons || [],
+      canApply,
+      deadline: scholarship.deadline,
+      daysUntilDeadline,
+      isClosingSoon: deadlineStatus === "closing-soon",
+      preScreenedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("[API] GET /api/scholarships/:id/check-eligibility", error);
+    res.status(500).json({ error: "Failed to check eligibility." });
+  }
+});
+
 app.post("/api/scholarships", async (req, res) => {
   try {
     const db = await getDb();
@@ -686,66 +694,9 @@ app.post("/api/admin/seed-qcsp", async (req, res) => {
   }
 });
 
-app.get("/api/admin/applications", async (_, res) => {
-  try {
-    const db = await getDb();
-    const applicationsCollection = db.collection("applications");
-    const [applications, pending, underReview, approved, rejected] = await Promise.all([
-      applicationsCollection.find({}).sort({ submittedAt: -1 }).toArray(),
-      applicationsCollection.countDocuments({ status: "Pending" }),
-      applicationsCollection.countDocuments({ status: "Under Review" }),
-      applicationsCollection.countDocuments({ status: "Approved" }),
-      applicationsCollection.countDocuments({ status: "Rejected" }),
-    ]);
-
-    res.json({
-      data: applications,
-      stats: { pending, underReview, approved, rejected },
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch applications." });
-  }
-});
-
-app.patch("/api/admin/applications/:id/approve", async (req, res) => {
-  try {
-    const db = await getDb();
-    const { ObjectId } = await import("mongodb");
-    const result = await db.collection("applications").findOneAndUpdate(
-      { _id: new ObjectId(req.params.id) },
-      { $set: { status: "Approved" } },
-      { returnDocument: "after" },
-    );
-
-    if (!result?.value) {
-      return res.status(404).json({ error: "Application not found." });
-    }
-
-    res.json({ data: result.value, message: "Application approved successfully." });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to approve application." });
-  }
-});
-
-app.patch("/api/admin/applications/:id/reject", async (req, res) => {
-  try {
-    const db = await getDb();
-    const { ObjectId } = await import("mongodb");
-    const result = await db.collection("applications").findOneAndUpdate(
-      { _id: new ObjectId(req.params.id) },
-      { $set: { status: "Rejected" } },
-      { returnDocument: "after" },
-    );
-
-    if (!result?.value) {
-      return res.status(404).json({ error: "Application not found." });
-    }
-
-    res.json({ data: result.value, message: "Application rejected successfully." });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to reject application." });
-  }
-});
+// NOTE: GET /api/admin/applications, PATCH approve/reject are defined further below
+// with the full status-flow implementation. These early stubs have been removed
+// to avoid duplicate route registration (Express uses the first match).
 
 // TEST ENDPOINT - verify new code is loaded
 app.get("/api/test-screening", (req, res) => {
@@ -821,18 +772,14 @@ app.patch("/api/admin/applications/:id/schedule-screening", async (req, res) => 
       },
       { returnDocument: "after" },
     );
-    console.log('[SCREENING-ENDPOINT] findOneAndUpdate raw result type:', typeof result);
-    try { console.log('[SCREENING-ENDPOINT] findOneAndUpdate raw result keys:', Object.keys(result || {})); } catch (e) {}
-    try { console.log('[SCREENING-ENDPOINT] findOneAndUpdate value:', JSON.stringify(result?.value || result)); } catch (e) { console.log('[SCREENING-ENDPOINT] findOneAndUpdate value: <non-serializable>'); }
-
-    if (!result?.value) {
+    if (!result) {
       return res.status(404).json({ error: "Application not found." });
     }
 
     res.json({
-      data: result.value,
+      data: result,
       message: "Screening appointment scheduled successfully.",
-      screening: result.value.screeningSchedule,
+      screening: result.screeningSchedule,
     });
   } catch (error) {
     console.error("Error scheduling screening:", error);
@@ -2402,7 +2349,10 @@ app.post("/api/users/profile", handleUserProfileUpdate);
 
       if (!student) {
         console.log("[scholarships-with-eligibility] User not found for email:", normalizedEmail);
-        return res.status(404).json({ error: "Student not found." });
+        // Fall back to returning scholarships without eligibility when the student profile
+        // cannot be found. The UI expects a list of scholarships even if the student
+        // profile is missing (avoids showing zero results when profile is incomplete).
+        return res.json({ data: scholarships.map(s => ({ ...s, eligibilityStatus: "unknown" })) });
       }
 
       // Debug logging - log FULL user object for debugging
@@ -3398,12 +3348,20 @@ app.post("/api/users/profile", handleUserProfileUpdate);
     }
   });
 
-  app.use("/api", (req, res) => {
-    res.status(404).json({ error: "API route not found" });
+// Handle unknown /api routes
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    error: `Route not found: ${req.method} ${req.path}` 
   });
+});
 
-  // ===== END ADMIN DASHBOARD ROUTES =====
-
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).json({
+    error: err.message || 'Internal server error'
+  });
+});
 
 const port = Number(process.env.PORT || 4000);
 app.listen(port, () => {

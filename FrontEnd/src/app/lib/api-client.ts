@@ -1,8 +1,8 @@
 import type { UserProfile } from "./user-storage";
 import { getAuthToken } from "./user-storage";
+import API_BASE_URL from "../../config/api";
 
-export const API_BASE_URL =
-  String((import.meta.env as any).VITE_API_BASE_URL || "http://localhost:5000").replace(/\/$/, "");
+export const API_URL = API_BASE_URL.replace(/\/$/, "");
 
 /** Absolute URL for uploaded assets served by the API (avatar, documents). */
 export function resolvePublicAssetUrl(src: string | undefined | null): string {
@@ -10,12 +10,12 @@ export function resolvePublicAssetUrl(src: string | undefined | null): string {
   if (!s || s.startsWith("data:")) return "";
   if (/^https?:\/\//i.test(s)) return s;
   const path = s.startsWith("/") ? s : `/${s}`;
-  return `${API_BASE_URL}${path}`;
+  return `${API_URL}${path}`;
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getAuthToken();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${API_URL}${path}`, {
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),

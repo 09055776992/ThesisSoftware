@@ -1,39 +1,84 @@
+# SCHOLAR — Team Setup Guide
 
-  # User request clarification
+## Requirements
+- Node.js v18+
+- Git
 
-  This is a code bundle for User request clarification. The original project is available at https://www.figma.com/design/J6wC3jy7lgfRAlhTXte4tV/User-request-clarification.
+## Backend Setup
+1. Open terminal → cd Backend
+2. Run: npm install
+3. Create a .env file (copy from .env.example)
+4. Run: node index.js or npm run dev
+5. Should see: "Server running on port 5000"
+6. Should see: "MongoDB connected"
 
-  ## Running the code
+## Frontend Setup
+1. Open new terminal → cd Frontend
+2. Run: npm install
+3. Create a .env file (copy from .env.example)
+   Add: VITE_API_URL=http://localhost:5000
+4. Run: npm run dev
+5. Open: http://localhost:5173
 
-  Run `npm i` to install the dependencies.
+## If you get the DOCTYPE JSON error:
+- Make sure backend is running on port 5000
+- Check vite.config.ts has the proxy config
+- Check your .env files exist and are correct
+- Never run only the frontend without the backend
 
-  Run `npm run dev` to start the development server.
+## Environment Variables
 
-## Matching and Database Setup
+### Backend (.env)
+```
+PORT=5000
+MONGODB_URI=your_mongodb_uri_here
+JWT_SECRET=your_jwt_secret_here
+```
 
-- Scholarship ranking now uses TOPSIS and stable pairing uses Gale-Shapley in `src/app/lib/matching-algorithms.ts`.
-- The scholarships page consumes this logic to produce dynamic match scores.
+### Frontend (.env)
+```
+VITE_API_URL=http://localhost:5000
+```
 
-### Supabase Postgres backend
+## Common Issues
 
-This app includes a minimal Node API in `Backend/` so database credentials stay on the server side.
+### DOCTYPE JSON Error
+This error occurs when the frontend tries to parse HTML (like a 404 page) as JSON. It usually means:
+1. Backend is not running
+2. Backend is running on wrong port
+3. Proxy configuration is missing
 
-1. Install API dependencies:
-   - `cd Backend`
-   - `npm install`
-2. Copy `.env.example` to `.env`
-3. Put your Supabase Postgres connection string in `DATABASE_URL`
-4. Start API with `npm run dev`
-5. In frontend root, create `.env` with:
-   - `VITE_API_BASE_URL=http://localhost:4000`
+### Port Conflicts
+- Backend must run on port 5000
+- Frontend will run on port 5173 (or next available)
+- Check if port 5000 is already in use
 
-Never place your database connection string directly in frontend files.
+### MongoDB Connection
+- Make sure your MongoDB URI is correct
+- Check network connectivity
+- Verify database user permissions
+
+## Development Workflow
+1. Always start backend first
+2. Then start frontend
+3. Make changes to either codebase
+4. Frontend will auto-reload
+5. Backend will restart with --watch flag
+
+## Testing
+- [ ] Backend runs on port 5000 without errors
+- [ ] Frontend runs on port 5173
+- [ ] Opening http://localhost:5173 loads the app
+- [ ] Login works
+- [ ] Browsing scholarships works
+- [ ] Applying to a scholarship works — no DOCTYPE error
+- [ ] Application appears in My Applications page
+- [ ] Application appears in admin panel
 
 ---
 
 ## System Architecture
 
-The Design phase produced the system architecture, database schema, and user interface wireframes for the SCHOLAR platform. The system is implemented as a three-tier web application comprising:
 
 ### Presentation Layer (Front-End)
 - **React.js 18** with **TypeScript** for type-safe component development

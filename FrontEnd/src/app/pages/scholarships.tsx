@@ -11,15 +11,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/toolti
 import { Separator } from "../components/ui/separator";
 import { Search, Calendar, MapPin, Award, Bookmark, ExternalLink, FileText, CheckCircle, ListChecks, GraduationCap } from "lucide-react";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
-import {
-  fetchSavedScholarships,
-  saveSavedScholarships,
-  fetchScholarshipsWithEligibility,
-  checkEligibility,
-  applyForScholarship,
-  resolveDisplayMatchScore,
-} from "../lib/api-client";
+import { fetchSavedScholarships, saveSavedScholarships, fetchScholarshipsWithEligibility, checkEligibility, applyForScholarship, resolveDisplayMatchScore } from "../lib/api-client";
 import { getStoredUser } from "../lib/user-storage";
+import API_BASE_URL from "../../config/api";
 import { toast } from "sonner";
 
 const SAVED_SCHOLARSHIPS_KEY_PREFIX = "scholarship-portal-saved-scholarships";
@@ -238,7 +232,7 @@ async function saveScholarshipsWithFallback(email: string | undefined, ids: numb
 export function Scholarships() {
   const [selectedScholarship, setSelectedScholarship] = useState<Scholarship | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [amountRange, setAmountRange] = useState([0, 20000]);
+  const [amountRange, setAmountRange] = useState([0, 100000]);
   const [scholarshipsData, setScholarshipsData] = useState<Scholarship[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState("all");
@@ -310,11 +304,29 @@ export function Scholarships() {
       const user = getStoredUser();
       console.log('Current user:', user);
 
+      console.log('Fetching scholarships...');
+      let result: any = null;
+
       // Use server-side eligibility when logged in (authoritative for QC scholarships)
-      const result = user?.email
-        ? await fetchScholarshipsWithEligibility(user.email)
-        : await fetch("/api/scholarships?status=Active").then((r) => r.json());
-      console.log('Scholarships fetched:', result.data?.length || 0);
+      if (user?.email) {
+        try {
+          result = await fetchScholarshipsWithEligibility(user.email);
+          console.log('Eligibility fetch succeeded:', result.data?.length || 0, 'scholarships');
+        } catch (eligErr) {
+          console.warn('fetchScholarshipsWithEligibility failed, falling back to plain list:', eligErr);
+          result = null;
+        }
+      }
+
+      // Fall back to plain /api/scholarships if eligibility endpoint failed or user not logged in
+      if (!result || !Array.isArray(result.data)) {
+        const r = await fetch(`${API_BASE_URL}/api/scholarships`);
+        console.log('Response status:', r.status);
+        console.log('Response content-type:', r.headers.get('content-type'));
+        result = await r.json();
+      }
+
+      console.log('Scholarships received:', result.data?.length || 0, result);
       
       const normalized = (result.data || []).map((item: any) => {
         const serverStatus = item.eligibilityStatus as string | undefined;
@@ -394,20 +406,29 @@ export function Scholarships() {
       params.append('minGPA', selectedGpa);
     }
     
-    // Always include amount range
-    params.append('amountMin', amountRange[0].toString());
-    params.append('amountMax', amountRange[1].toString());
+    // Only include amount range if user changed from defaults
+    if (amountRange[0] > 0) {
+      params.append('amountMin', amountRange[0].toString());
+    }
+    if (amountRange[1] < 100000) {
+      params.append('amountMax', amountRange[1].toString());
+    }
 
     try {
       const user = getStoredUser();
       const queryString = params.toString();
-      
-      // Use eligibility-aware API if user is logged in, otherwise use regular API
-      const apiUrl = user?.email 
-        ? `/api/scholarships-with-eligibility?studentEmail=${encodeURIComponent(user.email)}&${queryString}`
-        : `/api/scholarships?${queryString}`;
-        
-      const result = await fetch(apiUrl).then(r => r.json());
+
+      // Use the absolute backend URL to avoid relying on dev-server proxy when
+      // the frontend is served from a different origin. This ensures the
+      // logged-in path calls the real backend endpoint and returns results.
+      let result;
+      if (user?.email) {
+        const url = `${API_BASE_URL}/api/scholarships-with-eligibility?studentEmail=${encodeURIComponent(user.email)}&${queryString}`;
+        result = await fetch(url).then((r) => r.json());
+      } else {
+        const url = `${API_BASE_URL}/api/scholarships?${queryString}`;
+        result = await fetch(url).then((r) => r.json());
+      }
       
       const normalized = (result.data || []).map((item: any) => ({
         ...item,
@@ -448,7 +469,7 @@ export function Scholarships() {
   // Handle Clear All button
   const handleClearFilters = async () => {
     setSearchQuery("");
-    setAmountRange([0, 20000]);
+    setAmountRange([0, 100000]);
     setSelectedType("all");
     setSelectedField("all");
     setSelectedLocation("all");
@@ -615,10 +636,19 @@ export function Scholarships() {
         formData.append(`documentTypes`, docType);
       });
 
-      const response = await fetch("/api/applications/submit", {
+      const response = await fetch(`${API_BASE_URL}/api/applications/submit`, {
         method: "POST",
         body: formData,
       });
+
+      // Check content-type to prevent DOCTYPE errors
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error(
+          'Cannot connect to the server. ' +
+          'Please make sure the backend is running on port 5000.'
+        );
+      }
 
       if (!response.ok) {
         const error = await response.json();
@@ -711,8 +741,8 @@ export function Scholarships() {
                       value={amountRange}
                       onValueChange={(value) => setAmountRange([0, value[1]])}
                       min={0}
-                      max={20000}
-                      step={1000}
+                      max={100000}
+                      step={5000}
                     />
                   </div>
                   <div className="text-center text-sm font-medium text-primary">
@@ -720,7 +750,7 @@ export function Scholarships() {
                   </div>
                   <div className="flex justify-between text-xs text-muted-foreground font-semibold">
                     <span>₱0</span>
-                    <span>₱20,000</span>
+                    <span>₱100,000</span>
                   </div>
                 </div>
 
@@ -774,7 +804,7 @@ export function Scholarships() {
 
                 <Separator />
 
-                <div className="space-y-2 sticky bottom-0 bg-white pt-4 -mx-6 px-6 -mb-4 pb-4 border-t border-gray-100 mt-4">
+                <div className="space-y-2 pt-2">
                   <Button className="w-full" onClick={handleApplyFilters}>Apply Filters</Button>
                   <Button variant="ghost" className="w-full" onClick={handleClearFilters}>Clear All</Button>
                 </div>

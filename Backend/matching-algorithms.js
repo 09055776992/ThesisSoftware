@@ -134,7 +134,8 @@ function tokenize(value) {
 function textMatchScore(source, target) {
   const targetTokens = tokenize(target);
   if (targetTokens.length === 0) {
-    return 0.5;
+    // No field requirement on the scholarship — neutral score, not a bonus
+    return 0.0;
   }
 
   const sourceText = normalizeText(source);
@@ -177,9 +178,12 @@ function getScholarshipId(scholarship) {
 function buildStudentProfile(profile = {}) {
   const gpa = Number(profile.gpa);
   const scale = parseGpaScale(profile.gpaScale);
+  // gpaFit stored on profile is used as a fallback when no per-scholarship requirement exists
   const gpaFit = Number.isFinite(gpa) ? clamp(gpa / scale, 0, 1) : 0.5;
 
   return {
+    gpa,
+    gpaScale: scale,
     gpaFit,
     financialNeedFit: parseFinancialNeed(profile.financialNeed),
     fieldOfStudy: normalizeText(profile.fieldOfStudy),
@@ -191,45 +195,135 @@ function buildStudentProfile(profile = {}) {
 export function rankScholarships(scholarships, profile = {}, studentId = "current-student") {
   const studentProfile = buildStudentProfile(profile);
 
-  const scholarshipInputs = scholarships.map((scholarship) => {
-    const scholarshipText = [
-      scholarship.name,
-      scholarship.provider,
-      scholarship.type,
-      scholarship.eligibility,
-      scholarship.description,
-      scholarship.location,
-    ].join(" ");
+  // Max deadline window used to normalize urgency to [0,1]
+  const MAX_DEADLINE_DAYS = 365;
 
-    const needBasedScore = normalizeText(scholarship.type).includes("need") ? 1 : 0.7;
-    const fieldScore = Math.max(
-      textMatchScore(scholarshipText, studentProfile.fieldOfStudy),
-      textMatchScore(scholarship.eligibility, studentProfile.educationLevel),
-    );
-    const locationScore = textMatchScore(scholarship.location, studentProfile.location);
+  const scholarshipInputs = scholarships.map((scholarship) => {
+    // --- Education level fit ---
+    // Hard signal: does the scholarship's required education level match the student's?
+    // 1.0 = exact match, 0.0 = mismatch. This is the most important discriminator.
+    const scholarshipEduLevels = (
+      scholarship.eligibilityCriteria?.educationLevel ??
+      (scholarship.educationLevel ? [scholarship.educationLevel] : [])
+    ).map(l => normalizeText(l));
+
+    const studentEduLevel = normalizeText(studentProfile.educationLevel);
+
+    // Canonical level groups for fuzzy matching
+    const eduGroups = {
+      shs:        ["senior high school", "shs", "senior high", "grade 11", "grade 12"],
+      college:    ["college", "undergraduate", "college / undergraduate", "bachelor"],
+      postgrad:   ["postgraduate", "postgraduate (masters / doctorate)", "graduate", "masters", "doctorate"],
+      vocational: ["vocational", "vocational / tesda", "tesda"],
+      jhs:        ["junior high school", "jhs", "junior high"],
+    };
+
+    function getEduGroup(level) {
+      for (const [group, variants] of Object.entries(eduGroups)) {
+        if (variants.some(v => level === v || level.includes(v) || v.includes(level))) return group;
+      }
+      return null;
+    }
+
+    const studentGroup = getEduGroup(studentEduLevel);
+    let educationFit = 0.5; // default neutral when no requirement specified
+    if (scholarshipEduLevels.length > 0) {
+      const scholarshipGroups = scholarshipEduLevels.map(getEduGroup).filter(Boolean);
+      if (scholarshipGroups.length === 0) {
+        educationFit = 0.5; // Can't determine — neutral
+      } else if (studentGroup && scholarshipGroups.includes(studentGroup)) {
+        educationFit = 1.0; // Exact group match
+      } else {
+        educationFit = 0.0; // Mismatch — this scholarship is not for this student's level
+      }
+    }
+
+    // --- GPA fit ---
+    // Philippine GWA scale: lower is better (1.0 = best, 5.0 = fail).
+    // SHS uses percentage scale (0–100, higher is better).
+    // If student meets the requirement: full credit (1.0).
+    // If student misses it: partial credit proportional to closeness.
+    // If no GPA requirement: neutral (0.5).
+    const minGpa = scholarship.minimumGPA ?? scholarship.minimumGpa ??
+                   scholarship.eligibilityCriteria?.minGPA ?? scholarship.eligibilityCriteria?.minGwa;
+    let gpaFit;
+    if (minGpa == null || !Number.isFinite(Number(minGpa))) {
+      gpaFit = 0.5; // No GPA requirement — neutral
+    } else {
+      const req = Number(minGpa);
+      const studentGpa = studentProfile.gpa;
+      if (!Number.isFinite(studentGpa)) {
+        gpaFit = 0.5; // Unknown GPA — neutral
+      } else if (req > 50) {
+        // Percentage scale (SHS): higher is better, student must be >= req
+        gpaFit = studentGpa >= req ? 1.0 : clamp(studentGpa / req, 0, 1);
+      } else {
+        // GWA scale: lower is better, student must be <= req
+        gpaFit = studentGpa <= req ? 1.0 : clamp(req / studentGpa, 0, 1);
+      }
+    }
+
+    // --- Field fit ---
+    // Scholarships with no field restriction get a neutral score (0.5).
+    // Scholarships whose field matches the student's get a high score.
+    // Scholarships whose field doesn't match get a low score.
+    const scholarshipField = normalizeText(scholarship.fieldOfStudy);
+    let fieldFit;
+    if (!scholarshipField) {
+      fieldFit = 0.5; // Open to all fields — neutral
+    } else {
+      const studentFieldTokens = tokenize(studentProfile.fieldOfStudy);
+      const scholarshipFieldTokens = new Set(tokenize(scholarshipField));
+      if (studentFieldTokens.length === 0) {
+        fieldFit = 0.5; // Student has no field set — neutral
+      } else {
+        const matchCount = studentFieldTokens.filter(t => scholarshipFieldTokens.has(t)).length;
+        if (matchCount > 0) {
+          fieldFit = clamp(matchCount / studentFieldTokens.length, 0.3, 1);
+        } else if (scholarshipField.includes(normalizeText(studentProfile.fieldOfStudy)) ||
+                   normalizeText(studentProfile.fieldOfStudy).includes(scholarshipField)) {
+          fieldFit = 0.75;
+        } else {
+          fieldFit = 0.1; // Field mismatch — low but not zero
+        }
+      }
+    }
+
+    // --- Financial need fit ---
+    // Use the student's raw financial need score directly.
+    const financialNeedFit = studentProfile.financialNeedFit;
+
+    // --- Location fit ---
+    const locationFit = textMatchScore(scholarship.location, studentProfile.location);
+
+    // --- Deadline urgency ---
     const deadlineDate = new Date(scholarship.deadline);
     const diffMs = Number.isNaN(deadlineDate.getTime()) ? Number.POSITIVE_INFINITY : deadlineDate.getTime() - Date.now();
-    const deadlineUrgencyDays = Number.isFinite(diffMs)
+    const deadlineDays = Number.isFinite(diffMs)
       ? Math.max(1, Math.floor(diffMs / (1000 * 60 * 60 * 24)))
-      : 3650;
+      : MAX_DEADLINE_DAYS;
+    // 1 day → urgency 1.0 (most urgent); MAX_DEADLINE_DAYS+ → urgency 0.0
+    const deadlineUrgency = clamp(1 - (deadlineDays - 1) / (MAX_DEADLINE_DAYS - 1), 0, 1);
 
     return {
       ...scholarship,
       amountValue: parseAmount(scholarship.amount),
-      gpaFit: studentProfile.gpaFit,
-      financialNeedFit: clamp(studentProfile.financialNeedFit * needBasedScore, 0, 1),
-      fieldFit: clamp(fieldScore, 0, 1),
-      locationFit: clamp(locationScore, 0, 1),
-      deadlineUrgencyDays,
+      educationFit,
+      gpaFit,
+      financialNeedFit,
+      fieldFit: clamp(fieldFit, 0, 1),
+      locationFit: clamp(locationFit, 0, 1),
+      deadlineUrgency,
     };
   });
 
   const topsisResult = topsisRank(scholarshipInputs, [
-    { key: "gpaFit", weight: 0.25, type: "benefit" },
-    { key: "financialNeedFit", weight: 0.25, type: "benefit" },
-    { key: "fieldFit", weight: 0.25, type: "benefit" },
-    { key: "locationFit", weight: 0.1, type: "benefit" },
-    { key: "deadlineUrgencyDays", weight: 0.15, type: "cost" },
+    { key: "educationFit",     weight: 0.30, type: "benefit" }, // Most important: right level
+    { key: "gpaFit",           weight: 0.20, type: "benefit" }, // Meets GPA requirement
+    { key: "financialNeedFit", weight: 0.20, type: "benefit" }, // Financial need alignment
+    { key: "fieldFit",         weight: 0.15, type: "benefit" }, // Field of study match
+    { key: "locationFit",      weight: 0.10, type: "benefit" }, // Location match
+    { key: "deadlineUrgency",  weight: 0.05, type: "benefit" }, // Deadline urgency (tiebreaker)
   ]);
 
   const proposerPreferences = {
