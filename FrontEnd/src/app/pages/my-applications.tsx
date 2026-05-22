@@ -4,8 +4,8 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
-import { FileText, Calendar, ExternalLink, Award, AlertCircle, CheckCircle, Clock, XCircle } from "lucide-react";
-import { fetchMyApplications } from "../lib/api-client";
+import { FileText, Calendar, ExternalLink, Award, AlertCircle, CheckCircle, Clock, XCircle, Trophy, Brain, TrendingUp, TrendingDown } from "lucide-react";
+import { fetchMyApplications, fetchMyScore, type MyScoreResponse, type ShapContribution } from "../lib/api-client";
 import { getStoredUser } from "../lib/user-storage";
 import { useNavigate } from "react-router";
 
@@ -58,6 +58,8 @@ export function MyApplications() {
   const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedApp, setSelectedApp] = useState<Application | null>(null);
+  const [myScore, setMyScore] = useState<MyScoreResponse | null>(null);
+  const [scoreLoading, setScoreLoading] = useState(false);
   const navigate = useNavigate();
   const user = getStoredUser();
 
@@ -73,6 +75,21 @@ export function MyApplications() {
         .finally(() => setLoading(false));
     }
   }, [user?.email]);
+
+  // Fetch score when modal opens
+  const handleOpenModal = async (app: Application) => {
+    setSelectedApp(app);
+    setMyScore(null);
+    setScoreLoading(true);
+    try {
+      const score = await fetchMyScore(app._id);
+      setMyScore(score);
+    } catch {
+      // Score not available yet — that's fine
+    } finally {
+      setScoreLoading(false);
+    }
+  };
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "N/A";
@@ -153,7 +170,7 @@ export function MyApplications() {
                           <Badge className={`${statusConfig[app.status]?.bg || "bg-gray-100"} ${statusConfig[app.status]?.color || "text-gray-700"}`}>
                             {statusConfig[app.status]?.label || app.status}
                           </Badge>
-                          <Button size="sm" onClick={() => setSelectedApp(app)}>
+                          <Button size="sm" onClick={() => handleOpenModal(app)}>
                             View Details
                           </Button>
                         </div>
@@ -270,6 +287,111 @@ export function MyApplications() {
                       Resubmission Required
                     </h4>
                     <p className="text-sm text-orange-700">{selectedApp.resubmissionReason}</p>
+                  </div>
+                )}
+
+                {/* AI Score Section */}
+                {scoreLoading && (
+                  <div className="bg-gray-50 rounded-lg p-4 text-center text-sm text-muted-foreground">
+                    <Brain className="h-5 w-5 inline mr-2 animate-pulse" />
+                    Loading your score...
+                  </div>
+                )}
+
+                {!scoreLoading && myScore && myScore.has_score && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 font-semibold text-base">
+                      <Trophy className="h-5 w-5 text-primary" />
+                      Your Application Score
+                    </div>
+
+                    {/* Rank + Total Score */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-primary/5 rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold font-mono text-primary">
+                          #{myScore.rank}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          out of {myScore.total_applicants} applicants
+                        </p>
+                      </div>
+                      <div className="bg-primary/5 rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold font-mono text-primary">
+                          {myScore.total_score?.toFixed(1)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Total Score / 100</p>
+                      </div>
+                    </div>
+
+                    {/* Score breakdown bars */}
+                    {myScore.score_breakdown && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Score Breakdown</p>
+                        {[
+                          { label: "GPA", key: "gpa_score", weight: 30 },
+                          { label: "Financial Need", key: "financial_score", weight: 25 },
+                          { label: "Document Completeness", key: "document_completeness", weight: 20 },
+                          { label: "Document Authenticity", key: "document_authenticity", weight: 15 },
+                          { label: "Special Category", key: "special_category_score", weight: 10 },
+                        ].map(({ label, key, weight }) => {
+                          const score = (myScore.score_breakdown as any)[key] ?? 0;
+                          const color = score >= 75 ? "bg-green-500" : score >= 50 ? "bg-amber-400" : "bg-red-400";
+                          const textColor = score >= 75 ? "text-green-700" : score >= 50 ? "text-amber-700" : "text-red-600";
+                          return (
+                            <div key={key} className="space-y-1">
+                              <div className="flex justify-between text-xs">
+                                <span className="text-muted-foreground">
+                                  {label} <span className="opacity-60">({weight}%)</span>
+                                </span>
+                                <span className={`font-mono font-semibold ${textColor}`}>
+                                  {score.toFixed(0)}/100
+                                </span>
+                              </div>
+                              <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full ${color}`}
+                                  style={{ width: `${score}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* SHAP explanation */}
+                    {myScore.shap_explanation && (
+                      <div className="bg-blue-50 rounded-lg p-4 space-y-3">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-blue-800">
+                          <Brain className="h-4 w-4" />
+                          Why you received this score
+                        </div>
+                        <p className="text-sm text-blue-700 italic">
+                          "{myScore.shap_explanation.summary}"
+                        </p>
+                        <div className="space-y-2">
+                          {myScore.shap_explanation.contributions.map((c: ShapContribution) => (
+                            <div key={c.factor} className="flex items-start gap-2 text-sm">
+                              {c.impact === "positive"
+                                ? <TrendingUp className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                                : <TrendingDown className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                              }
+                              <div>
+                                <span className="font-medium text-gray-800">{c.factor}</span>
+                                <p className="text-xs text-muted-foreground">{c.explanation}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {!scoreLoading && myScore && !myScore.has_score && (
+                  <div className="bg-gray-50 rounded-lg p-4 text-sm text-muted-foreground text-center">
+                    <Trophy className="h-5 w-5 inline mr-2 opacity-40" />
+                    Rankings have not been generated yet for this scholarship.
                   </div>
                 )}
 

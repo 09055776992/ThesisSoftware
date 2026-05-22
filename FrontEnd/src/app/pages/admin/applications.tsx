@@ -10,7 +10,7 @@ import { Textarea } from "../../components/ui/textarea";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Separator } from "../../components/ui/separator";
-import { CheckCircle, XCircle, Clock, ShieldCheck, Eye, Download, FileText, AlertTriangle, CheckSquare, AlertCircle, ArrowLeft, ChevronRight, Calendar, ExternalLink, Search, FileSpreadsheet, Video } from "lucide-react";
+import { CheckCircle, XCircle, Clock, ShieldCheck, Eye, Download, FileText, AlertTriangle, CheckSquare, AlertCircle, ArrowLeft, ChevronRight, Calendar, ExternalLink, Search, FileSpreadsheet, Video, Trophy, Brain, TrendingUp, TrendingDown } from "lucide-react";
 import {
   fetchScholarshipApplicationSummary,
   fetchScholarshipApplicants,
@@ -23,6 +23,10 @@ import {
   exportApplicants,
   approveApplication,
   resolvePublicAssetUrl,
+  generateAIRankings,
+  fetchSavedRankings,
+  type AIRanking,
+  type ShapContribution,
 } from "../../lib/api-client";
 
 // ===== Types =====
@@ -144,6 +148,116 @@ function getDocumentUrl(filePath: string) {
   return `http://localhost:5000/${normalized}`;
 }
 
+// ===== RankingCard Component =====
+
+function ScoreBar({ label, score, weight }: { label: string; score: number; weight: number }) {
+  const color = score >= 75 ? "bg-green-500" : score >= 50 ? "bg-amber-400" : "bg-red-400";
+  const textColor = score >= 75 ? "text-green-700" : score >= 50 ? "text-amber-700" : "text-red-600";
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between text-xs">
+        <span className="text-muted-foreground">{label} <span className="text-xs opacity-60">({weight}%)</span></span>
+        <span className={`font-mono font-semibold ${textColor}`}>{score.toFixed(0)}/100</span>
+      </div>
+      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${score}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function RankingCard({ ranking }: { ranking: AIRanking }) {
+  const [expanded, setExpanded] = useState(false);
+  const medal = ranking.rank === 1 ? "🥇" : ranking.rank === 2 ? "🥈" : ranking.rank === 3 ? "🥉" : `#${ranking.rank}`;
+  const scoreColor = ranking.total_score >= 75 ? "text-green-700 bg-green-50" : ranking.total_score >= 50 ? "text-amber-700 bg-amber-50" : "text-red-700 bg-red-50";
+  const bd = ranking.score_breakdown;
+  const shap = ranking.shap_explanation;
+  // Tiebreaker info from the Python ranking engine
+  const tiebreakerUsed = (ranking as Record<string, unknown>).tiebreaker_used as string | null;
+  const tiebreakerNote = (ranking as Record<string, unknown>).tiebreaker_note as string | null;
+
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="p-0">
+        {/* Header row */}
+        <div className="flex items-center gap-4 p-4 border-b">
+          <span className="text-2xl w-10 text-center">{medal}</span>
+          <div className="flex-1">
+            <p className="font-semibold text-base">{ranking.student_name}</p>
+            <p className="text-xs text-muted-foreground">Rank {ranking.rank}</p>
+            {/* Tiebreaker badge */}
+            {tiebreakerUsed === "financial_status" && (
+              <p className="text-xs text-amber-600 mt-0.5">
+                ⚖️ Tied on score — ranked by financial need
+              </p>
+            )}
+            {tiebreakerUsed === "first_come_first_served" && (
+              <p className="text-xs text-blue-600 mt-0.5">
+                ⚖️ Tied on score & financial need — ranked by submission date (FCFS)
+              </p>
+            )}
+          </div>
+          <div className={`px-3 py-1 rounded-full text-sm font-bold font-mono ${scoreColor}`}>
+            {ranking.total_score.toFixed(1)} / 100
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => setExpanded(!expanded)}>
+            {expanded ? "Hide Details" : "Show Details"}
+          </Button>
+        </div>
+
+        {/* Score bars — always visible */}
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <ScoreBar label="GPA" score={bd.gpa_score} weight={30} />
+          <ScoreBar label="Financial Need" score={bd.financial_score} weight={25} />
+          <ScoreBar label="Document Completeness" score={bd.document_completeness} weight={20} />
+          <ScoreBar label="Document Authenticity" score={bd.document_authenticity} weight={15} />
+          <ScoreBar label="Special Category" score={bd.special_category_score} weight={10} />
+        </div>
+
+        {/* Tiebreaker note — shown when applicable */}
+        {tiebreakerNote && (
+          <div className="mx-4 mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+            ⚖️ {tiebreakerNote}
+          </div>
+        )}
+
+        {/* SHAP explanation — expandable */}
+        {expanded && shap && (
+          <div className="border-t bg-gray-50 p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-primary">
+              <Brain className="h-4 w-4" />
+              AI Explanation (SHAP)
+            </div>
+            <p className="text-sm text-muted-foreground italic">"{shap.summary}"</p>
+
+            <div className="space-y-2">
+              {shap.contributions.map((c: ShapContribution) => (
+                <div key={c.factor} className="flex items-start gap-2 text-sm">
+                  {c.impact === "positive"
+                    ? <TrendingUp className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    : <TrendingDown className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                  }
+                  <div>
+                    <span className="font-medium">{c.factor}</span>
+                    <span className="text-muted-foreground ml-1">({c.raw_score.toFixed(0)}/100)</span>
+                    <p className="text-xs text-muted-foreground">{c.explanation}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {shap.top_strength && (
+              <div className="text-xs text-green-700 bg-green-50 rounded p-2">
+                <strong>Top Strength:</strong> {shap.top_strength.factor} ({shap.top_strength.raw_score.toFixed(0)}/100)
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ===== Main Component =====
 
 type ViewMode = "scholarships" | "applicants" | "review";
@@ -162,6 +276,13 @@ export function AdminApplications() {
   const [selectedScholarshipName, setSelectedScholarshipName] = useState("");
   const [applicants, setApplicants] = useState<Application[]>([]);
   const [applicantStats, setApplicantStats] = useState<Record<string, number>>({});
+
+  // AI Rankings
+  const [applicantsTab, setApplicantsTab] = useState<"list" | "rankings">("list");
+  const [rankings, setRankings] = useState<AIRanking[]>([]);
+  const [rankingsLoading, setRankingsLoading] = useState(false);
+  const [rankingsError, setRankingsError] = useState<string | null>(null);
+  const [rankingsGeneratedAt, setRankingsGeneratedAt] = useState<string | null>(null);
 
   // Review page
   const [reviewApplication, setReviewApplication] = useState<Application | null>(null);
@@ -400,6 +521,35 @@ export function AdminApplications() {
     }
   };
 
+  const handleGenerateRankings = async () => {
+    if (!selectedScholarshipId) return;
+    setRankingsLoading(true);
+    setRankingsError(null);
+    try {
+      const result = await generateAIRankings(selectedScholarshipId);
+      setRankings(result.rankings || []);
+      setRankingsGeneratedAt(result.ranked_at || new Date().toISOString());
+    } catch (err: any) {
+      setRankingsError(err.message || "Failed to generate rankings. Make sure the AI server is running on port 8000.");
+    } finally {
+      setRankingsLoading(false);
+    }
+  };
+
+  const handleLoadSavedRankings = async () => {
+    if (!selectedScholarshipId) return;
+    setRankingsLoading(true);
+    setRankingsError(null);
+    try {
+      const result = await fetchSavedRankings(selectedScholarshipId);
+      setRankings(result.rankings || []);
+    } catch (err: any) {
+      setRankingsError(err.message || "No saved rankings found.");
+    } finally {
+      setRankingsLoading(false);
+    }
+  };
+
   const docsVerified = reviewApplication?.submittedDocuments?.every((d) => d.status === "verified") ?? false;
   const docsSomePending = reviewApplication?.submittedDocuments?.some((d) => d.status === "pending_review" || d.status === "uploaded") ?? false;
   const docsAnyRejected = reviewApplication?.submittedDocuments?.some((d) => d.status === "rejected") ?? false;
@@ -496,6 +646,7 @@ export function AdminApplications() {
 
     return (
       <div className="p-8 space-y-6">
+        {/* Header */}
         <div className="flex items-center gap-4 mb-2">
           <Button variant="ghost" size="sm" onClick={() => setViewMode("scholarships")}>
             <ArrowLeft className="h-4 w-4 mr-1" /> Back
@@ -511,102 +662,206 @@ export function AdminApplications() {
           </div>
         </div>
 
-        {/* Filter Tabs */}
-        <div className="flex gap-2 flex-wrap">
-          {filterTabs.map((tab) => (
-            <Button
-              key={tab.value}
-              variant={statusFilter === tab.value ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter(tab.value)}
-            >
-              {tab.label}
-              {tab.value !== "all" && applicantStats[tab.value] > 0 && (
-                <Badge variant="secondary" className="ml-1 text-xs">{applicantStats[tab.value]}</Badge>
-              )}
-            </Button>
-          ))}
+        {/* Main Tabs: Applicants List | AI Rankings */}
+        <div className="flex gap-1 border-b">
+          <button
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              applicantsTab === "list"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setApplicantsTab("list")}
+          >
+            <FileText className="h-4 w-4 inline mr-1" />
+            Applicants List
+          </button>
+          <button
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              applicantsTab === "rankings"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setApplicantsTab("rankings")}
+          >
+            <Trophy className="h-4 w-4 inline mr-1" />
+            AI Rankings
+          </button>
         </div>
 
-        {/* Search */}
-        <div className="relative max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search by name or email..."
-            className="pl-9"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-
-        {/* Stats Summary */}
-        <div className="grid grid-cols-4 gap-4">
-          <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold font-mono">{applicantStats["all"] || applicants.length}</p><p className="text-xs text-muted-foreground">Total</p></CardContent></Card>
-          <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold font-mono text-orange-600">{applicantStats["System Qualified"] || 0}</p><p className="text-xs text-muted-foreground">Pending Review</p></CardContent></Card>
-          <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold font-mono text-green-600">{applicantStats["Qualified for Final Screening"] || 0}</p><p className="text-xs text-muted-foreground">Qualified</p></CardContent></Card>
-          <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold font-mono text-blue-600">{applicantStats["Approved"] || 0}</p><p className="text-xs text-muted-foreground">Approved</p></CardContent></Card>
-        </div>
-
-        {loading ? (
-          <div className="text-center py-8">Loading applicants...</div>
-        ) : (
-          <Card>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Student</TableHead>
-                    <TableHead>Match Score</TableHead>
-                    <TableHead>Submitted</TableHead>
-                    <TableHead>Documents</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((app) => {
-                    const verifiedCount = app.submittedDocuments?.filter((d) => d.status === "verified").length || 0;
-                    const totalDocs = app.submittedDocuments?.length || 0;
-                    const docStatusLabel = totalDocs > 0 ? `${verifiedCount}/${totalDocs} Verified` : "No docs";
-                    const docStatusColor = verifiedCount === totalDocs && totalDocs > 0 ? "text-green-600" : verifiedCount > 0 ? "text-amber-600" : "text-muted-foreground";
-
-                    return (
-                      <TableRow key={app._id}>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-8 w-8">
-                              <AvatarImage src={studentProfileAvatar(app.studentProfile)} />
-                              <AvatarFallback className="text-xs">{getInitials(app.studentName || app.studentEmail)}</AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <span className="font-medium">{app.studentName || app.studentEmail}</span>
-                              {app.studentName && <p className="text-xs text-muted-foreground">{app.studentEmail}</p>}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell><MatchScoreBadge score={app.matchScore} /></TableCell>
-                        <TableCell className="text-sm">{formatDate(app.submittedAt)}</TableCell>
-                        <TableCell className={`text-sm ${docStatusColor}`}>{docStatusLabel}</TableCell>
-                        <TableCell><StatusBadge status={app.status} /></TableCell>
-                        <TableCell className="text-right">
-                          <Button size="sm" onClick={() => handleReviewApplication(app)}>
-                            Review Application
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                  {filtered.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                        No applicants found.
-                      </TableCell>
-                    </TableRow>
+        {/* ── TAB: Applicants List ── */}
+        {applicantsTab === "list" && (
+          <>
+            {/* Filter Tabs */}
+            <div className="flex gap-2 flex-wrap">
+              {filterTabs.map((tab) => (
+                <Button
+                  key={tab.value}
+                  variant={statusFilter === tab.value ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setStatusFilter(tab.value)}
+                >
+                  {tab.label}
+                  {tab.value !== "all" && applicantStats[tab.value] > 0 && (
+                    <Badge variant="secondary" className="ml-1 text-xs">{applicantStats[tab.value]}</Badge>
                   )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                </Button>
+              ))}
+            </div>
+
+            {/* Search */}
+            <div className="relative max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by name or email..."
+                className="pl-9"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+
+            {/* Stats Summary */}
+            <div className="grid grid-cols-4 gap-4">
+              <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold font-mono">{applicantStats["all"] || applicants.length}</p><p className="text-xs text-muted-foreground">Total</p></CardContent></Card>
+              <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold font-mono text-orange-600">{applicantStats["System Qualified"] || 0}</p><p className="text-xs text-muted-foreground">Pending Review</p></CardContent></Card>
+              <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold font-mono text-green-600">{applicantStats["Qualified for Final Screening"] || 0}</p><p className="text-xs text-muted-foreground">Qualified</p></CardContent></Card>
+              <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold font-mono text-blue-600">{applicantStats["Approved"] || 0}</p><p className="text-xs text-muted-foreground">Approved</p></CardContent></Card>
+            </div>
+
+            {loading ? (
+              <div className="text-center py-8">Loading applicants...</div>
+            ) : (
+              <Card>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Student</TableHead>
+                        <TableHead>Match Score</TableHead>
+                        <TableHead>Submitted</TableHead>
+                        <TableHead>Documents</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filtered.map((app) => {
+                        const verifiedCount = app.submittedDocuments?.filter((d) => d.status === "verified").length || 0;
+                        const totalDocs = app.submittedDocuments?.length || 0;
+                        const docStatusLabel = totalDocs > 0 ? `${verifiedCount}/${totalDocs} Verified` : "No docs";
+                        const docStatusColor = verifiedCount === totalDocs && totalDocs > 0 ? "text-green-600" : verifiedCount > 0 ? "text-amber-600" : "text-muted-foreground";
+
+                        return (
+                          <TableRow key={app._id}>
+                            <TableCell>
+                              <div className="flex items-center gap-3">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarImage src={studentProfileAvatar(app.studentProfile)} />
+                                  <AvatarFallback className="text-xs">{getInitials(app.studentName || app.studentEmail)}</AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <span className="font-medium">{app.studentName || app.studentEmail}</span>
+                                  {app.studentName && <p className="text-xs text-muted-foreground">{app.studentEmail}</p>}
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell><MatchScoreBadge score={app.matchScore} /></TableCell>
+                            <TableCell className="text-sm">{formatDate(app.submittedAt)}</TableCell>
+                            <TableCell className={`text-sm ${docStatusColor}`}>{docStatusLabel}</TableCell>
+                            <TableCell><StatusBadge status={app.status} /></TableCell>
+                            <TableCell className="text-right">
+                              <Button size="sm" onClick={() => handleReviewApplication(app)}>
+                                Review Application
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                      {filtered.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                            No applicants found.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
+          </>
+        )}
+
+        {/* ── TAB: AI Rankings ── */}
+        {applicantsTab === "rankings" && (
+          <div className="space-y-6">
+            {/* Controls */}
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={handleGenerateRankings}
+                disabled={rankingsLoading}
+                className="gap-2"
+              >
+                <Brain className="h-4 w-4" />
+                {rankingsLoading ? "Analyzing with AI..." : "Generate AI Rankings"}
+              </Button>
+              {rankings.length > 0 && (
+                <Button variant="outline" size="sm" onClick={handleLoadSavedRankings} disabled={rankingsLoading}>
+                  Load Saved Rankings
+                </Button>
+              )}
+              {rankingsGeneratedAt && (
+                <span className="text-xs text-muted-foreground">
+                  Last generated: {new Date(rankingsGeneratedAt).toLocaleString()}
+                </span>
+              )}
+            </div>
+
+            {/* Error */}
+            {rankingsError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+                <AlertCircle className="h-4 w-4 inline mr-2" />
+                {rankingsError}
+              </div>
+            )}
+
+            {/* Loading */}
+            {rankingsLoading && (
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <Brain className="h-12 w-12 mx-auto mb-4 text-primary animate-pulse" />
+                  <p className="text-lg font-medium">Analyzing applications with AI...</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    BERT is verifying documents · Scoring 5 criteria · Generating SHAP explanations
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Empty state */}
+            {!rankingsLoading && rankings.length === 0 && !rankingsError && (
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <Trophy className="h-12 w-12 mx-auto mb-4 opacity-30" />
+                  <p className="text-lg font-medium">No rankings yet</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Click "Generate AI Rankings" to score and rank all qualified applicants.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Rankings list */}
+            {!rankingsLoading && rankings.length > 0 && (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground font-medium">
+                  {rankings.length} applicants ranked — sorted by AI score (highest first)
+                </p>
+                {rankings.map((r) => (
+                  <RankingCard key={r.student_id} ranking={r} />
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
     );
@@ -1114,3 +1369,4 @@ export function AdminApplications() {
 
   return null;
 }
+

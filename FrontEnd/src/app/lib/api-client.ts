@@ -49,11 +49,72 @@ export function signUp(payload: AuthPayload) {
   });
 }
 
+/** Step 1 of 2FA: verify email+password, returns { requiresOTP, userId, maskedEmail } */
 export function signIn(payload: Pick<AuthPayload, "email" | "password">) {
-  return request<{ user: Record<string, unknown> }>("/api/auth/signin", {
+  return request<{
+    success: boolean;
+    requiresOTP: boolean;
+    userId: string;
+    maskedEmail: string;
+    message: string;
+  }>("/api/auth/signin", {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+/** Step 2 of 2FA: verify OTP, returns { token, user } */
+export function verifyOTP(userId: string, otp: string) {
+  return request<{
+    success: boolean;
+    token: string;
+    user: Record<string, unknown>;
+  }>("/api/auth/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ userId, otp }),
+  });
+}
+
+/** Resend OTP for student login */
+export function resendOTP(userId: string) {
+  return request<{ success: boolean; message: string; maskedEmail: string }>(
+    "/api/auth/resend-otp",
+    { method: "POST", body: JSON.stringify({ userId }) }
+  );
+}
+
+/** Step 1 of admin 2FA: verify email+password */
+export function adminSignIn(payload: Pick<AuthPayload, "email" | "password">) {
+  return request<{
+    success: boolean;
+    requiresOTP: boolean;
+    userId: string;
+    maskedEmail: string;
+    message: string;
+  }>("/api/auth/admin/signin", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Step 2 of admin 2FA: verify OTP */
+export function adminVerifyOTP(userId: string, otp: string) {
+  return request<{
+    success: boolean;
+    token: string;
+    user: Record<string, unknown>;
+  }>("/api/auth/admin/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ userId, otp }),
+  });
+}
+
+/** Resend OTP for admin login */
+export function adminResendOTP(userId: string) {
+  return request<{ success: boolean; message: string; maskedEmail: string }>(
+    "/api/auth/admin/resend-otp",
+    { method: "POST", body: JSON.stringify({ userId }) }
+  );
 }
 
 /** Match % from API, capped when the student is not eligible (safety net for UI). */
@@ -405,4 +466,81 @@ export function fetchMyApplications(email: string) {
   return request<{ data: Array<Record<string, unknown>> }>(
     `/api/applications/my-applications?email=${encodeURIComponent(normalizedEmail)}`
   );
+}
+
+// ===== AI RANKING API =====
+
+export type ScoreBreakdown = {
+  gpa_score: number;
+  financial_score: number;
+  document_completeness: number;
+  document_authenticity: number;
+  special_category_score: number;
+};
+
+export type ShapContribution = {
+  factor: string;
+  shap_value: number;
+  raw_score: number;
+  weight_percent: number;
+  impact: "positive" | "negative";
+  level: "high" | "medium" | "low" | "zero";
+  explanation: string;
+};
+
+export type ShapExplanation = {
+  mode: "simple" | "shap";
+  contributions: ShapContribution[];
+  summary: string;
+  top_strength: ShapContribution | null;
+  top_weakness: ShapContribution | null;
+};
+
+export type AIRanking = {
+  student_id: string;
+  student_name: string;
+  rank: number;
+  total_score: number;
+  score_breakdown: ScoreBreakdown;
+  shap_explanation: ShapExplanation;
+  weights_used: Record<string, number>;
+};
+
+export type AIRankingResponse = {
+  success: boolean;
+  scholarship_id: string;
+  scholarship_name: string;
+  total_applicants: number;
+  rankings: AIRanking[];
+  ranked_at: string;
+};
+
+export type MyScoreResponse = {
+  success: boolean;
+  has_score: boolean;
+  rank: number | null;
+  total_applicants: number;
+  total_score: number | null;
+  score_breakdown: ScoreBreakdown | null;
+  shap_explanation: ShapExplanation | null;
+  ranked_at: string | null;
+};
+
+/** Admin: trigger AI ranking for all applicants of a scholarship */
+export function generateAIRankings(scholarshipId: string) {
+  return request<AIRankingResponse>(`/api/admin/scholarships/${scholarshipId}/rank`, {
+    method: "POST",
+  });
+}
+
+/** Admin: fetch saved rankings without re-computing */
+export function fetchSavedRankings(scholarshipId: string) {
+  return request<{ success: boolean; total: number; rankings: AIRanking[] }>(
+    `/api/admin/scholarships/${scholarshipId}/rankings`,
+  );
+}
+
+/** Student: fetch their own score for one application */
+export function fetchMyScore(applicationId: string) {
+  return request<MyScoreResponse>(`/api/applications/${applicationId}/my-score`);
 }

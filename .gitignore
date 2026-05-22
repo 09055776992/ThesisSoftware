@@ -1,5 +1,39 @@
+# Dependencies
 node_modules
 dist
 .vite
+
+# Environment variables (contains secrets — NEVER push these)
 .env
 .env.*
+
+# Python virtual environment (too large, not needed on GitHub)
+venv
+.venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Python build artifacts
+*.egg-info
+dist/
+build/
+*.egg
+
+# AI model cache (downloaded automatically, no need to push)
+AI-Backend/venv
+.cache
+huggingface_cache
+
+# Uploads folder (user files, not code)
+Backend/uploads
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/settings.json

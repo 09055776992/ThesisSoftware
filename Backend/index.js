@@ -12,6 +12,8 @@ import { getDb } from "./db.js";
 import { rankScholarships } from "./matching-algorithms.js";
 import { seedQCSPPScholarships } from "./seed-qcsp-scholarships.js";
 import * as eligibilityMatching from "./eligibility-matching.js";
+import { sendOTPEmail, sendWelcomeEmail, maskEmail } from "./services/emailService.js";
+import { generateOTP, getOTPExpiry } from "./utils/otpUtils.js";
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -854,6 +856,11 @@ app.post("/api/auth/signup", async (req, res) => {
     const token = createAuthToken({ userId: result.insertedId, email, userType });
     await db.collection("sessions").insertOne({ token, email, createdAt: new Date() });
 
+    // Send welcome email (non-blocking — don't fail signup if email fails)
+    sendWelcomeEmail(email, user.fullName).catch((err) =>
+      console.error("[Email] Welcome email failed:", err.message)
+    );
+
     return res.status(201).json({
       user: {
         fullName: user.fullName,
@@ -870,6 +877,9 @@ app.post("/api/auth/signup", async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// STEP 1 of 2FA login: verify email+password, send OTP
+// ---------------------------------------------------------------------------
 app.post("/api/auth/signin", async (req, res) => {
   try {
     const db = await getDb();
@@ -886,15 +896,108 @@ app.post("/api/auth/signin", async (req, res) => {
       return res.status(401).json({ error: "Invalid email or password." });
     }
 
-    const token = createAuthToken({ userId: user._id, email, userType: user.userType || "student" });
-    await db.collection("sessions").insertOne({ token, email, createdAt: new Date() });
+    // Password correct — generate OTP and send email
+    const otpCode = generateOTP();
+    const otpExpiry = getOTPExpiry();
 
-    const profileImage =
-      user.profileImage || user.profilePicture || user.avatar || "";
-    const profilePicture =
-      user.profilePicture || user.profileImage || user.avatar || "";
+    // Remove any existing OTP for this user
+    await db.collection("otps").deleteMany({ userId: user._id });
+
+    // Store new OTP
+    await db.collection("otps").insertOne({
+      userId: user._id,
+      email: user.email,
+      otp: otpCode,
+      otpExpiry,
+      isUsed: false,
+      attempts: 0,
+      createdAt: new Date(),
+    });
+
+    // Send OTP email
+    await sendOTPEmail(user.email, otpCode, user.fullName || user.email);
 
     return res.json({
+      success: true,
+      requiresOTP: true,
+      userId: String(user._id),
+      maskedEmail: maskEmail(user.email),
+      message: "Verification code sent to your email.",
+    });
+  } catch (error) {
+    console.error("[Signin] Error:", error);
+    return res.status(500).json({ error: "Failed to sign in." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// STEP 2 of 2FA login: verify OTP, return JWT
+// ---------------------------------------------------------------------------
+app.post("/api/auth/verify-otp", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const { userId, otp } = req.body ?? {};
+
+    if (!userId || !otp) {
+      return res.status(400).json({ error: "userId and otp are required." });
+    }
+
+    let userObjectId;
+    try {
+      userObjectId = new ObjectId(String(userId));
+    } catch {
+      return res.status(400).json({ error: "Invalid userId." });
+    }
+
+    const otpRecord = await db.collection("otps").findOne({
+      userId: userObjectId,
+      isUsed: false,
+    });
+
+    if (!otpRecord) {
+      return res.status(400).json({ error: "OTP expired or not found. Please login again." });
+    }
+
+    // Max 5 attempts
+    if (otpRecord.attempts >= 5) {
+      await db.collection("otps").deleteOne({ _id: otpRecord._id });
+      return res.status(400).json({ error: "Too many incorrect attempts. Please login again." });
+    }
+
+    // Check expiry
+    if (new Date() > new Date(otpRecord.otpExpiry)) {
+      await db.collection("otps").deleteOne({ _id: otpRecord._id });
+      return res.status(400).json({ error: "OTP has expired. Please login again." });
+    }
+
+    // Check OTP value
+    if (String(otp) !== String(otpRecord.otp)) {
+      await db.collection("otps").updateOne(
+        { _id: otpRecord._id },
+        { $inc: { attempts: 1 } }
+      );
+      const remaining = 5 - (otpRecord.attempts + 1);
+      return res.status(400).json({ error: `Incorrect code. ${remaining} attempt(s) remaining.` });
+    }
+
+    // OTP correct — mark as used
+    await db.collection("otps").updateOne({ _id: otpRecord._id }, { $set: { isUsed: true } });
+
+    // Fetch user
+    const user = await db.collection("users").findOne({ _id: userObjectId });
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    const token = createAuthToken({ userId: user._id, email: user.email, userType: user.userType || "student" });
+    await db.collection("sessions").insertOne({ token, email: user.email, createdAt: new Date() });
+
+    const profileImage = user.profileImage || user.profilePicture || user.avatar || "";
+
+    return res.json({
+      success: true,
+      token,
       user: {
         fullName: user.fullName || "",
         email: user.email,
@@ -903,12 +1006,72 @@ app.post("/api/auth/signin", async (req, res) => {
         userType: user.userType || "student",
         avatar: profileImage,
         profileImage,
-        profilePicture,
+        profilePicture: profileImage,
       },
-      token,
     });
   } catch (error) {
-    return res.status(500).json({ error: "Failed to sign in." });
+    console.error("[Verify OTP] Error:", error);
+    return res.status(500).json({ error: "Verification failed. Please try again." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Resend OTP (rate-limited: 60 seconds between requests)
+// ---------------------------------------------------------------------------
+app.post("/api/auth/resend-otp", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const { userId } = req.body ?? {};
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required." });
+    }
+
+    let userObjectId;
+    try {
+      userObjectId = new ObjectId(String(userId));
+    } catch {
+      return res.status(400).json({ error: "Invalid userId." });
+    }
+
+    const user = await db.collection("users").findOne({ _id: userObjectId });
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    // Rate limit: only allow resend after 60 seconds
+    const recentOTP = await db.collection("otps").findOne({
+      userId: userObjectId,
+      createdAt: { $gt: new Date(Date.now() - 60 * 1000) },
+    });
+
+    if (recentOTP) {
+      return res.status(429).json({ error: "Please wait 60 seconds before requesting a new code." });
+    }
+
+    const otpCode = generateOTP();
+    await db.collection("otps").deleteMany({ userId: userObjectId });
+    await db.collection("otps").insertOne({
+      userId: userObjectId,
+      email: user.email,
+      otp: otpCode,
+      otpExpiry: getOTPExpiry(),
+      isUsed: false,
+      attempts: 0,
+      createdAt: new Date(),
+    });
+
+    await sendOTPEmail(user.email, otpCode, user.fullName || user.email);
+
+    return res.json({
+      success: true,
+      message: "New verification code sent.",
+      maskedEmail: maskEmail(user.email),
+    });
+  } catch (error) {
+    console.error("[Resend OTP] Error:", error);
+    return res.status(500).json({ error: "Failed to resend code." });
   }
 });
 
@@ -935,19 +1098,167 @@ app.post("/api/auth/admin/signin", async (req, res) => {
       return res.status(401).json({ error: "Invalid admin credentials." });
     }
 
-    const token = createAuthToken({ userId: admin._id, email, userType: "admin" });
-    await db.collection("sessions").insertOne({ token, email, role: "admin", createdAt: new Date() });
+    // Password correct — generate OTP and send email
+    const otpCode = generateOTP();
+    const otpExpiry = getOTPExpiry();
+
+    await db.collection("otps").deleteMany({ userId: admin._id });
+    await db.collection("otps").insertOne({
+      userId: admin._id,
+      email: admin.email,
+      otp: otpCode,
+      otpExpiry,
+      isUsed: false,
+      attempts: 0,
+      userType: "admin",
+      createdAt: new Date(),
+    });
+
+    await sendOTPEmail(admin.email, otpCode, admin.fullName || admin.email);
 
     return res.json({
+      success: true,
+      requiresOTP: true,
+      userId: String(admin._id),
+      maskedEmail: maskEmail(admin.email),
+      message: "Verification code sent to your email.",
+    });
+  } catch (error) {
+    console.error("[Admin Signin] Error:", error);
+    return res.status(500).json({ error: "Failed to sign in as admin." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Admin OTP verification
+// ---------------------------------------------------------------------------
+app.post("/api/auth/admin/verify-otp", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const { userId, otp } = req.body ?? {};
+
+    if (!userId || !otp) {
+      return res.status(400).json({ error: "userId and otp are required." });
+    }
+
+    let adminObjectId;
+    try {
+      adminObjectId = new ObjectId(String(userId));
+    } catch {
+      return res.status(400).json({ error: "Invalid userId." });
+    }
+
+    const otpRecord = await db.collection("otps").findOne({
+      userId: adminObjectId,
+      isUsed: false,
+    });
+
+    if (!otpRecord) {
+      return res.status(400).json({ error: "OTP expired or not found. Please login again." });
+    }
+
+    if (otpRecord.attempts >= 5) {
+      await db.collection("otps").deleteOne({ _id: otpRecord._id });
+      return res.status(400).json({ error: "Too many incorrect attempts. Please login again." });
+    }
+
+    if (new Date() > new Date(otpRecord.otpExpiry)) {
+      await db.collection("otps").deleteOne({ _id: otpRecord._id });
+      return res.status(400).json({ error: "OTP has expired. Please login again." });
+    }
+
+    if (String(otp) !== String(otpRecord.otp)) {
+      await db.collection("otps").updateOne(
+        { _id: otpRecord._id },
+        { $inc: { attempts: 1 } }
+      );
+      const remaining = 5 - (otpRecord.attempts + 1);
+      return res.status(400).json({ error: `Incorrect code. ${remaining} attempt(s) remaining.` });
+    }
+
+    await db.collection("otps").updateOne({ _id: otpRecord._id }, { $set: { isUsed: true } });
+
+    const admin = await db.collection("admins").findOne({ _id: adminObjectId });
+    if (!admin) {
+      return res.status(404).json({ error: "Admin not found." });
+    }
+
+    const token = createAuthToken({ userId: admin._id, email: admin.email, userType: "admin" });
+    await db.collection("sessions").insertOne({ token, email: admin.email, role: "admin", createdAt: new Date() });
+
+    return res.json({
+      success: true,
+      token,
       user: {
         fullName: admin.fullName || "",
         email: admin.email,
         userType: "admin",
       },
-      token,
     });
   } catch (error) {
-    return res.status(500).json({ error: "Failed to sign in as admin." });
+    console.error("[Admin Verify OTP] Error:", error);
+    return res.status(500).json({ error: "Verification failed. Please try again." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Admin resend OTP
+// ---------------------------------------------------------------------------
+app.post("/api/auth/admin/resend-otp", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const { userId } = req.body ?? {};
+
+    if (!userId) {
+      return res.status(400).json({ error: "userId is required." });
+    }
+
+    let adminObjectId;
+    try {
+      adminObjectId = new ObjectId(String(userId));
+    } catch {
+      return res.status(400).json({ error: "Invalid userId." });
+    }
+
+    const admin = await db.collection("admins").findOne({ _id: adminObjectId });
+    if (!admin) {
+      return res.status(404).json({ error: "Admin not found." });
+    }
+
+    const recentOTP = await db.collection("otps").findOne({
+      userId: adminObjectId,
+      createdAt: { $gt: new Date(Date.now() - 60 * 1000) },
+    });
+
+    if (recentOTP) {
+      return res.status(429).json({ error: "Please wait 60 seconds before requesting a new code." });
+    }
+
+    const otpCode = generateOTP();
+    await db.collection("otps").deleteMany({ userId: adminObjectId });
+    await db.collection("otps").insertOne({
+      userId: adminObjectId,
+      email: admin.email,
+      otp: otpCode,
+      otpExpiry: getOTPExpiry(),
+      isUsed: false,
+      attempts: 0,
+      userType: "admin",
+      createdAt: new Date(),
+    });
+
+    await sendOTPEmail(admin.email, otpCode, admin.fullName || admin.email);
+
+    return res.json({
+      success: true,
+      message: "New verification code sent.",
+      maskedEmail: maskEmail(admin.email),
+    });
+  } catch (error) {
+    console.error("[Admin Resend OTP] Error:", error);
+    return res.status(500).json({ error: "Failed to resend code." });
   }
 });
 
@@ -3347,6 +3658,247 @@ app.post("/api/users/profile", handleUserProfileUpdate);
       res.status(500).json({ error: "Failed to generate export." });
     }
   });
+
+// ============================================================
+// AI RANKING ROUTES
+// ============================================================
+
+import { rankStudents as aiRankStudents, checkAIHealth } from "./services/aiService.js";
+
+/**
+ * POST /api/admin/scholarships/:id/rank
+ * Triggers AI scoring + ranking for all qualified applicants of a scholarship.
+ * Saves rank, totalScore, scoreBreakdown, shapExplanation back to each Application.
+ */
+app.post("/api/admin/scholarships/:id/rank", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const scholarshipId = String(req.params.id || "").trim();
+
+    // 1. Check AI service is reachable
+    const aiAlive = await checkAIHealth();
+    if (!aiAlive) {
+      return res.status(503).json({
+        error: "AI service is not running. Please start the Python backend on port 8000.",
+      });
+    }
+
+    // 2. Fetch scholarship
+    let scholarship = null;
+    if (ObjectId.isValid(scholarshipId)) {
+      scholarship = await db.collection("scholarships").findOne({ _id: new ObjectId(scholarshipId) });
+    }
+    if (!scholarship) {
+      return res.status(404).json({ error: "Scholarship not found." });
+    }
+
+    // 3. Fetch all applications for this scholarship (all active statuses)
+    // Query both ObjectId and string versions of scholarshipId for compatibility
+    const idAsObjectId = ObjectId.isValid(scholarshipId) ? new ObjectId(scholarshipId) : null;
+    const idQuery = idAsObjectId
+      ? { $or: [{ scholarshipId: idAsObjectId }, { scholarshipId: scholarshipId }] }
+      : { scholarshipId: scholarshipId };
+
+    const applications = await db
+      .collection("applications")
+      .find({
+        ...idQuery,
+        status: { $in: ["System Qualified", "Under Review", "Pending", "Qualified for Final Screening", "Approved"] },
+      })
+      .toArray();
+
+    console.log(`[AI Rank] Found ${applications.length} applications for scholarship ${scholarshipId}`);
+
+    if (applications.length === 0) {
+      return res.json({
+        success: true,
+        message: "No qualified applicants to rank.",
+        rankings: [],
+        total_applicants: 0,
+      });
+    }
+
+    // 4. Fetch student profiles for each application
+    const studentEmails = [...new Set(applications.map((a) => String(a.studentEmail || "").toLowerCase()))];
+    const studentDocs = await db
+      .collection("users")
+      .find({ email: { $in: studentEmails } })
+      .toArray();
+
+    const studentByEmail = {};
+    for (const s of studentDocs) {
+      studentByEmail[String(s.email || "").toLowerCase()] = s;
+    }
+
+    // 5. Build student + application arrays for the AI service
+    const students = applications.map((app) => {
+      const email = String(app.studentEmail || "").toLowerCase();
+      const student = studentByEmail[email] || {};
+      return {
+        student_id: String(app._id),
+        student_name: app.studentName || student.fullName || email,
+        gpa: parseFloat(student.gwa || student.GWA || student.gpa || student.GPA || 5.0) || null,
+        income_category: student.incomeCategory || student.income_category || "",
+        financial_need: parseInt(student.financialNeed || student.financial_need || 1, 10) || 1,
+        special_categories: {
+          isFromIndigenousFamily: !!(student.isFromIndigenousFamily || student.specialCategories?.isFromIndigenousFamily),
+          isPersonWithDisability: !!(student.isPWD || student.specialCategories?.isPWD),
+          isPWD: !!(student.isPWD || student.specialCategories?.isPWD),
+          isSoloParent: !!(student.isSoloParent || student.specialCategories?.isSoloParent),
+          isIndigent: !!(student.isIndigent || student.specialCategories?.isIndigent),
+          isAthlete: !!(student.isAthlete || student.specialCategories?.isAthlete),
+          isArtist: !!(student.isArtist || student.specialCategories?.isArtist),
+          isSKOfficial: !!(student.isSKOfficial || student.specialCategories?.isSKOfficial),
+          isStudentLeader: !!(student.isStudentLeader || student.specialCategories?.isStudentLeader),
+          hasAcademicHonors: !!(student.hasAcademicHonors || student.academic_honors),
+        },
+        education_level: student.educationLevel || student.education_level || "",
+        submitted_at: app.submittedAt ? new Date(app.submittedAt).toISOString() : "9999-12-31",
+      };
+    });
+
+    const appPayloads = applications.map((app) => ({
+      submittedDocuments: (app.submittedDocuments || []).map((d) => ({
+        documentType: d.documentType || d.type || "",
+        status: d.status || "uploaded",
+      })),
+      authenticityResults: (app.authenticityResults || []),
+    }));
+
+    // 6. Call Python AI service
+    const aiResult = await aiRankStudents(
+      students,
+      scholarshipId,
+      scholarship,
+      appPayloads,
+    );
+
+    if (!aiResult || !aiResult.rankings) {
+      return res.status(502).json({ error: "AI service returned an invalid response." });
+    }
+
+    // 7. Save rankings back to each Application document
+    const now = new Date();
+    for (const ranked of aiResult.rankings) {
+      const appId = ranked.student_id;
+      if (!ObjectId.isValid(appId)) continue;
+
+      await db.collection("applications").updateOne(
+        { _id: new ObjectId(appId) },
+        {
+          $set: {
+            rank: ranked.rank,
+            totalScore: ranked.total_score,
+            scoreBreakdown: ranked.score_breakdown,
+            shapExplanation: ranked.shap_explanation,
+            rankedAt: now,
+          },
+        },
+      );
+    }
+
+    return res.json({
+      success: true,
+      scholarship_id: scholarshipId,
+      scholarship_name: scholarship.name,
+      total_applicants: aiResult.total_applicants,
+      rankings: aiResult.rankings,
+      ranked_at: now.toISOString(),
+    });
+  } catch (error) {
+    console.error("[AI Rank] Error:", error);
+    return res.status(500).json({ error: "Failed to generate rankings.", details: error.message });
+  }
+});
+
+/**
+ * GET /api/admin/scholarships/:id/rankings
+ * Returns saved rankings for a scholarship (no re-computation).
+ */
+app.get("/api/admin/scholarships/:id/rankings", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const scholarshipId = String(req.params.id || "").trim();
+
+    const query = ObjectId.isValid(scholarshipId)
+      ? { scholarshipId: new ObjectId(scholarshipId), rank: { $exists: true } }
+      : { scholarshipId, rank: { $exists: true } };
+
+    const ranked = await db
+      .collection("applications")
+      .find(query)
+      .sort({ rank: 1 })
+      .toArray();
+
+    return res.json({
+      success: true,
+      total: ranked.length,
+      rankings: ranked.map((a) => ({
+        application_id: String(a._id),
+        student_id: String(a.studentId || ""),
+        student_name: a.studentName || a.studentEmail,
+        student_email: a.studentEmail,
+        rank: a.rank,
+        total_score: a.totalScore,
+        score_breakdown: a.scoreBreakdown,
+        shap_explanation: a.shapExplanation,
+        status: a.status,
+        ranked_at: a.rankedAt,
+      })),
+    });
+  } catch (error) {
+    console.error("[AI Rankings GET] Error:", error);
+    return res.status(500).json({ error: "Failed to fetch rankings." });
+  }
+});
+
+/**
+ * GET /api/applications/:id/my-score
+ * Student fetches their own score and rank for one application.
+ * Never exposes other students' data.
+ */
+app.get("/api/applications/:id/my-score", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const appId = String(req.params.id || "").trim();
+
+    if (!ObjectId.isValid(appId)) {
+      return res.status(400).json({ error: "Invalid application ID." });
+    }
+
+    const application = await db
+      .collection("applications")
+      .findOne({ _id: new ObjectId(appId) });
+
+    if (!application) {
+      return res.status(404).json({ error: "Application not found." });
+    }
+
+    // Count total ranked applicants for this scholarship (for "Rank X of Y" display)
+    const scholarshipId = application.scholarshipId;
+    const totalRanked = await db
+      .collection("applications")
+      .countDocuments({ scholarshipId, rank: { $exists: true } });
+
+    // Only return this student's own data
+    return res.json({
+      success: true,
+      has_score: application.rank != null,
+      rank: application.rank ?? null,
+      total_applicants: totalRanked,
+      total_score: application.totalScore ?? null,
+      score_breakdown: application.scoreBreakdown ?? null,
+      shap_explanation: application.shapExplanation ?? null,
+      ranked_at: application.rankedAt ?? null,
+    });
+  } catch (error) {
+    console.error("[My Score] Error:", error);
+    return res.status(500).json({ error: "Failed to fetch score." });
+  }
+});
 
 // Handle unknown /api routes
 app.use('/api', (req, res) => {

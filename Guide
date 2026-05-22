@@ -1,0 +1,205 @@
+# 🎓 SCHOLAR System — How to Run the System
+**For Groupmates — Step by Step**
+
+---
+
+## ✅ BEFORE YOU START — Install These First (One Time Only)
+
+### 1. Install Node.js
+- Download from: https://nodejs.org/
+- Choose the **LTS version** (the green button)
+- Install it — just click Next, Next, Finish
+- Verify: Open Command Prompt and type:
+  ```
+  node --version
+  ```
+  You should see something like: `v22.0.0`
+
+### 2. Install Python 3.11
+- Download from: https://www.python.org/downloads/release/python-3119/
+- Scroll down and click **"Windows installer (64-bit)"**
+- **⚠️ VERY IMPORTANT**: When the installer opens, CHECK THE BOX that says:
+  ✅ **"Add Python 3.11 to PATH"**
+- Then click **"Install Now"**
+- Verify: Open Command Prompt and type:
+  ```
+  python --version
+  ```
+  You should see: `Python 3.11.x`
+
+---
+
+## 📁 STEP 1 — Get the Project Files
+
+Copy the entire **"Thesis Software"** folder to your computer.
+Put it somewhere easy to find, like:
+```
+C:\Thesis Software\
+```
+
+---
+
+## 💻 STEP 2 — Open the Project in VS Code
+
+1. Open **VS Code**
+2. Click **File → Open Folder**
+3. Select the **"Thesis Software"** folder
+4. Click **Select Folder**
+
+---
+
+## 📦 STEP 3 — Install All Dependencies
+
+You need to open **3 separate terminals** in VS Code.
+Press **Ctrl + `** to open a terminal, then click the **+** button to open more.
+
+### Terminal 1 — Install Backend packages
+```bash
+cd Backend
+npm install
+```
+Wait until it finishes (you'll see the cursor come back).
+
+### Terminal 2 — Install Frontend packages
+```bash
+cd FrontEnd
+npm install
+```
+Wait until it finishes.
+
+### Terminal 3 — Install Python AI packages
+```bash
+cd AI-Backend
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+⚠️ This one takes **5-10 minutes** — it's downloading AI libraries. Just wait.
+
+---
+
+## ▶️ STEP 4 — Run the System
+
+You need **3 terminals running at the same time**. Keep all of them open.
+
+### Terminal 1 — Start the Backend
+```bash
+cd Backend
+node index.js
+```
+✅ Ready when you see: `API listening on 4000` or `Server running`
+
+### Terminal 2 — Start the Frontend
+```bash
+cd FrontEnd
+npm run dev
+```
+✅ Ready when you see: `Local: http://localhost:5173/`
+
+### Terminal 3 — Start the AI Backend
+```bash
+cd AI-Backend
+venv\Scripts\activate
+python -m uvicorn main:app --reload --port 8000
+```
+✅ Ready when you see:
+```
+==================================================
+  SCHOLAR AI Backend is running
+  URL:  http://localhost:8000
+==================================================
+```
+
+---
+
+## 🌐 STEP 5 — Open the System in Your Browser
+
+Once all 3 terminals are running, open your browser and go to:
+```
+http://localhost:5173
+```
+
+You should see the **SCHOLAR login page**! 🎉
+
+---
+
+## 👤 STEP 6 — Log In
+
+Ask your groupmate for the login credentials, or use the test accounts:
+
+| Role | What they can do |
+|------|-----------------|
+| **Student** | Browse scholarships, apply, track applications, see AI score |
+| **Admin** | Review applications, generate AI rankings, approve/reject |
+
+---
+
+## 🤖 STEP 7 — Using the AI Ranking Feature (Admin Only)
+
+1. Log in as **Admin**
+2. Click **Applications** in the sidebar
+3. Click **View Applicants** on any scholarship
+4. Click the **AI Rankings** tab
+5. Click **Generate AI Rankings**
+6. Wait 10-30 seconds
+7. See the ranked list with scores and AI explanations
+
+---
+
+## ⚠️ COMMON PROBLEMS AND FIXES
+
+### Problem: `node is not recognized`
+**Fix**: Install Node.js from https://nodejs.org/ then restart VS Code
+
+### Problem: `python is not recognized`
+**Fix**: Reinstall Python 3.11 and make sure to check **"Add Python to PATH"**
+
+### Problem: `torch` install fails
+**Fix**: Run this instead:
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.txt
+```
+
+### Problem: `Fatal error in launcher` when running uvicorn
+**Fix**: Always use `python -m uvicorn` instead of just `uvicorn`:
+```bash
+python -m uvicorn main:app --reload --port 8000
+```
+
+### Problem: AI Rankings shows empty / error
+**Fix**: Make sure Terminal 3 (AI Backend) is running. If it's not started, the rankings won't work.
+
+### Problem: Website not loading
+**Fix**: Make sure all 3 terminals are running. Check that you see the "ready" messages in each one.
+
+---
+
+## 📋 QUICK CHECKLIST
+
+Before testing, confirm all of these:
+
+- [ ] Node.js installed (`node --version` works)
+- [ ] Python 3.11 installed (`python --version` shows 3.11.x)
+- [ ] `npm install` done in Backend folder
+- [ ] `npm install` done in FrontEnd folder
+- [ ] `pip install -r requirements.txt` done in AI-Backend folder
+- [ ] Terminal 1: Backend is running (port 4000 or 5000)
+- [ ] Terminal 2: Frontend is running (port 5173)
+- [ ] Terminal 3: AI Backend is running (port 8000)
+- [ ] Can open http://localhost:5173 in browser
+- [ ] Can log in successfully
+
+---
+
+## 💡 TIPS
+
+- **Every time you want to use the system**, you need to start all 3 terminals again
+- **Don't close the terminals** while using the system — it will stop working
+- The **first time** you run the AI Backend, it downloads the BERT model (~440MB). This is normal and only happens once.
+- If something breaks, **restart all 3 terminals** — that fixes most problems
+
+---
+
+**Last Updated**: May 2026
+**Project**: SCHOLAR — Scholarship Matching System
