@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { GraduationCap, ShieldCheck, ArrowLeft } from "lucide-react";
+import { GraduationCap, ShieldCheck, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import {
   buildNameFromEmail,
   clearStoredUser,
@@ -116,6 +116,7 @@ export function SignIn() {
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   // Step 2 state
   const [step, setStep] = useState<"login" | "otp">("login");
@@ -286,16 +287,26 @@ export function SignIn() {
 
                 <div className="space-y-2">
                   <Label htmlFor="password" className="text-gray-700">Password</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="Enter your password"
-                    required
-                    autoComplete="new-password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="h-11 rounded-lg"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Enter your password"
+                      required
+                      autoComplete="new-password"
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      className="h-11 rounded-lg pr-11"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-end">

@@ -7,7 +7,7 @@ using BERT embeddings and keyword matching.
 import re
 import torch
 import numpy as np
-from transformers import BertModel, BertTokenizer
+from transformers import AutoModel, AutoTokenizer
 
 # ---------------------------------------------------------------------------
 # Expected keyword sets per document type
@@ -61,17 +61,18 @@ class BERTDocumentAnalyzer:
     """
 
     def __init__(self):
-        print("[BERT] Loading tokenizer and model (first run may take a few minutes)...")
+        print("[ModernBERT] Loading tokenizer and model (first run may take a few minutes)...")
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"[BERT] Using device: {self.device}")
+        print(f"[ModernBERT] Using device: {self.device}")
 
-        # Load BERT for embeddings
-        self.tokenizer = BertTokenizer.from_pretrained("google-bert/bert-base-uncased")
-        self.model = BertModel.from_pretrained("google-bert/bert-base-uncased")
+        # Load ModernBERT for embeddings (8192 context, Flash Attention support)
+        model_id = "answerdotai/ModernBERT-base"
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
+        self.model = AutoModel.from_pretrained(model_id)  # Standard attention (Flash Attn optional)
         self.model.to(self.device)
         self.model.eval()
 
-        print("[BERT] Model loaded successfully.")
+        print("[ModernBERT] Model loaded successfully (8192 token context).")
 
     # ------------------------------------------------------------------
     # Public API
@@ -89,7 +90,7 @@ class BERTDocumentAnalyzer:
             text,
             return_tensors="pt",
             truncation=True,
-            max_length=512,
+            max_length=8192,  # ModernBERT supports 16x longer context
         )
         token_count = int(inputs["input_ids"].shape[1])
 
@@ -109,7 +110,7 @@ class BERTDocumentAnalyzer:
             text,
             return_tensors="pt",
             truncation=True,
-            max_length=512,
+            max_length=8192,  # ModernBERT supports 16x longer context
             padding=True,
         )
         inputs = {k: v.to(self.device) for k, v in inputs.items()}

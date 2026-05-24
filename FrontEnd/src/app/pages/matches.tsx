@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Card, CardContent, CardHeader, CardDescription, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { ImageWithFallback } from "../components/figma/ImageWithFallback";
-import { Bookmark, Award, Calendar, MapPin, ExternalLink } from "lucide-react";
+import { Bookmark, ExternalLink, TrendingUp, TrendingDown, Minus, Star } from "lucide-react";
 import { fetchScholarshipsWithEligibility, resolveDisplayMatchScore } from "../lib/api-client";
 import { getStoredUser } from "../lib/user-storage";
+import { galeShapleyMatch, type RankedScholarship } from "../lib/galeShapleyMatch";
+import { generateShapContributions, type ShapContribution } from "../lib/generateShapContributions";
 
-// Scholarship cover images mapping (FIX 5)
+// Scholarship cover images mapping
 const scholarshipImages: Record<string, string> = {
   "College Academic Scholarship": "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=600&q=80",
   "College Athletic and Arts Scholarship": "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=600&q=80",
@@ -26,27 +26,57 @@ const scholarshipImages: Record<string, string> = {
 // Default fallback image
 const defaultScholarshipImage = "https://images.unsplash.com/photo-1541339907198-e08756dedf3f?w=600&q=80";
 
+// SHAP contribution bar component
+function ShapBar({ contribution }: { contribution: ShapContribution }) {
+  const barWidth = Math.min(100, Math.abs(contribution.contribution) * 2);
+  const barColor =
+    contribution.impact === "positive"
+      ? "bg-emerald-500"
+      : contribution.impact === "negative"
+        ? "bg-amber-500"
+        : "bg-gray-300";
+
+  const ImpactIcon =
+    contribution.impact === "positive"
+      ? TrendingUp
+      : contribution.impact === "negative"
+        ? TrendingDown
+        : Minus;
+
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <ImpactIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <span className="w-[110px] shrink-0 truncate text-muted-foreground">
+        {contribution.factor}
+      </span>
+      <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${barColor}`}
+          style={{ width: `${barWidth}%` }}
+        />
+      </div>
+      <span className={`w-10 text-right font-semibold shrink-0 ${
+        contribution.impact === "positive" ? "text-emerald-600" : 
+        contribution.impact === "negative" ? "text-amber-600" : "text-gray-500"
+      }`}>
+        {contribution.displayContribution}
+      </span>
+    </div>
+  );
+}
+
 export function Matches() {
   const [scholarships, setScholarships] = useState<any[]>([]);
 
   useEffect(() => {
     const user = getStoredUser();
     console.debug("Matches: current user profile:", user);
-    console.debug("Matches: profile fields used -> gpa, fieldOfStudy, location, incomeCategory, financialNeed:", {
-      gpa: user?.gpa,
-      fieldOfStudy: user?.fieldOfStudy,
-      location: user?.location,
-      incomeCategory: user?.incomeCategory,
-      financialNeed: user?.financialNeed,
-    });
 
-    // Fetch scholarships - use regular endpoint since we'll calculate scores client-side
     fetchScholarshipsWithEligibility(user?.email || "")
       .then((result: any) => {
         const raw = result.data || [];
         console.log("Matches: fetched scholarships count:", raw.length);
 
-        // Calculate match scores using unified function
         const withMatchScores = raw.map((item: any, idx: number) => {
           const status = String(item.eligibilityStatus || "");
           const score = resolveDisplayMatchScore(
@@ -55,7 +85,7 @@ export function Matches() {
           );
           const qualified = status === "eligible" || status === "may-be-eligible";
           const failedReasons = item.eligibility?.unmetCriteria || [];
-          
+
           return {
             id: Number(item.id) || Number(item._id) || idx + 1,
             name: String(item.name || ""),
@@ -91,10 +121,10 @@ export function Matches() {
       });
   }, []);
 
-  const { matches, lowMatches, userMissingFields, userHasProfileFields } = useMemo(() => {
+  const { rankedMatches, userMissingFields, userHasProfileFields } = useMemo(() => {
     const user = getStoredUser();
     const missing: string[] = [];
-    const userHasProfileFields = !!(user && (user.gpa || user.fieldOfStudy || user.location || user.incomeCategory || (user.financialNeed && user.financialNeed.length)));
+    const hasFields = !!(user && (user.gpa || user.fieldOfStudy || user.location || user.incomeCategory || (user.financialNeed && user.financialNeed.length)));
 
     if (!user) {
       missing.push("GPA", "Field of Study", "Location", "Financial need / Income");
@@ -105,30 +135,59 @@ export function Matches() {
       if (!user.incomeCategory && !(user.financialNeed && user.financialNeed.length)) missing.push("Financial need / Income");
     }
 
-    // Prefer server eligibility; fall back to client match score
+    // Filter to qualified scholarships
     const qualified = scholarships.filter(
       (s) =>
         s.eligibilityStatus === "eligible" ||
         s.eligibilityStatus === "may-be-eligible" ||
         s.qualified === true,
     );
-    qualified.sort((a, b) => {
-      const statusOrder: Record<string, number> = { eligible: 0, "may-be-eligible": 1, unknown: 2, "not-eligible": 3 };
-      const aOrder = statusOrder[a.eligibilityStatus || "unknown"] ?? 2;
-      const bOrder = statusOrder[b.eligibilityStatus || "unknown"] ?? 2;
-      if (aOrder !== bOrder) return aOrder - bOrder;
-      return (b.matchPercent || 0) - (a.matchPercent || 0);
-    });
 
-    return { matches: qualified, lowMatches: [], userMissingFields: missing, userHasProfileFields };
+    // Apply Gale-Shapley stable matching to produce rank ordering
+    const studentPrefs = user ? {
+      gpa: user.gpa ? Number(user.gpa) : undefined,
+      fieldOfStudy: user.fieldOfStudy,
+      location: user.location,
+      incomeCategory: user.incomeCategory,
+      financialNeed: Array.isArray(user.financialNeed) ? user.financialNeed[0] : user.financialNeed,
+      educationLevel: user.educationLevel,
+      householdIncome: user.householdIncome,
+      financialSupportSource: user.financialSupportSource,
+      economicDependency: user.economicDependency,
+      specialCategories: {
+        isAthlete: !!user.isAthlete,
+        isArtist: !!user.isArtist,
+        isSKOfficial: !!user.isSKOfficial,
+        isStudentLeader: !!user.isStudentLeader,
+        isIndigent: !!user.isIndigent,
+        isPWD: !!user.isPWD,
+        isSoloParent: !!user.isSoloParent,
+        isFromIndigenousFamily: false,
+        isPersonWithDisability: !!user.isPWD,
+        hasAcademicHonors: !!user.hasAcademicHonors,
+      },
+    } : {};
+
+    const ranked = galeShapleyMatch(qualified, studentPrefs);
+
+    return {
+      rankedMatches: ranked,
+      userMissingFields: missing,
+      userHasProfileFields: hasFields,
+    };
   }, [scholarships]);
 
+  // Get stored user for SHAP contributions
+  const storedUser = useMemo(() => getStoredUser(), []);
+
   return (
-    <div className="p-8">
+    <div className="p-6 lg:p-8">
       <div className="max-w-7xl mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">Scholarship Matches</h1>
-          <p className="text-muted-foreground">Scholarships that match your profile, sorted by match percentage.</p>
+          <p className="text-muted-foreground">
+            Ranked by Gale-Shapley stable matching algorithm based on mutual fit between your profile and scholarship criteria.
+          </p>
         </div>
 
         {/* If there are no scholarships at all */}
@@ -151,7 +210,7 @@ export function Matches() {
           </div>
         ) : (
           <>
-            {matches.length === 0 ? (
+            {rankedMatches.length === 0 ? (
               <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
                 <div className="max-w-md mx-auto">
                   <h2 className="text-xl font-semibold text-gray-900 mb-2">No scholarships match your profile yet</h2>
@@ -159,39 +218,118 @@ export function Matches() {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {matches.map((s) => (
-                  <Card key={s.id} className="hover:shadow-lg transition-shadow">
-                    <div className="relative h-36">
-                      <img
-                        src={scholarshipImages[s.name] || defaultScholarshipImage}
-                        alt={s.name}
-                        className="w-full h-full object-cover rounded-t-lg"
-                      />
-                      {/* Dark gradient overlay for badge readability */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent rounded-t-lg" />
-                      <div className="absolute top-2 right-2">
-                        <Badge className="bg-accent">{s.matchPercent}% Match</Badge>
-                      </div>
-                    </div>
-                    <CardHeader>
-                      <CardTitle className="text-base line-clamp-2">{s.name}</CardTitle>
-                      <CardDescription className="line-clamp-1">{s.provider}</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-muted-foreground">Due: {s.deadline}</span>
-                          <Button size="sm" variant="ghost">
-                            <Bookmark className="h-4 w-4" />
-                            <span className="ml-2">Save</span>
-                          </Button>
+              <div className="flex flex-col gap-4">
+                {rankedMatches.map((s) => {
+                  const studentProfile = storedUser ? {
+                    ...storedUser,
+                    gpa: storedUser.gpa ? Number(storedUser.gpa) : undefined,
+                    householdIncome: storedUser.householdIncome,
+                    financialSupportSource: storedUser.financialSupportSource,
+                    economicDependency: storedUser.economicDependency,
+                    specialCategories: {
+                      isAthlete: !!storedUser.isAthlete,
+                      isArtist: !!storedUser.isArtist,
+                      isSKOfficial: !!storedUser.isSKOfficial,
+                      isStudentLeader: !!storedUser.isStudentLeader,
+                      isIndigent: !!storedUser.isIndigent,
+                      isPWD: !!storedUser.isPWD,
+                      isSoloParent: !!storedUser.isSoloParent,
+                      isFromIndigenousFamily: false,
+                      isPersonWithDisability: !!storedUser.isPWD,
+                      hasAcademicHonors: !!storedUser.hasAcademicHonors,
+                    },
+                  } : {};
+                  const shapData = generateShapContributions(
+                    studentProfile,
+                    { matchPercent: s.matchPercent, amount: s.amount, minimumGpa: s.minimumGpa, qualified: s.qualified, eligibilityStatus: s.eligibilityStatus, requiresFinancialNeed: s.requiresFinancialNeed },
+                  );
+
+                  return (
+                    <div key={s.id} className="flex flex-col gap-0">
+                      <div
+                        className="flex flex-col lg:flex-row items-stretch gap-0 bg-white rounded-xl border border-gray-200 hover:shadow-md transition-shadow overflow-hidden"
+                      >
+                        {/* === FAR LEFT: Rank Number === */}
+                        <div className="flex items-center justify-center lg:w-16 w-full lg:min-h-0 min-h-[48px] bg-blue-600 text-white shrink-0">
+                          <span className="text-2xl font-bold">{s.galeShapleyRank}</span>
                         </div>
-                        <Button className="w-full" size="sm">View Details</Button>
+
+                        {/* === MIDDLE LEFT: Square Scholarship Card === */}
+                        <div className="flex flex-col w-full lg:w-[280px] shrink-0 border-b lg:border-b-0 lg:border-r border-gray-100">
+                          {/* Cover image */}
+                          <div className="relative h-32 lg:h-28">
+                            <img
+                              src={scholarshipImages[s.name] || defaultScholarshipImage}
+                              alt={s.name}
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                            <div className="absolute top-2 right-2">
+                              <Badge className="bg-emerald-500 text-white text-xs font-semibold">
+                                {s.matchPercent}% Match
+                              </Badge>
+                            </div>
+                          </div>
+                          {/* Info + Actions */}
+                          <div className="p-3 flex flex-col justify-between flex-1">
+                            <div>
+                              <h3 className="text-sm font-semibold text-gray-900 line-clamp-2 leading-tight">
+                                {s.name}
+                              </h3>
+                              <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                                {String(s.provider || "Quezon City Youth Development Office")}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 mt-3">
+                              <Button size="sm" className="flex-1 h-7 text-xs bg-blue-600 hover:bg-blue-700">
+                                <ExternalLink className="h-3 w-3 mr-1" />
+                                View Details
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-7 w-7 p-0 shrink-0">
+                                <Bookmark className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* === MIDDLE RIGHT: SHAP Explanation Panel === */}
+                        <div className="flex-1 p-4 lg:p-5">
+                          <div className="flex items-center gap-2 mb-3">
+                            <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                              AI Match Explanation (SHAP Values)
+                            </h4>
+                            <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+                              {String(s.eligibilityStatus === "eligible" ? "Eligible" : "May be eligible")}
+                            </Badge>
+                          </div>
+
+                          {/* SHAP Contribution Bars */}
+                          <div className="space-y-2">
+                            {shapData.contributions.map((c) => (
+                              <ShapBar key={c.factor} contribution={c} />
+                            ))}
+                          </div>
+
+                          {/* Summary */}
+                          <p className="text-xs text-muted-foreground mt-3 italic">
+                            {shapData.summary}
+                          </p>
+                        </div>
                       </div>
-                    </CardContent>
-                  </Card>
-                ))}
+
+                      {/* #1 Recommendation Badge — shown only for top-ranked */}
+                      {s.isTopRecommendation && (
+                        <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 mt-1">
+                          <Star className="h-4 w-4 text-blue-600 shrink-0 mt-0.5 fill-blue-600" />
+                          <p className="text-xs text-blue-800">
+                            <span className="font-semibold">System Recommendation:</span>{" "}
+                            Optimized to provide the highest financial coverage based on your household income and economic dependency.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </>

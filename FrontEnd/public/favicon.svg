@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Background rounded square -->
+  <rect width="512" height="512" rx="100" ry="100" fill="#1a3a6b"/>
+
+  <!-- Graduation cap board (diamond/square rotated 45deg) -->
+  <polygon points="256,110 390,200 256,240 122,200" fill="none" stroke="white" stroke-width="14" stroke-linejoin="round"/>
+
+  <!-- Cap top flat line -->
+  <line x1="256" y1="110" x2="256" y2="240" stroke="white" stroke-width="6" opacity="0.4"/>
+
+  <!-- Cap body (the hanging part below) -->
+  <path d="M160,215 L160,310 Q256,360 352,310 L352,215" fill="none" stroke="white" stroke-width="14" stroke-linejoin="round" stroke-linecap="round"/>
+
+  <!-- Tassel string -->
+  <line x1="352" y1="200" x2="390" y2="270" stroke="white" stroke-width="8" stroke-linecap="round"/>
+  <!-- Tassel knot -->
+  <circle cx="390" cy="278" r="10" fill="#c9a227"/>
+  <!-- Tassel fringe -->
+  <line x1="385" y1="288" x2="382" y2="315" stroke="#c9a227" stroke-width="5" stroke-linecap="round"/>
+  <line x1="390" y1="288" x2="390" y2="318" stroke="#c9a227" stroke-width="5" stroke-linecap="round"/>
+  <line x1="395" y1="288" x2="398" y2="315" stroke="#c9a227" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- AI Brain (centered on cap board) -->
+  <!-- Left hemisphere -->
+  <path d="M220,185 Q205,170 208,155 Q212,140 228,138 Q238,136 244,145 L244,195 Q232,198 220,185 Z" fill="#c9a227"/>
+  <!-- Right hemisphere -->
+  <path d="M292,185 Q307,170 304,155 Q300,140 284,138 Q274,136 268,145 L268,195 Q280,198 292,185 Z" fill="#c9a227"/>
+  <!-- Brain center divide -->
+  <line x1="256" y1="140" x2="256" y2="195" stroke="#1a3a6b" stroke-width="4"/>
+  <!-- Brain folds left -->
+  <path d="M220,165 Q228,158 236,165" fill="none" stroke="#1a3a6b" stroke-width="3" stroke-linecap="round"/>
+  <path d="M215,178 Q224,170 233,178" fill="none" stroke="#1a3a6b" stroke-width="3" stroke-linecap="round"/>
+  <!-- Brain folds right -->
+  <path d="M292,165 Q284,158 276,165" fill="none" stroke="#1a3a6b" stroke-width="3" stroke-linecap="round"/>
+  <path d="M297,178 Q288,170 279,178" fill="none" stroke="#1a3a6b" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Network nodes extending from brain -->
+  <!-- Left nodes -->
+  <line x1="208" y1="162" x2="175" y2="148" stroke="#c9a227" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="170" cy="145" r="9" fill="#c9a227"/>
+  <line x1="208" y1="178" x2="172" y2="185" stroke="#c9a227" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="166" cy="187" r="9" fill="#c9a227"/>
+  <!-- Right nodes -->
+  <line x1="304" y1="162" x2="337" y2="148" stroke="#c9a227" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="342" cy="145" r="9" fill="#c9a227"/>
+  <line x1="304" y1="178" x2="340" y2="185" stroke="#c9a227" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="346" cy="187" r="9" fill="#c9a227"/>
+  <!-- Top node -->
+  <line x1="256" y1="140" x2="256" y2="118" stroke="#c9a227" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="256" cy="112" r="9" fill="#c9a227"/>
+</svg>

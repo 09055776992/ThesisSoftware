@@ -165,11 +165,16 @@ function checkEligibility(student, scholarship) {
   // 1.1 QC Residency Check (ALL QCSP scholarships require QC residency)
   const studentLocation = student.location || student.address || student.city || student.residence || student.userAddress || "";
   const locationLower = String(studentLocation).toLowerCase().trim();
-  
+
+  // Fallback: if the profile location is blank, treat a QC school/campus as proof of residency
+  const schoolLocationFallback = isQuezonCityText(student.schoolLocation || student.school_location || "") ||
+                                  isQuezonCityText(student.schoolCampus || student.school_campus || "");
+
   const isQCResident = student.is_qc_resident === true || 
                        student.isQCResident === true ||
                        student.qcResident === true ||
-                       isQuezonCityText(locationLower);
+                       isQuezonCityText(locationLower) ||
+                       (!locationLower && schoolLocationFallback);
   
   eligibility.criteriaChecks.qcResident = {
     passed: isQCResident,

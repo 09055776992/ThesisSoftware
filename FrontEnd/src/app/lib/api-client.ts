@@ -43,7 +43,7 @@ export type AuthPayload = {
 export type ScholarshipRecommendationProfile = UserProfile | null;
 
 export function signUp(payload: AuthPayload) {
-  return request<{ user: Record<string, unknown> }>("/api/auth/signup", {
+  return request<{ user: Record<string, unknown>; token: string }>("/api/auth/signup", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -543,4 +543,71 @@ export function fetchSavedRankings(scholarshipId: string) {
 /** Student: fetch their own score for one application */
 export function fetchMyScore(applicationId: string) {
   return request<MyScoreResponse>(`/api/applications/${applicationId}/my-score`);
+}
+
+// ===== SECTION-SPECIFIC PROFILE PATCH API =====
+
+export interface PersonalProfilePayload {
+  email: string;
+  fullName?: string;
+  phone?: string;
+  location?: string;
+  dateOfBirth?: string;
+  about?: string;
+  headline?: string;
+  skills?: string[];
+}
+
+export function patchPersonalProfile(payload: PersonalProfilePayload) {
+  return request<{ user: Record<string, unknown>; message: string }>(
+    "/api/users/profile/personal",
+    { method: "PATCH", body: JSON.stringify(payload) }
+  );
+}
+
+export interface AcademicProfilePayload {
+  email: string;
+  gpa?: string;
+  educationLevel?: string;
+  yearLevel?: string;
+  fieldOfStudy?: string;
+  graduationYear?: string;
+  schoolName?: string;
+  schoolCampus?: string;
+  schoolType?: string;
+  schoolLocation?: string;
+  hasAcademicHonors?: boolean;
+  academic_rank?: string | number | null;
+}
+
+export function patchAcademicProfile(payload: AcademicProfilePayload) {
+  return request<{ user: Record<string, unknown>; message: string }>(
+    "/api/users/profile/academic",
+    { method: "PATCH", body: JSON.stringify(payload) }
+  );
+}
+
+export interface AchievementsProfilePayload {
+  email: string;
+  isAthlete?: boolean;
+  isArtist?: boolean;
+  isSKOfficial?: boolean;
+  isStudentLeader?: boolean;
+  isIndigent?: boolean;
+  isPWD?: boolean;
+  isSoloParent?: boolean;
+  financialNeed?: number;
+  netWorth?: string;
+  currency?: string;
+  incomeCategory?: string;
+  householdIncome?: number;
+  financialSupportSource?: string;
+  economicDependency?: number;
+}
+
+export function patchAchievementsProfile(payload: AchievementsProfilePayload) {
+  return request<{ user: Record<string, unknown>; message: string }>(
+    "/api/users/profile/achievements",
+    { method: "PATCH", body: JSON.stringify(payload) }
+  );
 }

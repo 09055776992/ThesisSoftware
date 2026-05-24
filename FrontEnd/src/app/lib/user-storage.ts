@@ -17,6 +17,9 @@ export type UserProfile = {
   currency?: string;
   incomeCategory?: string;
   financialNeed?: number[];
+  householdIncome?: number;
+  financialSupportSource?: string;
+  economicDependency?: number;
   schoolName?: string;
   schoolCampus?: string;
   schoolType?: string;

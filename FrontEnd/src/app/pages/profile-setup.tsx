@@ -852,7 +852,7 @@ export function ProfileSetup() {
                   Back
                 </Button>
               ) : (
-                <Button type="button" variant="ghost" onClick={() => navigate("/")}>
+                <Button type="button" variant="ghost" onClick={() => navigate("/dashboard")}>
                   Skip Setup
                 </Button>
               )}

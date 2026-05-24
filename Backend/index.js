@@ -1734,6 +1734,243 @@ app.get("/api/users/profile", async (req, res) => {
 app.put("/api/users/profile", handleUserProfileUpdate);
 app.post("/api/users/profile", handleUserProfileUpdate);
 
+// PATCH /api/users/profile/personal — update personal info fields only
+app.patch("/api/users/profile/personal", async (req, res) => {
+  try {
+    const db = await getDb();
+    const { email, fullName, phone, location, dateOfBirth, about, headline, skills } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "email is required." });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    const existingUser = await db.collection("users").findOne({ email: normalizedEmail });
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    // Build $set object with only the fields present in the request body
+    const personalFields = {};
+    if (fullName !== undefined) personalFields.fullName = String(fullName);
+    if (phone !== undefined) personalFields.phone = String(phone);
+    if (location !== undefined) personalFields.location = String(location);
+    if (dateOfBirth !== undefined) personalFields.dateOfBirth = String(dateOfBirth);
+    if (about !== undefined) personalFields.about = String(about);
+    if (headline !== undefined) personalFields.headline = String(headline);
+    if (skills !== undefined) {
+      personalFields.skills = Array.isArray(skills)
+        ? skills.map((s) => String(s).trim()).filter(Boolean)
+        : String(skills || "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+    }
+
+    await db.collection("users").updateOne(
+      { email: normalizedEmail },
+      { $set: personalFields }
+    );
+
+    return res.status(200).json({
+      user: { email: normalizedEmail, ...personalFields },
+      message: "Personal info updated.",
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Failed to update personal info: " + error.message });
+  }
+});
+
+// PATCH /api/users/profile/academic — update academic info fields only
+app.patch("/api/users/profile/academic", async (req, res) => {
+  try {
+    const db = await getDb();
+
+    const rawEmail = req.body.email;
+    if (!rawEmail || String(rawEmail).trim() === "") {
+      return res.status(400).json({ error: "email is required." });
+    }
+    const normalizedEmail = String(rawEmail).trim().toLowerCase();
+
+    const existingUser = await db.collection("users").findOne({ email: normalizedEmail });
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    const {
+      gpa,
+      educationLevel,
+      yearLevel,
+      fieldOfStudy,
+      graduationYear,
+      schoolName,
+      schoolCampus,
+      schoolType,
+      schoolLocation,
+      hasAcademicHonors,
+      academic_rank,
+    } = req.body;
+
+    // Validate GPA when provided: must be numeric and 1.00 <= value <= 5.00
+    if (gpa !== undefined) {
+      const gpaNum = Number(gpa);
+      if (isNaN(gpaNum) || gpaNum < 1.0 || gpaNum > 5.0) {
+        return res.status(400).json({ error: "GPA must be between 1.00 and 5.00." });
+      }
+    }
+
+    // Build $set object — only include fields present in the request body
+    const academicFields = {};
+
+    if (gpa !== undefined) academicFields.gpa = String(gpa);
+    if (educationLevel !== undefined) academicFields.educationLevel = String(educationLevel);
+    if (yearLevel !== undefined) academicFields.yearLevel = String(yearLevel);
+    if (fieldOfStudy !== undefined) academicFields.fieldOfStudy = String(fieldOfStudy);
+    if (graduationYear !== undefined) academicFields.graduationYear = String(graduationYear);
+    if (schoolName !== undefined) academicFields.schoolName = String(schoolName);
+    if (schoolCampus !== undefined) academicFields.schoolCampus = String(schoolCampus);
+    if (schoolType !== undefined) academicFields.schoolType = String(schoolType);
+    if (schoolLocation !== undefined) {
+      academicFields.schoolLocation = String(schoolLocation);
+      // Derive enrolledInQCSchool server-side — ignore any client-supplied value
+      academicFields.enrolledInQCSchool = String(schoolLocation) === "Quezon City";
+    }
+    if (hasAcademicHonors !== undefined) {
+      const honors =
+        hasAcademicHonors === true ||
+        hasAcademicHonors === "true" ||
+        hasAcademicHonors === 1 ||
+        hasAcademicHonors === "1";
+      academicFields.hasAcademicHonors = honors;
+      academicFields.academic_honors = honors;
+    }
+    if (academic_rank !== undefined) {
+      if (academic_rank === null || String(academic_rank).trim() === "") {
+        academicFields.academic_rank = null;
+      } else {
+        const rank = parseInt(String(academic_rank), 10);
+        if (Number.isFinite(rank) && rank >= 1 && rank <= 10) {
+          academicFields.academic_rank = rank;
+        }
+      }
+    }
+
+    await db.collection("users").updateOne(
+      { email: normalizedEmail },
+      { $set: academicFields }
+    );
+
+    return res.status(200).json({
+      user: { ...academicFields },
+      message: "Academic info updated.",
+    });
+  } catch (error) {
+    console.error("[Academic Profile Update] Error:", error);
+    return res.status(500).json({ error: "Failed to update academic info: " + error.message });
+  }
+});
+
+// PATCH /api/users/profile/achievements — update achievements and financial fields only
+app.patch("/api/users/profile/achievements", async (req, res) => {
+  try {
+    const db = await getDb();
+
+    const {
+      email,
+      isAthlete,
+      isArtist,
+      isSKOfficial,
+      isStudentLeader,
+      isIndigent,
+      isPWD,
+      isSoloParent,
+      financialNeed,
+      netWorth,
+      currency,
+      incomeCategory,
+      householdIncome,
+      financialSupportSource,
+      economicDependency,
+    } = req.body;
+
+    // Validate email
+    if (!email) {
+      return res.status(400).json({ error: "email is required." });
+    }
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    // Check user exists
+    const existingUser = await db.collection("users").findOne({ email: normalizedEmail });
+    if (!existingUser) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    // Validate financialNeed when provided: must be an integer 1–5
+    if (financialNeed !== undefined) {
+      const fn = Number(financialNeed);
+      if (!Number.isInteger(fn) || fn < 1 || fn > 5) {
+        return res.status(400).json({ error: "financialNeed must be between 1 and 5." });
+      }
+    }
+
+    // Build $set object with only the fields present in the request body
+    const achievementsFields = {};
+
+    const booleanFieldMap = {
+      isAthlete,
+      isArtist,
+      isSKOfficial,
+      isStudentLeader,
+      isIndigent,
+      isPWD,
+      isSoloParent,
+    };
+
+    for (const [field, value] of Object.entries(booleanFieldMap)) {
+      if (value !== undefined) {
+        achievementsFields[field] = value === true || value === "true";
+      }
+    }
+
+    if (financialNeed !== undefined) {
+      achievementsFields.financialNeed = Number(financialNeed);
+    }
+    if (netWorth !== undefined) {
+      achievementsFields.netWorth = String(netWorth);
+    }
+    if (currency !== undefined) {
+      achievementsFields.currency = String(currency);
+    }
+    if (incomeCategory !== undefined) {
+      achievementsFields.incomeCategory = String(incomeCategory);
+    }
+    if (householdIncome !== undefined) {
+      achievementsFields.householdIncome = Number(householdIncome);
+    }
+    if (financialSupportSource !== undefined) {
+      achievementsFields.financialSupportSource = String(financialSupportSource);
+    }
+    if (economicDependency !== undefined) {
+      achievementsFields.economicDependency = Number(economicDependency);
+    }
+
+    // Persist using updateOne + $set (never replaceOne)
+    await db.collection("users").updateOne(
+      { email: normalizedEmail },
+      { $set: achievementsFields }
+    );
+
+    return res.status(200).json({
+      user: { ...achievementsFields },
+      message: "Achievements updated.",
+    });
+  } catch (error) {
+    console.error("[Achievements Update] Error:", error);
+    return res.status(500).json({ error: "Failed to update achievements: " + error.message });
+  }
+});
+
   // ===== ADMIN DASHBOARD ROUTES =====
 
   function normalizeUserRole(user) {

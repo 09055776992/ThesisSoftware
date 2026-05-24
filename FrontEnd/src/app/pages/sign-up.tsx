@@ -69,7 +69,7 @@ export function SignUp() {
       };
 
       clearStoredUser();
-      saveAuthToken((result as { token?: string }).token ?? null);
+      saveAuthToken(result.token ?? null);
       saveStoredUser({
         fullName: user.fullName,
         email: user.email,
