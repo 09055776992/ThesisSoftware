@@ -4,7 +4,7 @@ import { LayoutDashboard, Users, Award, FileText, MessageSquare, BarChart3, Bell
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { Redirect } from "../pages/redirect";
-import { getStoredUser } from "../lib/user-storage";
+import { getStoredUser, getDisplayName, getInitials } from "../lib/user-storage";
 
 interface QuickStats {
   totalScholars: number;
@@ -60,11 +60,13 @@ export function AdminLayout() {
           <div className="mb-6 pt-2">
             <div className="flex items-center gap-3 mb-1">
               <Avatar className="h-14 w-14 border-2 border-orange-100">
-                <AvatarImage src="https://api.dicebear.com/7.x/avataaars/svg?seed=admin" />
-                <AvatarFallback className="bg-orange-100 text-orange-700 text-lg font-semibold">AD</AvatarFallback>
+                <AvatarImage src={user?.profilePicture || user?.profileImage || ""} />
+                <AvatarFallback className="bg-orange-100 text-orange-700 text-lg font-semibold">
+                  {getInitials(user)}
+                </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-gray-900 text-base truncate">Admin User</p>
+                <p className="font-semibold text-gray-900 text-base truncate">{getDisplayName(user)}</p>
                 <Badge className="bg-orange-600 hover:bg-orange-600 text-white text-xs px-2 py-0.5 mt-1">
                   Administrator
                 </Badge>

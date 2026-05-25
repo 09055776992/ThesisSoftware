@@ -50,6 +50,12 @@ interface SubmittedDocument {
   uploadedAt: string;
   status: string;
   rejectionReason?: string;
+  confidence_score?: number;
+  extracted_gwa?: number;
+  matched_keywords?: string[];
+  match_scores?: Record<string, number>;
+  total_expected_terms?: number;
+  fuzzy_threshold?: number;
 }
 
 interface ScreeningData {
@@ -1025,6 +1031,11 @@ export function AdminApplications() {
                         <TableCell className="text-sm">
                           <div>{doc.fileName}</div>
                           <div className="text-xs text-muted-foreground">{formatFileSize(doc.fileSize)}</div>
+                          {doc.extracted_gwa !== undefined && (
+                            <Badge variant="outline" className="mt-1 text-xs bg-blue-50 text-blue-700 border-blue-200">
+                              Extracted GWA: {doc.extracted_gwa}
+                            </Badge>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm">{doc.uploadedAt ? formatDate(doc.uploadedAt) : ""}</TableCell>
                         <TableCell>
@@ -1042,8 +1053,21 @@ export function AdminApplications() {
                             </SelectContent>
                           </Select>
                         </TableCell>
+                        <TableCell>
+                          {doc.confidence_score !== undefined ? (
+                            <span className={`font-medium ${
+                              doc.confidence_score >= 70 ? "text-green-600" :
+                              doc.confidence_score >= 40 ? "text-amber-500" :
+                              "text-red-500"
+                            }`}>
+                              {doc.confidence_score}%
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground text-sm">-</span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1">
                             <Button
                               variant="ghost"
                               size="sm"
@@ -1065,6 +1089,14 @@ export function AdminApplications() {
                               }}
                             >
                               <Download className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={docStatus !== (doc.status || "pending_review") ? "default" : "outline"}
+                              onClick={() => saveDocumentStatus(idx)}
+                              disabled={isUpdating}
+                            >
+                              Save
                             </Button>
                           </div>
                         </TableCell>
@@ -1095,9 +1127,264 @@ export function AdminApplications() {
               );
             })}
 
+            {/* Document Accuracy Summary */}
+            {app.submittedDocuments && app.submittedDocuments.length > 0 && (
+              <div className="mt-6 pt-6 border-t">
+                <div className="flex items-center gap-2 mb-4">
+                  <ShieldCheck className="h-5 w-5 text-primary" />
+                  <h4 className="font-semibold text-lg">Document AI Accuracy</h4>
+                </div>
+
+                {(() => {
+                  const totalDocs = app.submittedDocuments?.length || 0;
+                  const docsWithScore = app.submittedDocuments?.filter(d => d.confidence_score !== undefined) || [];
+                  const avgScore = docsWithScore.length > 0
+                    ? Math.round(docsWithScore.reduce((sum, d) => sum + (d.confidence_score || 0), 0) / docsWithScore.length)
+                    : null;
+                  const passedThreshold = avgScore !== null && avgScore >= 70;
+
+                  return (
+                    <div className="space-y-4">
+                      {/* Summary Notification */}
+                      <div className={`p-4 rounded-lg border-l-4 ${
+                        avgScore === null
+                          ? "bg-gray-50 border-gray-400"
+                          : passedThreshold
+                            ? "bg-green-50 border-green-500"
+                            : avgScore >= 40
+                              ? "bg-amber-50 border-amber-400"
+                              : "bg-red-50 border-red-500"
+                      }`}>
+                        <div className="flex items-start gap-3">
+                          {avgScore === null ? (
+                            <AlertCircle className="h-5 w-5 text-gray-500 flex-shrink-0 mt-0.5" />
+                          ) : passedThreshold ? (
+                            <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                          ) : avgScore >= 40 ? (
+                            <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                          ) : (
+                            <XCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+                          )}
+                          <div className="flex-1">
+                            <p className="font-semibold text-sm">
+                              {avgScore === null
+                                ? `📄 ${totalDocs} document${totalDocs !== 1 ? 's' : ''} submitted — AI analysis pending`
+                                : `📄 ${totalDocs} document${totalDocs !== 1 ? 's' : ''} submitted • Overall Accuracy: ${avgScore}%`
+                              }
+                            </p>
+                            <p className={`text-xs mt-1 ${
+                              avgScore === null
+                                ? "text-gray-600"
+                                : passedThreshold
+                                  ? "text-green-700"
+                                  : avgScore >= 40
+                                    ? "text-amber-700"
+                                    : "text-red-700"
+                            }`}>
+                              {avgScore === null
+                                ? "Documents have not been analyzed by the AI system yet."
+                                : passedThreshold
+                                  ? "✓ Documents meet authenticity threshold. All appear genuine and complete."
+                                  : avgScore >= 40
+                                    ? "⚠ Some documents show medium confidence. Manual review recommended."
+                                    : "✗ Low document confidence detected. Potential authenticity issues."
+                              }
+                            </p>
+                            {/* Document List */}
+                            <div className="mt-3 space-y-1.5">
+                              {app.submittedDocuments?.map((doc, idx) => {
+                                const hasScore = doc.confidence_score !== undefined;
+                                const score = doc.confidence_score || 0;
+                                const docStatusLocal = documentStatuses[String(idx)]?.status || doc.status;
+                                return (
+                                  <div key={idx} className="flex items-center gap-2 text-xs">
+                                    <FileText className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                                    <span className="font-medium truncate flex-1">{doc.documentType}</span>
+                                    <span className={`whitespace-nowrap ${
+                                      docStatusLocal === "verified" ? "text-green-600 font-medium" :
+                                      docStatusLocal === "rejected" ? "text-red-500 font-medium" :
+                                      "text-amber-600"
+                                    }`}>
+                                      {docStatusLocal === "verified" ? "✓ Verified" :
+                                       docStatusLocal === "rejected" ? "✗ Rejected" :
+                                       "⏳ Pending"}
+                                    </span>
+                                    {hasScore ? (
+                                      <span className={`whitespace-nowrap font-medium ${
+                                        score >= 70 ? "text-green-600" :
+                                        score >= 40 ? "text-amber-500" :
+                                        "text-red-500"
+                                      }`}>
+                                        {score}% accurate
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground whitespace-nowrap">Pending analysis</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Overall Score */}
+                      {avgScore !== null ? (
+                        <div className="p-4 rounded-lg bg-gray-50">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm text-muted-foreground">Overall Document Confidence</span>
+                            <span className={`font-bold text-lg ${
+                              avgScore >= 70 ? "text-green-600" :
+                              avgScore >= 40 ? "text-amber-500" :
+                              "text-red-500"
+                            }`}>
+                              {avgScore}%
+                            </span>
+                          </div>
+                          <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                avgScore >= 70 ? "bg-green-500" :
+                                avgScore >= 40 ? "bg-amber-400" :
+                                "bg-red-400"
+                              }`}
+                              style={{ width: `${avgScore}%` }}
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            Based on AI analysis of {docsWithScore.length} document{docsWithScore.length !== 1 ? 's' : ''}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="p-4 rounded-lg bg-gray-50 text-center">
+                          <p className="text-sm text-muted-foreground">
+                            No AI analysis data available for these documents.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Individual Document Scores */}
+                      {docsWithScore.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {docsWithScore.map((doc, idx) => (
+                            <div key={idx} className="flex items-center gap-3 p-3 rounded-lg border">
+                              <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{doc.documentType}</p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <div className="h-2 flex-1 bg-gray-100 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full ${
+                                        (doc.confidence_score || 0) >= 70 ? "bg-green-500" :
+                                        (doc.confidence_score || 0) >= 40 ? "bg-amber-400" :
+                                        "bg-red-400"
+                                      }`}
+                                      style={{ width: `${doc.confidence_score}%` }}
+                                    />
+                                  </div>
+                                  <span className={`text-xs font-medium whitespace-nowrap ${
+                                    (doc.confidence_score || 0) >= 70 ? "text-green-600" :
+                                    (doc.confidence_score || 0) >= 40 ? "text-amber-500" :
+                                    "text-red-500"
+                                  }`}>
+                                    {doc.confidence_score}%
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* SHAP-style Keyword Explanations */}
+                      {app.submittedDocuments?.some(d => d.match_scores && Object.keys(d.match_scores).length > 0) && (
+                        <div className="mt-4 pt-4 border-t">
+                          <div className="flex items-center gap-2 mb-3">
+                            <Brain className="h-4 w-4 text-primary" />
+                            <h5 className="font-medium text-sm">AI Explanation (Keyword Analysis)</h5>
+                          </div>
+                          <div className="space-y-3">
+                            {app.submittedDocuments?.filter(d => d.match_scores && Object.keys(d.match_scores).length > 0).map((doc, idx) => {
+                              const scores = doc.match_scores || {};
+                              const matched = doc.matched_keywords || [];
+                              const threshold = doc.fuzzy_threshold || 80;
+                              const allTerms = doc.total_expected_terms || Object.keys(scores).length;
+
+                              return (
+                                <div key={idx} className="p-3 rounded-lg bg-gray-50">
+                                  <p className="text-sm font-medium mb-2">{doc.documentType}</p>
+                                  <p className="text-xs text-muted-foreground mb-2">
+                                    Matched {matched.length} of {allTerms} expected keywords (threshold: {threshold}%)
+                                  </p>
+                                  <div className="space-y-1.5">
+                                    {Object.entries(scores).sort(([,a], [,b]) => (b as number) - (a as number)).map(([keyword, score]) => {
+                                      const isMatched = (score as number) >= threshold;
+                                      const contribution = Math.min((score as number) / 100 * 15, 15); // Max 15% contribution per keyword
+                                      return (
+                                        <div key={keyword} className="flex items-center gap-2 text-xs">
+                                          {(score as number) >= threshold ? (
+                                            <TrendingUp className="h-3 w-3 text-green-600 flex-shrink-0" />
+                                          ) : (score as number) >= 50 ? (
+                                            <TrendingUp className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                                          ) : (
+                                            <TrendingDown className="h-3 w-3 text-red-500 flex-shrink-0" />
+                                          )}
+                                          <span className="w-24 truncate flex-shrink-0" title={keyword}>{keyword}</span>
+                                          <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden min-w-[60px]">
+                                            <div
+                                              className={`h-full rounded-full ${
+                                                (score as number) >= threshold ? "bg-green-500" :
+                                                (score as number) >= 50 ? "bg-amber-400" :
+                                                "bg-red-400"
+                                              }`}
+                                              style={{ width: `${Math.min((score as number) / 100 * 100, 100)}%` }}
+                                            />
+                                          </div>
+                                          <span className={`w-10 text-right font-medium whitespace-nowrap ${
+                                            (score as number) >= threshold ? "text-green-600" :
+                                            (score as number) >= 50 ? "text-amber-500" :
+                                            "text-red-500"
+                                          }`}>
+                                            {Math.round(score as number)}%
+                                          </span>
+                                          <span className="text-muted-foreground whitespace-nowrap">
+                                            {isMatched ? "✓ matched" : "✗ not matched"}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Legend */}
+                      <div className="flex items-center gap-4 text-xs">
+                        <div className="flex items-center gap-1">
+                          <div className="w-3 h-3 rounded-full bg-green-500" />
+                          <span className="text-muted-foreground">High (≥70%)</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <div className="w-3 h-3 rounded-full bg-amber-400" />
+                          <span className="text-muted-foreground">Medium (≥40%)</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <div className="w-3 h-3 rounded-full bg-red-400" />
+                          <span className="text-muted-foreground">Low (&lt;40%)</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             {/* Save all document statuses */}
             {app.submittedDocuments && app.submittedDocuments.length > 0 && (
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2 pt-4">
                 <Button
                   variant="outline"
                   size="sm"

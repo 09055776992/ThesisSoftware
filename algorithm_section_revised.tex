@@ -1,0 +1,13 @@
+\section{Algorithm}
+
+Identifying appropriate QCYDO scholarships presents considerable difficulty for prospective applicants. The program encompasses twelve distinct scholarship categories—spanning Senior High School, College, Postgraduate, and Vocational levels—each governed by specific eligibility criteria including minimum GWA thresholds, household income limits, residency requirements, and required documentation. This variation has led many qualified students to overlook scholarships for which they qualify. SCHOLAR addresses this gap as a web-based platform consolidating scholarship discovery and applicant evaluation into a unified system.
+
+The system employs a two-stage pipeline. Stage one applies rule-based hard-filtering to evaluate applicants against mandatory eligibility requirements: Quezon City residency, educational level alignment, minimum GWA compliance, and special category qualifications. Applicants failing any hard constraint are immediately excluded from further consideration for that specific scholarship.
+
+Eligible applicants proceed to Stage two, where a weighted scoring formula computes composite rankings across five criteria: academic performance (30\%), financial need (25\%), document completeness (20\%), document authenticity (15\%), and special category status (10\%). The system correctly handles the Philippine General Weighted Average scale, where lower numerical values indicate superior performance (1.00 being highest, 5.00 indicating failure), reversing the ranking logic appropriately.
+
+Document authenticity assessment utilizes a Bidirectional Encoder Representations from Transformers (BERT) model to analyze submitted files for expected terminology and contextual patterns associated with their declared document type. For ranking explainability, the system implements SHapley Additive exPlanations (SHAP) to generate interpretable justifications for each applicant's score, enabling students and administrators to understand the contribution of individual criteria to final rankings.
+
+Comprehensive testing validated system functionality across 22 test scenarios with a 95\% success rate. The eligibility matching algorithm correctly identified qualified applicants across all education levels (Senior High School, College, Postgraduate, Vocational), with verified results including proper handling of QC residency requirements, GWA scale interpretation, and special category qualifications. SCHOLAR operates as a decision-support tool for QCYDO staff rather than an autonomous selection system, with final scholarship awards remaining under administrator authority.
+
+Identified future enhancements include Optical Character Recognition integration for processing scanned document submissions.

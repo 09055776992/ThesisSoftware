@@ -8,6 +8,8 @@ import re
 import torch
 import numpy as np
 from transformers import AutoModel, AutoTokenizer
+from rapidfuzz import fuzz
+from document_ingestion import _normalize_ocr_text
 
 # ---------------------------------------------------------------------------
 # Expected keyword sets per document type
@@ -20,7 +22,9 @@ EXPECTED_TERMS: dict[str, list[str]] = {
     "enrollment": [
         "enrolled", "enrollment", "registered", "student",
         "school year", "semester", "certificate of enrollment",
-        "currently enrolled"
+        "currently enrolled", "date enrolled", "subject", "units",
+        "student id", "year level", "student type", "regular",
+        "schedule", "total load", "subject title"
     ],
     "QCitizen_ID": [
         "quezon city", "citizen", "resident", "identification",
@@ -122,10 +126,19 @@ class BERTDocumentAnalyzer:
         cls_embedding = outputs.last_hidden_state[:, 0, :]
         return cls_embedding.cpu().numpy()
 
+    # Minimum rapidfuzz partial_ratio score (0-100) to count a keyword as matched.
+    # 80 tolerates single-character OCR noise (e.g. '7ranscript') while
+    # rejecting genuinely unrelated words.
+    FUZZY_THRESHOLD: int = 80
+
     def verify_document_authenticity(self, text: str, doc_type: str) -> dict:
         """
         Checks whether the document text contains the keywords expected
         for the given document type.
+
+        Uses rapidfuzz.fuzz.partial_ratio for fuzzy substring matching so that
+        minor OCR errors (e.g. '7ranscript', 'enrollrnent') do not cause a
+        total keyword miss.
 
         Confidence = matched_terms / total_expected_terms
         is_authentic = confidence >= 0.4 (at least 40% of keywords found)
@@ -153,7 +166,15 @@ class BERTDocumentAnalyzer:
             }
 
         text_lower = text.lower()
-        matched = [term for term in terms if term in text_lower]
+        matched = []
+        match_scores = {}
+
+        for term in terms:
+            score = fuzz.partial_ratio(term, text_lower)
+            match_scores[term] = score
+            if score >= self.FUZZY_THRESHOLD:
+                matched.append(term)
+
         confidence = len(matched) / len(terms)
 
         return {
@@ -163,15 +184,23 @@ class BERTDocumentAnalyzer:
             "matched_terms": len(matched),
             "matched_keywords": matched,
             "total_expected_terms": len(terms),
+            "fuzzy_threshold": self.FUZZY_THRESHOLD,
+            "match_scores": match_scores,
         }
 
     def extract_gwa_from_text(self, text: str) -> float | None:
         """
         Attempts to extract a GWA/GPA value from document text
         using regex patterns. Returns None if not found.
+
+        Applies OCR normalization first (l.50 → 1.50, I.75 → 1.75, etc.)
+        so that scanned transcript photos don't silently fail GWA extraction.
         """
         if not text:
             return None
+
+        # Normalize common OCR misreads before running regex
+        text = _normalize_ocr_text(text)
 
         for pattern in GWA_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)

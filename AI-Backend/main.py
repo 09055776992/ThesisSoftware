@@ -4,13 +4,14 @@ Port: 8000
 
 Endpoints:
   GET  /health                  — health check
-  POST /analyze-document        — BERT document analysis
+  POST /analyze-document        — BERT document analysis (raw text input)
+  POST /analyze-document-file   — OCR + BERT analysis (file upload: PDF, JPG, PNG, TXT)
   POST /rank-students           — score + rank all applicants for a scholarship
   POST /explain-score           — SHAP explanation for a single score breakdown
   POST /train-explainer         — train SHAP model on historical data
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
@@ -20,6 +21,7 @@ import traceback
 from bert_analyzer import bert_analyzer
 from scoring import scoring_system
 from explainer import explainer
+from document_ingestion import extract_text_from_file
 
 # ---------------------------------------------------------------------------
 # Lifespan (replaces deprecated @app.on_event)
@@ -117,6 +119,62 @@ async def health_check():
         "explainer_mode": "simple" if explainer.use_simple_explainer else "shap",
         "historical_records": len(explainer._historical_scores),
     }
+
+
+@app.post("/analyze-document-file")
+async def analyze_document_file(
+    file: UploadFile = File(..., description="Document file: PDF, JPG, PNG, or TXT"),
+    doc_type: str = Form(..., description="Type: TOR, enrollment, QCitizen_ID, indigency, etc."),
+):
+    """
+    Accepts a raw file upload (PDF, image, or text), extracts text via OCR or
+    PDF parsing, then runs the full BERT analysis pipeline.
+
+    Returns the same shape as /analyze-document plus ingestion metadata
+    (source, char_count, ocr_failed) so the caller knows how text was obtained.
+    """
+    try:
+        file_bytes = await file.read()
+        ingestion = extract_text_from_file(file_bytes, file.filename or "upload")
+
+        if not ingestion["success"]:
+            return {
+                "success": False,
+                "doc_type": doc_type,
+                "ocr_failed": True,
+                "reason": ingestion["reason"],
+                "source": ingestion["source"],
+                "authenticity": {
+                    "doc_type": doc_type,
+                    "is_authentic": False,
+                    "confidence": 0.0,
+                    "matched_terms": 0,
+                    "total_expected_terms": 0,
+                    "reason": ingestion["reason"],
+                },
+                "extracted_gwa": None,
+                "analysis": {"analyzed": False, "reason": ingestion["reason"], "text_length": 0, "token_count": 0},
+            }
+
+        text = ingestion["text"]
+        authenticity = bert_analyzer.verify_document_authenticity(text, doc_type)
+        extracted_gwa = bert_analyzer.extract_gwa_from_text(text)
+        analysis = bert_analyzer.analyze_document_text(text)
+
+        return {
+            "success": True,
+            "doc_type": doc_type,
+            "ocr_failed": False,
+            "source": ingestion["source"],
+            "char_count": ingestion["char_count"],
+            "authenticity": authenticity,
+            "extracted_gwa": extracted_gwa,
+            "analysis": analysis,
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/analyze-document")

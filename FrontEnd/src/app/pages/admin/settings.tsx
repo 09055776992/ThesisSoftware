@@ -32,19 +32,19 @@ export function AdminSettings() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="platform-name">Platform Name</Label>
-                <Input id="platform-name" defaultValue="EduConnect" />
+                <Input id="platform-name" defaultValue="SCHOLAR" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="tagline">Tagline</Label>
-                <Input id="tagline" defaultValue="Connect with Your Future" />
+                <Input id="tagline" defaultValue="Your Gateway to Educational Opportunities" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="support-email">Support Email</Label>
-                <Input id="support-email" type="email" defaultValue="support@educonnect.com" />
+                <Input id="support-email" type="email" defaultValue="support@scholar.qcydo.gov.ph" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="description">Platform Description</Label>
-                <Textarea id="description" rows={3} defaultValue="A platform connecting students with scholarship opportunities." />
+                <Textarea id="description" rows={3} defaultValue="SCHOLAR is a scholarship management system by the Quezon City Youth Development Office (QCYDO) that helps Quezon City students find, apply for, and track scholarship opportunities." />
               </div>
               <Button>Save Changes</Button>
             </CardContent>
@@ -134,7 +134,7 @@ export function AdminSettings() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="welcome-email">Welcome Email</Label>
-                <Textarea id="welcome-email" rows={4} defaultValue="Welcome to EduConnect! We're excited to help you..." />
+                <Textarea id="welcome-email" rows={4} defaultValue="Welcome to SCHOLAR! We're excited to help you find and apply for scholarship opportunities." />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="approval-email">Application Approval Email</Label>

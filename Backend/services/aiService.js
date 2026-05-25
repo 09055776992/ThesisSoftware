@@ -6,6 +6,8 @@
  * degrade when the Python service is unavailable.
  */
 
+import FormData from "form-data";
+
 const AI_BASE_URL = process.env.AI_SERVICE_URL || "http://localhost:8000";
 const TIMEOUT_MS = 60000; // 60s — BERT can be slow on CPU
 
@@ -97,4 +99,46 @@ export async function explainScore(scoreBreakdown) {
     method: "POST",
     body: JSON.stringify({ score_breakdown: scoreBreakdown }),
   });
+}
+
+/**
+ * Analyze a document file using BERT (sends file to AI-Backend).
+ * @param {Buffer} fileBuffer - File buffer
+ * @param {string} filename - Original filename
+ * @param {string} docType - Document type (TOR, enrollment, QCitizen_ID, etc.)
+ * @returns {Promise<object|null>}
+ */
+export async function analyzeDocumentFile(fileBuffer, filename, docType) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  try {
+    const form = new FormData();
+    form.append("file", fileBuffer, filename);
+    form.append("doc_type", docType);
+
+    const response = await fetch(`${AI_BASE_URL}/analyze-document-file`, {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+      headers: form.getHeaders(),
+    });
+
+    clearTimeout(timer);
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || `AI service error: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    clearTimeout(timer);
+    if (error.name === "AbortError") {
+      console.error("[AI Service] File analysis timed out");
+    } else {
+      console.error("[AI Service] File analysis failed:", error.message);
+    }
+    return null;
+  }
 }

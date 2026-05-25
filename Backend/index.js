@@ -14,6 +14,7 @@ import { seedQCSPPScholarships } from "./seed-qcsp-scholarships.js";
 import * as eligibilityMatching from "./eligibility-matching.js";
 import { sendOTPEmail, sendWelcomeEmail, maskEmail } from "./services/emailService.js";
 import { generateOTP, getOTPExpiry } from "./utils/otpUtils.js";
+import { analyzeDocumentFile } from "./services/aiService.js";
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -3086,17 +3087,54 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
         return res.status(400).json({ error: "You have already applied for this scholarship." });
       }
 
-      // Process uploaded files
+      // Process uploaded files with AI analysis
       const documentTypes = req.body.documentTypes || [];
-      const submittedDocuments = files.map((file, index) => ({
-        documentType: Array.isArray(documentTypes) ? documentTypes[index] : documentTypes,
-        fileName: file.originalname,
-        filePath: file.path,
-        fileSize: file.size,
-        mimeType: file.mimetype,
-        uploadedAt: new Date(),
-        status: "uploaded"
-      }));
+      const submittedDocuments = [];
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const docType = Array.isArray(documentTypes) ? documentTypes[i] : documentTypes;
+
+        // Read file for AI analysis
+        let aiAnalysis = null;
+        try {
+          const fileBuffer = fs.readFileSync(file.path);
+          console.log(`[AI Analysis] Analyzing ${file.originalname} (${fileBuffer.length} bytes)...`);
+          aiAnalysis = await analyzeDocumentFile(fileBuffer, file.originalname, docType || "unknown");
+          console.log(`[AI Analysis] ${file.originalname} result:`, JSON.stringify(aiAnalysis, null, 2));
+        } catch (err) {
+          console.error(`[AI Analysis] Error analyzing ${file.originalname}:`, err.message);
+        }
+
+        const doc = {
+          documentType: docType || "Document",
+          fileName: file.originalname,
+          filePath: file.path,
+          fileSize: file.size,
+          mimeType: file.mimetype,
+          uploadedAt: new Date(),
+          status: "uploaded"
+        };
+
+        // Add AI analysis results if available
+        if (aiAnalysis?.success) {
+          doc.confidence_score = Math.round(aiAnalysis.authenticity?.confidence || 0);
+          doc.extracted_gwa = aiAnalysis.extracted_gwa || null;
+          doc.matched_keywords = aiAnalysis.authenticity?.matched_keywords || [];
+          doc.match_scores = aiAnalysis.authenticity?.match_scores || {};
+          doc.total_expected_terms = aiAnalysis.authenticity?.total_expected_terms || 0;
+          doc.fuzzy_threshold = aiAnalysis.authenticity?.fuzzy_threshold || 80;
+          console.log(`[AI Analysis] Stored for ${file.originalname}:`, {
+            confidence: doc.confidence_score,
+            gwa: doc.extracted_gwa,
+            keywords: doc.matched_keywords?.length || 0
+          });
+        } else {
+          console.log(`[AI Analysis] No results for ${file.originalname}, aiAnalysis:`, aiAnalysis);
+        }
+
+        submittedDocuments.push(doc);
+      }
 
       // Check eligibility
       const eligibilityResult = eligibilityMatching.checkEligibility(student, scholarship);
