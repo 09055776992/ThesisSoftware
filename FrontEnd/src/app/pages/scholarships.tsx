@@ -9,9 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 import { Separator } from "../components/ui/separator";
-import { Search, Calendar, MapPin, Award, Bookmark, ExternalLink, FileText, CheckCircle, ListChecks, GraduationCap } from "lucide-react";
+import { Search, Calendar, MapPin, Award, Bookmark, ExternalLink, FileText, CheckCircle, XCircle, ListChecks, GraduationCap, AlertCircle } from "lucide-react";
+import { Checkbox } from "../components/ui/checkbox";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
-import { fetchSavedScholarships, saveSavedScholarships, fetchScholarshipsWithEligibility, checkEligibility, applyForScholarship, resolveDisplayMatchScore } from "../lib/api-client";
+import { fetchSavedScholarships, saveSavedScholarships, fetchScholarshipsWithEligibility, checkEligibility, applyForScholarship, resolveDisplayMatchScore, fetchProfileDocuments, type ProfileDocumentResponse } from "../lib/api-client";
 import { getStoredUser } from "../lib/user-storage";
 import API_BASE_URL from "../../config/api";
 import { toast } from "sonner";
@@ -20,7 +21,7 @@ const SAVED_SCHOLARSHIPS_KEY_PREFIX = "scholarship-portal-saved-scholarships";
 
 // Scholarship cover images mapping (FIX 5)
 const scholarshipImages: Record<string, string> = {
-  "College Academic Scholarship": "https://images.unsplash.com/photo-1523050854058-8df90110c9f1?w=600&q=80",
+  "College Academic Scholarship": "https://images.unsplash.com/photo-1541339907198-e08756dedf3f?w=600&q=80",
   "College Athletic and Arts Scholarship": "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=600&q=80",
   "College Youth Leaders Scholarship": "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?w=600&q=80",
   "Economic Scholarship": "https://images.unsplash.com/photo-1532619675605-1ede6c2ed2b0?w=600&q=80",
@@ -61,8 +62,8 @@ const scholarshipTypeOptions = [
   { value: "other", label: "Other" },
 ];
 
-const gpaOptions = [
-  { value: "all", label: "Any GPA" },
+const gwaOptions = [
+  { value: "all", label: "Any GWA" },
   { value: "1.50", label: "1.00–1.50 (Excellent)" },
   { value: "2.00", label: "1.51–2.00 (Very Good)" },
   { value: "2.50", label: "2.01–2.50 (Good)" },
@@ -106,6 +107,7 @@ interface Scholarship {
   amountValue?: number;
   minimumGpa?: number;
   minimumGPA?: number;
+  minimumGWA?: number;
   requiredEducationLevel?: string[];
   specificCriteria?: string[];
   requiredDocuments?: string[];
@@ -151,7 +153,7 @@ function deriveStudentApplyAllowed(s: Scholarship | null | undefined): boolean {
 function eligibilityCriteriaToLines(criteria: Scholarship["eligibilityCriteria"]): string[] {
   if (!criteria || typeof criteria !== "object") return [];
   const lines: string[] = [];
-  if (criteria.minGPA != null) lines.push(`Minimum GPA: ${criteria.minGPA}`);
+  if (criteria.minGPA != null) lines.push(`Minimum GWA: ${criteria.minGPA}`);
   if (criteria.minGwa != null) lines.push(`Minimum GWA: ${criteria.minGwa}`);
   if (criteria.minGWA != null) lines.push(`Minimum GWA: ${criteria.minGWA}`);
   if (Array.isArray(criteria.educationLevel) && criteria.educationLevel.length > 0) {
@@ -159,6 +161,46 @@ function eligibilityCriteriaToLines(criteria: Scholarship["eligibilityCriteria"]
   }
   if (criteria.qcResident === true) lines.push("Must be a Quezon City resident");
   return lines;
+}
+
+/**
+ * Education Level Visibility Filter
+ * - SHS students: See ALL scholarships (SHS + College)
+ * - College students: Only see College scholarships (hide SHS-specific)
+ */
+function isScholarshipVisibleToUser(scholarship: Scholarship, userEducationLevel?: string): boolean {
+  // If no user education level, show all scholarships
+  if (!userEducationLevel) return true;
+  
+  // If scholarship has no specific education level requirement, it's universal
+  const requiredLevels = scholarship.requiredEducationLevel || [];
+  if (requiredLevels.length === 0) return true;
+  
+  // Normalize user's education level
+  const userLevel = userEducationLevel.toLowerCase().trim();
+  const isUserSHS = userLevel.includes("senior high") || userLevel === "shs";
+  const isUserCollege = userLevel.includes("college") || userLevel.includes("undergraduate");
+  
+  // SHS students: see all scholarships
+  if (isUserSHS) return true;
+  
+  // College students: filter out SHS-specific scholarships
+  if (isUserCollege) {
+    // Check if scholarship is strictly SHS-only
+    const isSHSOnly = requiredLevels.every(level => {
+      const l = level.toLowerCase();
+      return l.includes("senior high") || l === "shs";
+    });
+    
+    // If scholarship is SHS-only, hide it from College students
+    if (isSHSOnly) return false;
+    
+    // Otherwise (College-only or mixed), show it
+    return true;
+  }
+  
+  // For other education levels (JHS, Postgrad, etc.), show all
+  return true;
 }
 
 function savedScholarshipsKey(email?: string): string {
@@ -238,22 +280,47 @@ export function Scholarships() {
   const [selectedType, setSelectedType] = useState("all");
   const [selectedField, setSelectedField] = useState("all");
   const [selectedLocation, setSelectedLocation] = useState("all");
-  const [selectedGpa, setSelectedGpa] = useState("all");
+  const [selectedGwa, setSelectedGwa] = useState("all");
   const [savedScholarships, setSavedScholarships] = useState<string[]>([]);
   
-  // Application Modal State
-  const [isApplicationModalOpen, setIsApplicationModalOpen] = useState(false);
-  const [applicationStep, setApplicationStep] = useState(1);
-  const [uploadedDocuments, setUploadedDocuments] = useState<Record<string, { file: File; preview?: string }>>({});
+  // Application State - Simplified single-step flow
   const [declarationChecked, setDeclarationChecked] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Legacy modal state - keeping for compatibility but not using multi-step
+  const [isApplicationModalOpen, setIsApplicationModalOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  
+  // Profile Documents State (from Document Vault)
+  const [profileDocuments, setProfileDocuments] = useState<ProfileDocumentResponse[]>([]);
+  const [hasProfileDocuments, setHasProfileDocuments] = useState(false);
+  const [isLoadingProfileDocs, setIsLoadingProfileDocs] = useState(false);
 
   useEffect(() => {
     const user = getStoredUser();
     const id = selectedScholarship?._id;
     if (!user?.email || !id) return;
     let cancelled = false;
+
+    // Reset form state when opening a new scholarship detail
+    setDeclarationChecked(false);
+    setSubmitError(null);
+
+    // Load profile documents when detail dialog opens
+    setIsLoadingProfileDocs(true);
+    fetchProfileDocuments(user.email)
+      .then((result) => {
+        if (cancelled) return;
+        setProfileDocuments(result.documents);
+        setHasProfileDocuments(result.isComplete);
+      })
+      .catch(() => {
+        if (!cancelled) setHasProfileDocuments(false);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingProfileDocs(false);
+      });
+
     checkEligibility(String(id), user.email)
       .then((res) => {
         if (cancelled) return;
@@ -383,7 +450,7 @@ export function Scholarships() {
       type: selectedType,
       fieldOfStudy: selectedField,
       location: selectedLocation,
-      minGPA: selectedGpa
+      minGPA: selectedGwa
     });
 
     // Build query parameters
@@ -402,8 +469,8 @@ export function Scholarships() {
     if (selectedLocation !== 'all') {
       params.append('location', selectedLocation);
     }
-    if (selectedGpa !== 'all') {
-      params.append('minGPA', selectedGpa);
+    if (selectedGwa !== 'all') {
+      params.append('minGPA', selectedGwa);
     }
     
     // Only include amount range if user changed from defaults
@@ -473,33 +540,13 @@ export function Scholarships() {
     setSelectedType("all");
     setSelectedField("all");
     setSelectedLocation("all");
-    setSelectedGpa("all");
+    setSelectedGwa("all");
     
     // Reload all scholarships with default filters
     await loadScholarships();
   };
 
   const recommendedScholarships = useMemo(() => {
-    return scholarshipsData
-      .map((scholarship) => ({
-        ...scholarship,
-        amountValue: scholarship.amountValue || Number(scholarship.amount) || 0,
-      }))
-      // Only apply search filter on frontend since it's real-time
-      .filter((scholarship) => scholarship.name.toLowerCase().includes(searchQuery.toLowerCase()))
-      .sort((a, b) => {
-        // Sort by eligibility status first
-        const statusOrder = { eligible: 0, "may-be-eligible": 1, unknown: 2, "not-eligible": 3 };
-        const aOrder = statusOrder[a.eligibilityStatus || "unknown"] ?? 2;
-        const bOrder = statusOrder[b.eligibilityStatus || "unknown"] ?? 2;
-        if (aOrder !== bOrder) return aOrder - bOrder;
-        // Then by match score
-        return (b.matchScore || 0) - (a.matchScore || 0);
-      });
-  }, [scholarshipsData, searchQuery]);
-
-  // Filter scholarships based on eligibility status
-  const matchedScholarships = useMemo(() => {
     const user = getStoredUser();
     
     return scholarshipsData
@@ -507,35 +554,30 @@ export function Scholarships() {
         ...scholarship,
         amountValue: scholarship.amountValue || Number(scholarship.amount) || 0,
       }))
-      .map((s) => {
-        const reasons: string[] = [];
-        if (s.eligibilityStatus === "eligible") {
-          reasons.push("You meet all eligibility criteria");
-        } else if (s.eligibilityStatus === "may-be-eligible") {
-          reasons.push("You may be eligible (requires verification)");
-        } else if (s.eligibility?.reasons?.length) {
-          reasons.push(...s.eligibility.reasons);
-        } else if (user) {
-          if (user.fieldOfStudy && s.fieldOfStudy && user.fieldOfStudy === s.fieldOfStudy) reasons.push("Matches your field of study");
-          if (user.gpa && s.minimumGpa !== undefined) {
-            const userGpa = Number(String(user.gpa).replace(/[^0-9.]/g, ""));
-            if (!Number.isNaN(userGpa) && userGpa <= (s.minimumGpa ?? 0)) reasons.push("Meets GPA requirement");
-          }
-          if (user.location && s.location && s.location.toLowerCase().includes(String(user.location).toLowerCase())) reasons.push("Matches your location");
-        }
-
-        return { ...s, matchReasons: reasons };
-      })
-      .filter((s) => s.eligibilityStatus === "eligible" || s.eligibilityStatus === "may-be-eligible" || (s.matchReasons || []).length > 0)
+      .filter((scholarship) => isScholarshipVisibleToUser(scholarship, user?.educationLevel))
+      .filter((scholarship) => scholarship.name.toLowerCase().includes(searchQuery.toLowerCase()))
+      .filter((s) => s.eligibilityStatus === "eligible" || s.eligibilityStatus === "may-be-eligible")
       .sort((a, b) => {
-        // Eligible first, then may-be-eligible, then others
-        const statusOrder = { eligible: 0, "may-be-eligible": 1, unknown: 2, "not-eligible": 3 };
+        const statusOrder: Record<string, number> = { eligible: 0, "may-be-eligible": 1, unknown: 2, "not-eligible": 3 };
         const aOrder = statusOrder[a.eligibilityStatus || "unknown"] ?? 2;
         const bOrder = statusOrder[b.eligibilityStatus || "unknown"] ?? 2;
         if (aOrder !== bOrder) return aOrder - bOrder;
         return (b.matchScore || 0) - (a.matchScore || 0);
       });
-  }, [scholarshipsData]);
+  }, [scholarshipsData, searchQuery]);
+
+  const fallbackScholarships = useMemo(() => {
+    const user = getStoredUser();
+    return scholarshipsData
+      .map((scholarship) => ({
+        ...scholarship,
+        amountValue: scholarship.amountValue || Number(scholarship.amount) || 0,
+      }))
+      .filter((scholarship) => isScholarshipVisibleToUser(scholarship, user?.educationLevel))
+      .filter((scholarship) => scholarship.name.toLowerCase().includes(searchQuery.toLowerCase()))
+      .filter((s) => s.eligibilityStatus === "not-eligible" || s.eligibilityStatus === "unknown")
+      .sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+  }, [scholarshipsData, searchQuery]);
 
   const toggleSavedScholarship = (scholarshipId: string) => {
     setSavedScholarships((current) => {
@@ -554,59 +596,37 @@ export function Scholarships() {
     });
   };
 
-  // Application Modal Functions
-  const openApplicationModal = () => {
-    setApplicationStep(1);
-    setUploadedDocuments({});
+  // Application Functions - Simplified single-step flow
+  const openApplicationModal = async () => {
+    // Reset declaration checkbox when opening scholarship details
     setDeclarationChecked(false);
     setSubmitError(null);
+    
+    // Load profile documents when opening modal
+    const user = getStoredUser();
+    if (user?.email) {
+      setIsLoadingProfileDocs(true);
+      try {
+        const result = await fetchProfileDocuments(user.email);
+        setProfileDocuments(result.documents);
+        setHasProfileDocuments(result.isComplete);
+      } catch (err) {
+        console.error("Failed to load profile documents:", err);
+        // Don't block modal opening, but show warning in UI
+        setHasProfileDocuments(false);
+      } finally {
+        setIsLoadingProfileDocs(false);
+      }
+    }
+    
     setIsApplicationModalOpen(true);
   };
 
   const closeApplicationModal = () => {
     setIsApplicationModalOpen(false);
-    setApplicationStep(1);
-    setUploadedDocuments({});
+    setSelectedScholarship(null);
     setDeclarationChecked(false);
     setSubmitError(null);
-  };
-
-  const handleFileUpload = (documentType: string, file: File) => {
-    if (file.size > 5 * 1024 * 1024) {
-      setSubmitError("File size must be less than 5MB");
-      toast.error("File size must be less than 5MB");
-      return;
-    }
-    
-    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
-    if (!allowedTypes.includes(file.type)) {
-      setSubmitError("Only PDF, JPG, JPEG, and PNG files are allowed");
-      toast.error("Only PDF, JPG, JPEG, and PNG files are allowed");
-      return;
-    }
-
-    setUploadedDocuments(prev => ({
-      ...prev,
-      [documentType]: { file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined }
-    }));
-    setSubmitError(null);
-    toast.success(`"${documentType.substring(0, 30)}${documentType.length > 30 ? '...' : ''}" uploaded successfully`);
-  };
-
-  const removeUploadedFile = (documentType: string) => {
-    setUploadedDocuments(prev => {
-      const newDocs = { ...prev };
-      if (newDocs[documentType]?.preview) {
-        URL.revokeObjectURL(newDocs[documentType].preview!);
-      }
-      delete newDocs[documentType];
-      return newDocs;
-    });
-  };
-
-  const canProceedToStep3 = () => {
-    if (!selectedScholarship?.generalDocuments) return true;
-    return selectedScholarship.generalDocuments.every(doc => uploadedDocuments[doc]);
   };
 
   const handleSubmitApplication = async () => {
@@ -624,21 +644,17 @@ export function Scholarships() {
         throw new Error("Please sign in to submit your application");
       }
 
-      // Create FormData for file upload
-      const formData = new FormData();
-      formData.append("studentEmail", user.email);
-      formData.append("scholarshipId", selectedScholarship!._id);
-      formData.append("declaration", "true");
-      
-      // Append all uploaded files
-      Object.entries(uploadedDocuments).forEach(([docType, docData]) => {
-        formData.append(`documents`, docData.file);
-        formData.append(`documentTypes`, docType);
-      });
-
+      // Submit application - documents are linked from profile vault on backend
       const response = await fetch(`${API_BASE_URL}/api/applications/submit`, {
         method: "POST",
-        body: formData,
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          studentEmail: user.email,
+          scholarshipId: selectedScholarship!._id,
+          declaration: "true",
+        }),
       });
 
       // Check content-type to prevent DOCTYPE errors
@@ -652,14 +668,14 @@ export function Scholarships() {
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || "Failed to submit application");
+        throw new Error(error.message || error.error || "Failed to submit application");
       }
 
       const result = await response.json();
       
       // Close modal and show success
       closeApplicationModal();
-      toast.success(`Application submitted successfully! Reference: ${result.applicationId}`);
+      toast.success(`Application submitted successfully! ${result.message}`);
       
       // Refresh scholarships data
       loadScholarships();
@@ -785,15 +801,15 @@ export function Scholarships() {
                   </Select>
                 </div>
 
-                {/* GPA Requirement */}
+                {/* GWA Requirement */}
                 <div className="space-y-2">
-                  <Label htmlFor="gpa">Minimum GPA</Label>
-                  <Select value={selectedGpa} onValueChange={setSelectedGpa}>
-                    <SelectTrigger id="gpa">
+                  <Label htmlFor="gwa">Minimum GWA</Label>
+                  <Select value={selectedGwa} onValueChange={setSelectedGwa}>
+                    <SelectTrigger id="gwa">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {gpaOptions.map((option) => (
+                      {gwaOptions.map((option) => (
                         <SelectItem key={option.value} value={option.value}>
                           {option.label}
                         </SelectItem>
@@ -830,6 +846,22 @@ export function Scholarships() {
               </Select>
             </div>
 
+            {/* ── Empty state when zero matches ── */}
+            {!loading && recommendedScholarships.length === 0 && (
+              <div className="mb-8 flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-gray-50 py-14 px-6 text-center">
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-4xl">
+                  🔍
+                </div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">No Perfect Matches Right Now</h3>
+                <p className="max-w-md text-sm text-gray-500 leading-relaxed">
+                  Based on your current profile, you do not meet the baseline criteria for active targeted
+                  scholarship allocations. Try updating your academic profile or explore the general
+                  opportunities listed below.
+                </p>
+              </div>
+            )}
+
+            {/* ── Matched scholarships grid ── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {loading ? (
                 <div className="col-span-full text-center py-8">Loading scholarships...</div>
@@ -919,6 +951,89 @@ export function Scholarships() {
                 ))
               )}
             </div>
+
+            {/* ── Fallback: Other Active Scholarship Programs ── */}
+            {!loading && fallbackScholarships.length > 0 && (
+              <div className="mt-10">
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="flex-1 border-t border-gray-200" />
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 border border-orange-200 rounded-full">
+                    <AlertCircle className="h-4 w-4 text-orange-500" />
+                    <span className="text-sm font-semibold text-orange-700">Other Active Scholarship Programs</span>
+                  </div>
+                  <div className="flex-1 border-t border-gray-200" />
+                </div>
+                <p className="text-xs text-gray-500 text-center mb-5">
+                  You do not currently meet all criteria for these programs. View each one to see exactly which requirements are missing.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {fallbackScholarships.map((scholarship) => (
+                    <Card
+                      key={scholarship._id}
+                      className="hover:shadow-lg transition-shadow cursor-pointer w-full border-orange-100"
+                      onClick={() => setSelectedScholarship(scholarship)}
+                    >
+                      <div className="relative h-40">
+                        <img
+                          src={scholarshipImages[scholarship.name] || defaultScholarshipImage}
+                          alt={scholarship.name}
+                          className="w-full h-full object-cover rounded-t-lg"
+                          style={{ filter: "grayscale(25%)" }}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent rounded-t-lg" />
+                        <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
+                          {scholarship.deadlineStatus === "closing-soon" && (
+                            <Badge className="bg-red-500 text-white">Closing Soon</Badge>
+                          )}
+                          <Badge className="bg-orange-500 text-white text-xs">Criteria Missing</Badge>
+                          <Badge variant="outline" className="border-orange-300 text-orange-700 bg-white/90 text-xs">
+                            {scholarship.matchScore}% Match
+                          </Badge>
+                        </div>
+                      </div>
+                      <CardHeader>
+                        <CardTitle className="text-base line-clamp-2 break-words">{scholarship.name}</CardTitle>
+                        <CardDescription className="line-clamp-1 text-sm">{scholarship.provider}</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3 p-4">
+                          <span className="text-xl font-bold text-primary font-mono">
+                            ₱{Number(scholarship.amount).toLocaleString()}
+                          </span>
+                          <Separator />
+                          <div className="space-y-2 text-sm">
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <Calendar className="h-4 w-4 flex-shrink-0" />
+                              <span className="break-words">Due: {scholarship.deadline}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-muted-foreground">
+                              <MapPin className="h-4 w-4 flex-shrink-0" />
+                              <span className="break-words">{scholarship.location || "Quezon City"}</span>
+                            </div>
+                          </div>
+                          {scholarship.eligibility?.unmetCriteria && scholarship.eligibility.unmetCriteria.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              {scholarship.eligibility.unmetCriteria.slice(0, 2).map((criterion, idx) => (
+                                <div key={idx} className="flex items-start gap-1.5 text-xs text-red-600">
+                                  <XCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                  <span className="leading-snug">{criterion}</span>
+                                </div>
+                              ))}
+                              {scholarship.eligibility.unmetCriteria.length > 2 && (
+                                <p className="text-xs text-gray-400 pl-5">+{scholarship.eligibility.unmetCriteria.length - 2} more criteria missing</p>
+                              )}
+                            </div>
+                          )}
+                          <Button className="w-full mt-4" size="sm" variant="outline">
+                            View Details
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -985,7 +1100,7 @@ export function Scholarships() {
                 )}
 
                 {selectedScholarship.eligibilityStatus === "not-eligible" && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-5">
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-5 space-y-4">
                     <div className="flex items-start gap-4">
                       <div className="w-8 h-8 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0 mt-0.5">
                         <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -993,17 +1108,44 @@ export function Scholarships() {
                         </svg>
                       </div>
                       <div className="flex-1">
-                        <p className="font-semibold text-red-800 text-base">You do not qualify for this scholarship</p>
-                        <p className="text-sm text-red-700 mt-1">You do not meet the required eligibility criteria:</p>
-                        {selectedScholarship.eligibility?.unmetCriteria && selectedScholarship.eligibility.unmetCriteria.length > 0 && (
-                          <ul className="mt-3 text-sm text-red-700 list-disc list-inside space-y-1 ml-1">
-                            {selectedScholarship.eligibility.unmetCriteria.map((criterion, idx) => (
-                              <li key={idx}>{criterion}</li>
-                            ))}
-                          </ul>
-                        )}
+                        <p className="font-semibold text-red-800 text-base">You do not currently qualify for this scholarship</p>
+                        <p className="text-sm text-red-700 mt-1">The matching engine identified the following unmet requirements from your profile:</p>
                       </div>
                     </div>
+
+                    {/* Per-criterion breakdown */}
+                    {selectedScholarship.eligibility?.unmetCriteria && selectedScholarship.eligibility.unmetCriteria.length > 0 && (
+                      <div className="rounded-lg border border-red-200 bg-white divide-y divide-red-100">
+                        {selectedScholarship.eligibility.unmetCriteria.map((criterion, idx) => (
+                          <div key={idx} className="flex items-start gap-3 px-4 py-3">
+                            <XCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                            <span className="text-sm text-red-700 leading-snug">{criterion}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Met criteria — shown only when criteriaChecks exists */}
+                    {selectedScholarship.eligibility?.criteriaChecks && (() => {
+                      const passed = Object.values(selectedScholarship.eligibility!.criteriaChecks!).filter(c => c.passed);
+                      return passed.length > 0 ? (
+                        <div>
+                          <p className="text-xs font-semibold text-green-700 mb-2 uppercase tracking-wide">Criteria you DO meet:</p>
+                          <div className="rounded-lg border border-green-200 bg-white divide-y divide-green-100">
+                            {passed.map((c, idx) => (
+                              <div key={idx} className="flex items-start gap-3 px-4 py-3">
+                                <CheckCircle className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
+                                <span className="text-sm text-green-700 leading-snug">{c.label || c.message}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null;
+                    })()}
+
+                    <p className="text-xs text-red-600 italic">
+                      Update your profile with accurate information to re-evaluate your eligibility automatically.
+                    </p>
                   </div>
                 )}
 
@@ -1168,9 +1310,9 @@ export function Scholarships() {
                             </Badge>
                           ))}
                         </div>
-                        {selectedScholarship.minimumGPA && (
+                        {selectedScholarship.minimumGWA && (
                           <p className="text-sm text-gray-600 mt-3">
-                            Minimum GPA/GWA Required: <span className="font-medium">{selectedScholarship.minimumGPA}</span>
+                            Minimum GWA Required: <span className="font-medium">{selectedScholarship.minimumGWA}</span>
                           </p>
                         )}
                       </div>
@@ -1224,44 +1366,128 @@ export function Scholarships() {
 
                 <Separator className="my-8" />
 
-                {/* Action Buttons */}
-                <div className="flex flex-col sm:flex-row gap-4 pt-2">
+                {/* Certification & Application Submission */}
+                <div className="space-y-6">
+                  {/* Document Status Summary */}
+                  {selectedScholarship.eligibilityStatus === "eligible" ||
+                    selectedScholarship.eligibilityStatus === "may-be-eligible" ? (
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-primary" />
+                        Application Documents
+                      </h4>
+                      <p className="text-sm text-gray-600 mb-2">
+                        Your profile documents will be automatically linked to this application:
+                      </p>
+                      <ul className="text-sm text-gray-600 space-y-1 ml-5 list-disc">
+                        <li>Copy of Grades / Transcript of Records / Form 137 or 138</li>
+                        <li>Proof of school enrollment/registration/acceptance</li>
+                        <li>Valid QCitizen ID</li>
+                      </ul>
+                      <p className="text-xs text-muted-foreground mt-3">
+                        Scholarship-specific documents will be requested after acceptance.
+                      </p>
+                      {!isLoadingProfileDocs && !hasProfileDocuments && (
+                        <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                          <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                          <span>
+                            One or more required documents are not yet uploaded. Please go to{" "}
+                            <strong>Profile &gt; Document Vault</strong> and upload all three documents before applying.
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
                   {selectedScholarship.deadlineStatus === "closed" ? (
-                    <Button className="flex-1 h-12 text-base" disabled>
+                    <Button className="w-full h-12 text-base" disabled>
                       Application Closed
                     </Button>
                   ) : selectedScholarship.deadlineStatus === "not-yet-open" ? (
-                    <Button className="flex-1 h-12 text-base" disabled>
+                    <Button className="w-full h-12 text-base" disabled>
                       Opens Soon
                     </Button>
                   ) : selectedScholarship.eligibilityStatus === "eligible" ||
                     selectedScholarship.eligibilityStatus === "may-be-eligible" ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span
-                          className={`inline-flex flex-1 ${!deriveStudentApplyAllowed(selectedScholarship) ? "cursor-not-allowed" : ""}`}
-                        >
-                          <Button
-                            className={`flex-1 h-12 text-base bg-blue-600 hover:bg-blue-700 ${!deriveStudentApplyAllowed(selectedScholarship) ? "opacity-50 cursor-not-allowed" : ""}`}
-                            disabled={!deriveStudentApplyAllowed(selectedScholarship)}
-                            onClick={openApplicationModal}
-                          >
-                            <FileText className="h-5 w-5 mr-2" />
-                            Submit Requirements
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      {!deriveStudentApplyAllowed(selectedScholarship) && (
-                        <TooltipContent side="top" className="max-w-xs text-left">
-                          You cannot submit yet. Confirm eligibility and that applications are open (deadline not passed).
-                        </TooltipContent>
+                    <div className="space-y-4">
+                      {/* Error message */}
+                      {submitError && (
+                        <div className="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+                          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                          <span>{submitError}</span>
+                        </div>
                       )}
-                    </Tooltip>
+
+                      {/* Certification Checkbox - At Top */}
+                      <div className="flex items-start gap-3">
+                        <Checkbox
+                          id="declaration"
+                          checked={declarationChecked}
+                          onCheckedChange={(checked) => setDeclarationChecked(checked === true)}
+                          className="mt-1"
+                        />
+                        <Label htmlFor="declaration" className="text-sm font-normal cursor-pointer">
+                          I certify that all information and documents submitted are true and correct. 
+                          I understand that any false information may result in the disqualification of my application.
+                        </Label>
+                      </div>
+                      
+                      {/* Buttons Row - Below Checkbox */}
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        {/* Apply Scholarship Button */}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              className={`inline-flex flex-1 ${!declarationChecked || !deriveStudentApplyAllowed(selectedScholarship) ? "cursor-not-allowed" : ""}`}
+                            >
+                              <Button
+                                onClick={handleSubmitApplication}
+                                disabled={!declarationChecked || isSubmitting || !deriveStudentApplyAllowed(selectedScholarship)}
+                                className={`w-full h-12 text-base bg-blue-600 hover:bg-blue-700 ${
+                                  !declarationChecked || isSubmitting || !deriveStudentApplyAllowed(selectedScholarship)
+                                    ? "opacity-50 cursor-not-allowed"
+                                    : ""
+                                }`}
+                              >
+                                {isSubmitting ? (
+                                  <>
+                                    <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                                    Submitting...
+                                  </>
+                                ) : (
+                                  <>
+                                    <FileText className="h-5 w-5 mr-2" />
+                                    Apply Scholarship
+                                  </>
+                                )}
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          {(!declarationChecked || !deriveStudentApplyAllowed(selectedScholarship)) && !isSubmitting && (
+                            <TooltipContent side="top" className="max-w-xs text-left">
+                              {!declarationChecked
+                                ? "Please check the certification box to proceed with your application."
+                                : "You cannot apply yet. Confirm eligibility and that applications are open."}
+                            </TooltipContent>
+                          )}
+                        </Tooltip>
+                        
+                        {/* Save for Later Button */}
+                        <Button
+                          variant="outline"
+                          className={`flex-1 h-12 text-base ${savedScholarships.includes(selectedScholarship._id) ? "border-green-500 text-green-700 bg-green-50 hover:bg-green-100" : ""}`}
+                          onClick={() => toggleSavedScholarship(selectedScholarship._id)}
+                        >
+                          <Bookmark className={`h-5 w-5 mr-2 ${savedScholarships.includes(selectedScholarship._id) ? "fill-current" : ""}`} />
+                          {savedScholarships.includes(selectedScholarship._id) ? "Saved" : "Save for Later"}
+                        </Button>
+                      </div>
+                    </div>
                   ) : (
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <span className="inline-flex flex-1 cursor-not-allowed">
-                          <Button className="flex-1 h-12 text-base bg-gray-400 opacity-50 cursor-not-allowed" disabled>
+                        <span className="inline-flex w-full cursor-not-allowed">
+                          <Button className="w-full h-12 text-base bg-gray-400 opacity-50 cursor-not-allowed" disabled>
                             Not Eligible
                           </Button>
                         </span>
@@ -1271,14 +1497,6 @@ export function Scholarships() {
                       </TooltipContent>
                     </Tooltip>
                   )}
-                  <Button
-                    variant="outline"
-                    className={`flex-1 h-12 text-base ${savedScholarships.includes(selectedScholarship._id) ? "border-green-500 text-green-700 bg-green-50 hover:bg-green-100" : ""}`}
-                    onClick={() => toggleSavedScholarship(selectedScholarship._id)}
-                  >
-                    <Bookmark className={`h-5 w-5 mr-2 ${savedScholarships.includes(selectedScholarship._id) ? "fill-current" : ""}`} />
-                    {savedScholarships.includes(selectedScholarship._id) ? "Saved" : "Save for Later"}
-                  </Button>
                 </div>
               </div>
             </>
@@ -1286,509 +1504,7 @@ export function Scholarships() {
         </DialogContent>
       </Dialog>
 
-      {/* Application Multi-Step Modal */}
-      <Dialog open={isApplicationModalOpen} onOpenChange={(open) => !open && closeApplicationModal()}>
-        <DialogContent className="w-full min-w-[320px] sm:min-w-[600px] sm:max-w-[800px] max-h-[90vh] overflow-y-auto overflow-x-hidden p-6 sm:p-8">
-          {selectedScholarship && (
-            <>
-              <DialogHeader className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <DialogTitle className="text-xl">Apply for {selectedScholarship.name}</DialogTitle>
-                  <Badge variant="outline">Step {applicationStep} of 3</Badge>
-                </div>
-                <DialogDescription>
-                  Complete your application by following the steps below
-                </DialogDescription>
-              </DialogHeader>
-
-              {/* Step Indicators */}
-              <div className="flex items-center justify-center gap-2 py-4">
-                {[1, 2, 3].map((step) => (
-                  <div
-                    key={step}
-                    className={`h-2 rounded-full transition-all ${
-                      step === applicationStep
-                        ? "w-8 bg-primary"
-                        : step < applicationStep
-                        ? "w-4 bg-green-500"
-                        : "w-4 bg-gray-200"
-                    }`}
-                  />
-                ))}
-              </div>
-
-              {/* Error Message */}
-              {submitError && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-                  <p className="text-sm text-red-600">{submitError}</p>
-                </div>
-              )}
-
-              {/* STEP 1: Eligibility Summary */}
-              {applicationStep === 1 && (
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                      <CheckCircle className="h-5 w-5 text-primary" />
-                      Eligibility Check
-                    </h3>
-                    <p className="text-sm text-gray-600 mb-4">
-                      The system has automatically verified your eligibility based on your profile:
-                    </p>
-
-                    <div className="space-y-3">
-                      {/* Universal Checks */}
-                      <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                        {selectedScholarship.eligibility?.criteriaChecks?.qcResident?.passed ? (
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
-                        ) : (
-                          <div className="h-5 w-5 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <span className="text-red-500 text-xs">✗</span>
-                          </div>
-                        )}
-                        <div>
-                          <p className="font-medium text-sm">Quezon City Resident</p>
-                          <p className="text-xs text-gray-500">
-                            {selectedScholarship.eligibility?.criteriaChecks?.qcResident?.passed
-                              ? "Verified QC Resident"
-                              : "Must be a Quezon City resident"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                        {selectedScholarship.eligibility?.criteriaChecks?.notOtherLGUScholar?.passed !== false ? (
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
-                        ) : (
-                          <div className="h-5 w-5 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <span className="text-red-500 text-xs">✗</span>
-                          </div>
-                        )}
-                        <div>
-                          <p className="font-medium text-sm">Not a Scholar of Another LGU</p>
-                          <p className="text-xs text-gray-500">
-                            {selectedScholarship.eligibility?.criteriaChecks?.notOtherLGUScholar?.passed !== false
-                              ? "Not receiving other LGU scholarship"
-                              : "Currently a scholar of another LGU"}
-                          </p>
-                        </div>
-                      </div>
-
-                      {(() => {
-                        const schoolCheck = selectedScholarship.eligibility?.criteriaChecks?.qcSchoolEnrollment;
-                        const status = schoolCheck?.status;
-                        const passed = schoolCheck?.passed;
-                        
-                        // Determine icon and styling based on status
-                        let icon = <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />;
-                        let label = schoolCheck?.label || "Enrolled in QC-Recognized School";
-                        let message = schoolCheck?.message || "Verified enrollment";
-                        
-                        if (status === "no_school" || (!passed && !status)) {
-                          icon = (
-                            <div className="h-5 w-5 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                              <span className="text-red-500 text-xs">✗</span>
-                            </div>
-                          );
-                          label = "School Not Provided";
-                          message = "Please add your school in Settings before applying";
-                        } else if (status === "requires_verification" || !passed) {
-                          icon = (
-                            <div className="h-5 w-5 rounded-full bg-yellow-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                              <span className="text-yellow-600 text-xs">!</span>
-                            </div>
-                          );
-                          label = "School Requires Verification";
-                          message = `${schoolCheck?.schoolName || "Your school"} — Staff will verify during final screening`;
-                        } else if (status === "qc_verified" || passed) {
-                          icon = <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />;
-                          label = "Enrolled in QC-Recognized School";
-                          message = schoolCheck?.schoolName 
-                            ? `${schoolCheck.schoolName}${schoolCheck.schoolCampus ? ` (${schoolCheck.schoolCampus})` : ""} — Quezon City ✓`
-                            : "Verified enrollment";
-                        }
-                        
-                        return (
-                          <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                            {icon}
-                            <div>
-                              <p className="font-medium text-sm">{label}</p>
-                              <p className="text-xs text-gray-500">{message}</p>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                        {selectedScholarship.eligibility?.criteriaChecks?.educationLevel?.passed ? (
-                          <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
-                        ) : (
-                          <div className="h-5 w-5 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <span className="text-red-500 text-xs">✗</span>
-                          </div>
-                        )}
-                        <div>
-                          <p className="font-medium text-sm">Education Level</p>
-                          <p className="text-xs text-gray-500">
-                            {selectedScholarship.eligibility?.criteriaChecks?.educationLevel?.message ||
-                              "Education level check"}
-                          </p>
-                        </div>
-                      </div>
-
-                      {selectedScholarship.minimumGPA && (
-                        <div className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
-                          {selectedScholarship.eligibility?.criteriaChecks?.gpa?.passed ? (
-                            <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
-                          ) : (
-                            <div className="h-5 w-5 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                              <span className="text-red-500 text-xs">✗</span>
-                            </div>
-                          )}
-                          <div>
-                            <p className="font-medium text-sm">
-                              {selectedScholarship.minimumGPA <= 2.0 ? "GWA" : "GPA"} Requirement
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              {selectedScholarship.eligibility?.criteriaChecks?.gpa?.message ||
-                                `Minimum: ${selectedScholarship.minimumGPA}`}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end items-center gap-4 flex-wrap">
-                    {!deriveStudentApplyAllowed(selectedScholarship) && (
-                      <div className="text-right">
-                        {selectedScholarship.eligibility?.mayBeEligible ? (
-                          <div className="text-sm text-amber-600">
-                            <p className="font-semibold">⚠️ Requires Verification</p>
-                            <p className="text-xs">
-                              {selectedScholarship.eligibility?.unmetCriteria?.[0] || 
-                                "Some criteria require verification. Check your Settings for special categories (Athlete, Artist, SK Official, etc.)"}
-                            </p>
-                          </div>
-                        ) : (
-                          <p className="text-sm text-red-600">
-                            {selectedScholarship.eligibility?.criteriaChecks?.qcSchoolEnrollment?.status === "no_school"
-                              ? "Please add your school information in Settings before applying"
-                              : "You must meet all eligibility criteria to proceed"}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span
-                          className={`inline-flex ${!deriveStudentApplyAllowed(selectedScholarship) ? "cursor-not-allowed" : ""}`}
-                        >
-                          <Button
-                            onClick={() => setApplicationStep(2)}
-                            className={`bg-green-600 hover:bg-green-700 ${!deriveStudentApplyAllowed(selectedScholarship) ? "opacity-50 cursor-not-allowed" : ""}`}
-                            disabled={!deriveStudentApplyAllowed(selectedScholarship)}
-                          >
-                            Proceed to Documents
-                            <ExternalLink className="h-4 w-4 ml-2" />
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      {!deriveStudentApplyAllowed(selectedScholarship) && (
-                        <TooltipContent side="top" className="max-w-xs text-left">
-                          Complete eligibility requirements and ensure applications are open before continuing.
-                        </TooltipContent>
-                      )}
-                    </Tooltip>
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 2: Document Upload */}
-              {applicationStep === 2 && (
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                      <FileText className="h-5 w-5 text-primary" />
-                      Upload Documents
-                    </h3>
-
-                    {/* General Documents */}
-                    {selectedScholarship.generalDocuments && selectedScholarship.generalDocuments.length > 0 && (
-                      <div className="mb-6">
-                        <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                          <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-xs font-semibold">REQUIRED</span>
-                          General Documents
-                        </h4>
-                        <div className="space-y-3">
-                          {selectedScholarship.generalDocuments.map((doc, idx) => (
-                            <div key={idx} className="border rounded-lg p-3">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex-1">
-                                  <p className="text-sm font-medium">{doc}</p>
-                                  {uploadedDocuments[doc] ? (
-                                    <div className="flex items-center gap-2 mt-2">
-                                      <Badge className="bg-green-100 text-green-700 text-xs">
-                                        <CheckCircle className="h-3 w-3 mr-1" />
-                                        Uploaded
-                                      </Badge>
-                                      <span className="text-xs text-gray-500">
-                                        {uploadedDocuments[doc].file.name}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <Badge variant="outline" className="text-xs mt-2">
-                                      Required
-                                    </Badge>
-                                  )}
-                                </div>
-                                {uploadedDocuments[doc] ? (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => removeUploadedFile(doc)}
-                                  >
-                                    ✕
-                                  </Button>
-                                ) : (
-                                  <div className="relative">
-                                    <input
-                                      type="file"
-                                      id={`file-${doc.replace(/\s+/g, '-').substring(0, 30)}`}
-                                      accept=".pdf,.jpg,.jpeg,.png"
-                                      className="hidden"
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) handleFileUpload(doc, file);
-                                        // Reset input so same file can be selected again
-                                        e.target.value = '';
-                                      }}
-                                    />
-                                    <label 
-                                      htmlFor={`file-${doc.replace(/\s+/g, '-').substring(0, 30)}`}
-                                      className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3 cursor-pointer"
-                                    >
-                                      📎 Upload
-                                    </label>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Scholarship-Specific Documents */}
-                    {selectedScholarship.requiredDocuments && selectedScholarship.requiredDocuments.length > 0 && (
-                      <div className="mb-6">
-                        <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                          <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-semibold">SCHOLARSHIP-SPECIFIC</span>
-                          Required Documents
-                        </h4>
-                        <div className="space-y-3">
-                          {selectedScholarship.requiredDocuments.map((doc, idx) => (
-                            <div key={idx} className="border rounded-lg p-3 bg-blue-50/50">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="flex-1">
-                                  <p className="text-sm font-medium">{doc}</p>
-                                  {uploadedDocuments[doc] ? (
-                                    <div className="flex items-center gap-2 mt-2">
-                                      <Badge className="bg-green-100 text-green-700 text-xs">
-                                        <CheckCircle className="h-3 w-3 mr-1" />
-                                        Uploaded
-                                      </Badge>
-                                      <span className="text-xs text-gray-500">
-                                        {uploadedDocuments[doc].file.name}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <Badge variant="outline" className="text-xs mt-2 text-amber-600 border-amber-300">
-                                      Recommended
-                                    </Badge>
-                                  )}
-                                </div>
-                                {uploadedDocuments[doc] ? (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => removeUploadedFile(doc)}
-                                  >
-                                    ✕
-                                  </Button>
-                                ) : (
-                                  <div className="relative">
-                                    <input
-                                      type="file"
-                                      id={`file-${doc.replace(/\s+/g, '-').substring(0, 30)}`}
-                                      accept=".pdf,.jpg,.jpeg,.png"
-                                      className="hidden"
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) handleFileUpload(doc, file);
-                                        // Reset input so same file can be selected again
-                                        e.target.value = '';
-                                      }}
-                                    />
-                                    <label 
-                                      htmlFor={`file-${doc.replace(/\s+/g, '-').substring(0, 30)}`}
-                                      className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3 cursor-pointer"
-                                    >
-                                      📎 Upload
-                                    </label>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {!canProceedToStep3() && (
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
-                        <p className="text-sm text-red-600">
-                          Please upload all required general documents before proceeding.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex justify-between">
-                    <Button variant="outline" onClick={() => setApplicationStep(1)}>
-                      Back
-                    </Button>
-                    <Button 
-                      onClick={() => setApplicationStep(3)}
-                      disabled={!canProceedToStep3()}
-                    >
-                      Review & Submit
-                      <ExternalLink className="h-4 w-4 ml-2" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 3: Review & Submit */}
-              {applicationStep === 3 && (
-                <div className="space-y-6">
-                  <div>
-                    <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                      <CheckCircle className="h-5 w-5 text-primary" />
-                      Review Your Application
-                    </h3>
-
-                    {/* Scholarship Summary */}
-                    <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                      <h4 className="font-medium mb-2">Scholarship</h4>
-                      <p className="text-sm text-gray-600">{selectedScholarship.name}</p>
-                      <p className="text-lg font-semibold text-primary mt-1">
-                        ₱{Number(selectedScholarship.amount).toLocaleString()}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        Match Score: {selectedScholarship.matchScore}%
-                      </p>
-                    </div>
-
-                    {/* Uploaded Documents Summary */}
-                    <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                      <h4 className="font-medium mb-2">Uploaded Documents</h4>
-                      <div className="space-y-2">
-                        {Object.entries(uploadedDocuments).map(([docType, docData]) => (
-                          <div key={docType} className="flex items-center justify-between">
-                            <span className="text-sm text-gray-600">{docType}</span>
-                            <Badge className="bg-green-100 text-green-700 text-xs">
-                              <CheckCircle className="h-3 w-3 mr-1" />
-                              Uploaded
-                            </Badge>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Declaration */}
-                    <div className="border rounded-lg p-4 mb-4">
-                      <label className="flex items-start gap-3 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={declarationChecked}
-                          onChange={(e) => setDeclarationChecked(e.target.checked)}
-                          className="mt-1 h-4 w-4 text-primary"
-                        />
-                        <span className="text-sm text-gray-700">
-                          I certify that all information and documents submitted are true and correct. 
-                          I understand that any false information may result in the disqualification of my application.
-                        </span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-between items-center gap-4 flex-wrap">
-                    <Button variant="outline" onClick={() => setApplicationStep(2)}>
-                      Back
-                    </Button>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span
-                          className={`inline-flex ${
-                            declarationChecked &&
-                            !isSubmitting &&
-                            !deriveStudentApplyAllowed(selectedScholarship)
-                              ? "cursor-not-allowed"
-                              : ""
-                          }`}
-                        >
-                          <Button
-                            onClick={handleSubmitApplication}
-                            disabled={
-                              !declarationChecked ||
-                              isSubmitting ||
-                              !deriveStudentApplyAllowed(selectedScholarship)
-                            }
-                            className={`bg-blue-600 hover:bg-blue-700 ${
-                              !declarationChecked ||
-                              isSubmitting ||
-                              !deriveStudentApplyAllowed(selectedScholarship)
-                                ? "opacity-50 cursor-not-allowed"
-                                : ""
-                            }`}
-                          >
-                            {isSubmitting ? (
-                              <>
-                                <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
-                                Submitting...
-                              </>
-                            ) : (
-                              <>
-                                Submit Application
-                                <ExternalLink className="h-4 w-4 ml-2" />
-                              </>
-                            )}
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      {(() => {
-                        const blocked =
-                          !declarationChecked ||
-                          isSubmitting ||
-                          !deriveStudentApplyAllowed(selectedScholarship);
-                        if (!blocked || isSubmitting) return null;
-                        return (
-                          <TooltipContent side="top" className="max-w-xs text-left">
-                            {!declarationChecked
-                              ? "Confirm the declaration checkbox to submit."
-                              : "You are not eligible or applications are closed for this scholarship."}
-                          </TooltipContent>
-                        );
-                      })()}
-                    </Tooltip>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Legacy multi-step modal removed - application now uses simplified single-step flow in detail view */}
     </div>
   );
 }

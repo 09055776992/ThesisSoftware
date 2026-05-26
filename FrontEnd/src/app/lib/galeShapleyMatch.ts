@@ -24,6 +24,7 @@ export interface ScholarshipForMatching {
   type?: string;
   fieldOfStudy?: string;
   location?: string;
+  requiredEducationLevel?: string[];
   [key: string]: unknown;
 }
 

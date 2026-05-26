@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Outlet, useNavigate } from "react-router";
+import { Outlet, useNavigate, useLocation } from "react-router";
 import { AdminAuthModal } from "../pages/admin-auth/admin-auth-modal";
 import { ProviderAuthModal } from "../pages/provider-auth/provider-auth-modal";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
@@ -8,9 +8,13 @@ import { fetchUserProfile, pickProfileImageUrl } from "../lib/api-client";
 
 export function RootLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [showAdminModal, setShowAdminModal] = useState(false);
   const [showProviderModal, setShowProviderModal] = useState(false);
   const [isAuthRestored, setIsAuthRestored] = useState(false);
+
+  // Check if we're on the landing page (root path)
+  const isLandingPage = location.pathname === "/";
 
   // Keyboard shortcuts hook - must be called before any conditional returns
   useKeyboardShortcuts({
@@ -24,13 +28,14 @@ export function RootLayout() {
     const user = getStoredUser();
 
     const finishRestore = (profileUser: typeof user) => {
-      if (token && profileUser) {
+      // Only redirect authenticated users if they're NOT on the landing page
+      if (token && profileUser && !isLandingPage) {
         if (profileUser.userType === "admin") {
           navigate("/admin", { replace: true });
         } else if (profileUser.userType === "provider") {
           navigate("/provider/dashboard", { replace: true });
         } else {
-          navigate("/dashboard/home", { replace: true });
+          navigate("/dashboard", { replace: true });
         }
       }
       setIsAuthRestored(true);
@@ -56,10 +61,10 @@ export function RootLayout() {
         finishRestore(getStoredUser());
       })
       .catch(() => finishRestore(user));
-  }, [navigate]);
+  }, [navigate, isLandingPage]);
 
-  // Don't render until auth is restored to prevent flash
-  if (!isAuthRestored) {
+  // Don't render until auth is restored to prevent flash, except on landing page
+  if (!isAuthRestored && !isLandingPage) {
     return null;
   }
 

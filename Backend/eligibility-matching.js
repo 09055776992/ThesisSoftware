@@ -66,10 +66,21 @@ function isQuezonCityText(value) {
 }
 
 function getStudentGradeValue(student) {
-  const values = [student.gpa, student.GPA, student.gwa, student.GWA]
-    .map((value) => parseFloat(value))
-    .filter((value) => Number.isFinite(value));
-  return values.length > 0 ? values[0] : null;
+  // Check gwa first (preferred field name), then gpa (legacy/alias)
+  // All values are stored as strings in MongoDB (String(gpa)) so we parseFloat each.
+  // Empty string, null, undefined, and "NaN" all safely return null.
+  const candidates = [
+    student.gwa,
+    student.GWA,
+    student.gpa,
+    student.GPA,
+  ];
+  for (const raw of candidates) {
+    if (raw === null || raw === undefined || String(raw).trim() === "") continue;
+    const n = parseFloat(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
 }
 
 function getStudentPercentageValue(student) {
@@ -356,78 +367,66 @@ function checkEligibility(student, scholarship) {
     const studentPercentage = getStudentPercentageValue(student);
     const studentGPA = getStudentGradeValue(student);
     
-    // Determine which scale the requirement uses
-    const isPercentage = minimumGPA > 50; // Percentage grades (e.g., 85, 89)
-    const isGWA = minimumGPA >= 1.0 && minimumGPA <= 3.0 && minimumGPA <= 5.0; // Philippine GWA: 1.0 (best) to 5.0
-    const isGPA = minimumGPA >= 2.0 && minimumGPA <= 4.0; // International GPA: 0-4.0, higher is better
-    
+    // Determine which scale the requirement uses.
+    // Philippine GWA:  1.0 (best) to 5.0 (worst) — LOWER is better.
+    // SHS Percentage:  70–100 — HIGHER is better.
+    // Both scales are unambiguously separated at 50: anything > 50 is a percentage.
+    const isPercentage = minimumGPA > 50;
+
     let passed = false;
     let message = "";
     let actualValue = "";
     let label = "Grade";
-    
+
     if (isPercentage) {
-      // SHS Percentage scale: 0-100, higher is better
-      // Convert student's GWA to percentage if needed (approximate: GWA 1.0 ≈ 95%)
+      // SHS Percentage scale (70–100): higher is better.
       let studentPercentageValue = studentPercentage;
-      if (!studentPercentageValue && studentGPA && studentGPA <= 5.0) {
-        // Convert GWA to approximate percentage: (5 - GWA) / 4 * 100
+      if (!studentPercentageValue && studentGPA !== null && studentGPA <= 5.0) {
+        // Convert Philippine GWA to approximate percentage: (5 - GWA) / 4 * 100
         studentPercentageValue = ((5 - studentGPA) / 4) * 100;
       }
-      
-      actualValue = studentPercentageValue?.toFixed(2) || studentGPA?.toString() || "Not provided";
+
+      actualValue = studentPercentageValue != null ? studentPercentageValue.toFixed(2) : (studentGPA != null ? studentGPA.toString() : "Not provided");
       label = "Percentage Grade";
-      
-      if (studentPercentageValue === null && studentGPA === null) {
+
+      if (studentPercentageValue == null && studentGPA == null) {
         passed = false;
         message = `Grade not provided. Minimum required: ${minimumGPA}%`;
       } else {
-        const gradeToCheck = studentPercentageValue !== null ? studentPercentageValue : (studentGPA * 20); // Rough conversion
+        const gradeToCheck = studentPercentageValue != null ? studentPercentageValue : (studentGPA * 20);
         passed = gradeToCheck >= minimumGPA;
-        message = passed 
+        message = passed
           ? `Grade: ${actualValue}% (meets minimum ${minimumGPA}%)`
           : `Grade requirement not met. Minimum: ${minimumGPA}%, Yours: ${actualValue}%`;
       }
-    } else if (isGWA) {
-      // GWA scale: 1.0 (best) to 5.0 (worst), lower is better
+    } else {
+      // Philippine GWA scale (1.0 best → 5.0 worst): LOWER value = BETTER grade.
+      // Correct logic: student passes when their GWA is less than or equal to the required maximum.
+      // e.g. scholarship requires max GWA 2.50 → student with 1.75 PASSES (1.75 <= 2.50).
       label = "General Weighted Average (GWA)";
       actualValue = studentGPA !== null ? studentGPA.toString() : "Not provided";
-      
+
       if (studentGPA === null) {
         passed = false;
-        message = `GWA not provided. Minimum required: ${minimumGPA}`;
+        message = `GWA not provided. Required: ${minimumGPA} or better (lower is better on the Philippine 1.0–5.0 scale)`;
       } else {
-        passed = studentGPA <= minimumGPA;
-        message = passed 
-          ? `GWA: ${studentGPA} (meets maximum ${minimumGPA})`
-          : `GWA requirement not met. Maximum: ${minimumGPA}, Yours: ${studentGPA}`;
-      }
-    } else {
-      // Philippine GPA/GWA scale: lower is better
-      label = "Grade Point Average (GPA)";
-      actualValue = studentGPA !== null ? studentGPA.toString() : "Not provided";
-      
-      if (studentGPA === null) {
-        passed = false;
-        message = `GPA not provided. Minimum required: ${minimumGPA}`;
-      } else {
-        passed = studentGPA <= minimumGPA;
-        message = passed 
-          ? `GPA: ${studentGPA} (meets maximum ${minimumGPA})`
-          : `GPA requirement not met. Maximum: ${minimumGPA}, Yours: ${studentGPA}`;
+        passed = studentGPA <= minimumGPA; // ✅ correct: 1.75 <= 2.50 → PASS
+        message = passed
+          ? `GWA: ${studentGPA} (meets requirement of ${minimumGPA} or better)`
+          : `GWA requirement not met. Required: ${minimumGPA} or better, Yours: ${studentGPA} (lower GWA = better grade)`;
       }
     }
 
     if (DEBUG_ELIGIBILITY) {
-      console.log('GPA Check:', {
-        studentGPA,
+      console.log('GWA Check:', {
+        studentGWA: studentGPA,
         requiredMinimum: minimumGPA,
-        comparisonUsed: 'student.gpa <= scholarship.minimumGPA',
-        passed: studentGPA !== null ? studentGPA <= minimumGPA : false,
+        comparisonUsed: isPercentage ? 'student.grade >= scholarship.minimumGrade' : 'student.gwa <= scholarship.minimumGWA',
+        passed: passed,
       });
     }
     
-    eligibility.criteriaChecks.gpa = {
+    eligibility.criteriaChecks.gwa = {
       passed: passed,
       label: label,
       required: minimumGPA,
@@ -442,24 +441,39 @@ function checkEligibility(student, scholarship) {
     }
   }
 
-  // 3. GPA/GWA Check (if specified - supports both GPA and GWA scales)
-  if (criteria.minGWA !== null && criteria.minGWA !== undefined) {
+  // 3. GWA Check (legacy criteria fields: minGWA / minGPA / minGwa)
+  // Identical scale logic as Part 2: > 50 = percentage (higher is better), <= 5.0 = Philippine GWA (lower is better).
+  const minGradeRequirement = criteria.minGWA ?? criteria.minGPA ?? criteria.minGwa;
+  if (minGradeRequirement !== null && minGradeRequirement !== undefined) {
     const studentGWA = getStudentGradeValue(student);
-    // GWA scale: 1.0 (best) to 5.0 (worst), lower is better
-    if (studentGWA === null || studentGWA > criteria.minGWA) {
-      eligibility.isEligible = false;
-      eligibility.unmetCriteria.push(`GWA requirement not met. Minimum: ${criteria.minGWA}, Yours: ${studentGWA || 'Not provided'}`);
-      return eligibility; // Early exit - GWA too low
-    }
-  }
+    const isPercentageScale = minGradeRequirement > 50;
 
-  if (criteria.minGPA !== null && criteria.minGPA !== undefined) {
-    const studentGPA = getStudentGradeValue(student);
-    // Philippine GPA/GWA scale: lower is better
-    if (studentGPA === null || studentGPA > criteria.minGPA) {
+    if (studentGWA === null) {
+      // Student hasn't entered grades yet — degrade gracefully to mayBeEligible
+      // instead of hard-failing so new accounts can still see the scholarship.
+      eligibility.mayBeEligible = true;
+      eligibility.unmetCriteria.push(
+        `GWA not yet provided. Required: ${minGradeRequirement}${isPercentageScale ? '%' : ' or better'}. Add your GWA in Profile → Education.`
+      );
+      return eligibility;
+    }
+
+    let passed;
+    if (isPercentageScale) {
+      // SHS percentage: higher is better (e.g. student 88 >= required 85 → PASS)
+      passed = studentGWA >= minGradeRequirement;
+    } else {
+      // Philippine GWA: lower is better (e.g. student 1.75 <= required 2.50 → PASS)
+      passed = studentGWA <= minGradeRequirement; // ✅ correct direction
+    }
+
+    if (!passed) {
       eligibility.isEligible = false;
-      eligibility.unmetCriteria.push(`GPA requirement not met. Maximum: ${criteria.minGPA}, Yours: ${studentGPA || 'Not provided'}`);
-      return eligibility; // Early exit - GPA too low
+      const comparisonMsg = isPercentageScale
+        ? `GWA requirement not met. Minimum: ${minGradeRequirement}%, Yours: ${studentGWA}%`
+        : `GWA requirement not met. Required: ${minGradeRequirement} or better, Yours: ${studentGWA} (lower GWA = better grade)`;
+      eligibility.unmetCriteria.push(comparisonMsg);
+      return eligibility;
     }
   }
 
@@ -948,34 +962,38 @@ function calculateMatchScore(student, scholarship, eligibility) {
     });
   }
   
-  // 3. GPA/GWA (25% weight)
-  if (criteria.minGWA !== null && criteria.minGWA !== undefined) {
+  // 3. GWA/Grade (25% weight) - Supports both SHS percentage and College GWA scales
+  const minGradeReq = criteria.minGWA ?? criteria.minGPA ?? criteria.minGwa;
+  if (minGradeReq !== null && minGradeReq !== undefined) {
     maxPoints += 25;
-    const studentGWA = getStudentGradeValue(student);
-    if (studentGWA !== null && studentGWA <= criteria.minGWA) {
+    const studentGrade = getStudentGradeValue(student);
+    
+    // Determine scale: > 50 is percentage (SHS), <= 5.0 is GWA (College)
+    const isPercentageScale = minGradeReq > 50;
+    
+    let matched = false;
+    if (studentGrade !== null) {
+      if (isPercentageScale) {
+        // SHS percentage scale: higher is better
+        matched = studentGrade >= minGradeReq;
+      } else {
+        // College GWA scale: lower is better
+        matched = studentGrade <= minGradeReq;
+      }
+    }
+    
+    if (matched) {
       points += 25;
       breakdown.gpaMatch = true;
     }
+    
     breakdown.criteriaDetails.push({ 
-      name: "GWA Requirement", 
+      name: isPercentageScale ? "Grade Requirement (SHS %)" : "GWA Requirement", 
       weight: 25, 
-      matched: breakdown.gpaMatch,
-      required: criteria.minGWA,
-      actual: studentGWA
-    });
-  } else if (criteria.minGPA !== null && criteria.minGPA !== undefined) {
-    maxPoints += 25;
-    const studentGPA = getStudentGradeValue(student);
-    if (studentGPA !== null && studentGPA <= criteria.minGPA) {
-      points += 25;
-      breakdown.gpaMatch = true;
-    }
-    breakdown.criteriaDetails.push({ 
-      name: "GPA Requirement", 
-      weight: 25, 
-      matched: breakdown.gpaMatch,
-      required: criteria.minGPA,
-      actual: studentGPA
+      matched: matched,
+      required: minGradeReq,
+      actual: studentGrade,
+      scale: isPercentageScale ? "percentage" : "gwa"
     });
   }
   
@@ -1117,16 +1135,14 @@ function filterScholarshipsByEligibility(scholarships, student) {
       eligibility,
       // Calculate actual match score based on criteria met
       matchScore,
-      eligibilityStatus: eligibility.isEligible ? "eligible" : 
-                        (eligibility.mayBeEligible ? "may_be_eligible" : "not_eligible")
+      eligibilityStatus: eligibility.isEligible ? "eligible" :
+                        (eligibility.mayBeEligible ? "may-be-eligible" : "not-eligible")
     };
-  }).filter(scholarship => 
-    scholarship.eligibility.isEligible || scholarship.eligibility.mayBeEligible
-  ).sort((a, b) => {
+  }).sort((a, b) => {
     // Sort by eligibility status, then match score
-    const statusOrder = { eligible: 0, may_be_eligible: 1, not_eligible: 2 };
-    const aStatus = statusOrder[a.eligibilityStatus] || 2;
-    const bStatus = statusOrder[b.eligibilityStatus] || 2;
+    const statusOrder = { eligible: 0, "may-be-eligible": 1, "not-eligible": 2 };
+    const aStatus = statusOrder[a.eligibilityStatus] ?? 2;
+    const bStatus = statusOrder[b.eligibilityStatus] ?? 2;
     
     if (aStatus !== bStatus) return aStatus - bStatus;
     return b.matchScore - a.matchScore;

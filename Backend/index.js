@@ -12,7 +12,7 @@ import { getDb } from "./db.js";
 import { rankScholarships } from "./matching-algorithms.js";
 import { seedQCSPPScholarships } from "./seed-qcsp-scholarships.js";
 import * as eligibilityMatching from "./eligibility-matching.js";
-import { sendOTPEmail, sendWelcomeEmail, maskEmail } from "./services/emailService.js";
+import { sendOTPEmail, sendWelcomeEmail, sendScreeningEmail, sendNewScholarshipEmail, maskEmail } from "./services/emailService.js";
 import { generateOTP, getOTPExpiry } from "./utils/otpUtils.js";
 import { analyzeDocumentFile } from "./services/aiService.js";
 
@@ -94,24 +94,41 @@ const uploadAvatar = multer({
 // POST /api/user/upload-avatar - Upload profile picture
 app.post("/api/user/upload-avatar", uploadAvatar.single("avatar"), async (req, res) => {
   try {
+    console.log("[Avatar Upload] Request received:", { email: req.body.email, file: req.file?.originalname });
+    
     if (!req.file) {
+      console.log("[Avatar Upload] No file in request");
       return res.status(400).json({ error: "No file uploaded." });
     }
+    
     const db = await getDb();
     const email = req.body.email?.toLowerCase();
     if (!email) {
+      console.log("[Avatar Upload] No email provided");
       return res.status(400).json({ error: "Email is required." });
     }
 
     const avatarUrl = `/uploads/avatars/${req.file.filename}`;
+    const filePath = path.join(__dirname, "uploads", "avatars", req.file.filename);
+    
+    console.log(`[Avatar Upload] File saved to: ${filePath}`);
+    console.log(`[Avatar Upload] File size: ${req.file.size} bytes`);
+    
+    // Verify file exists
+    if (!fs.existsSync(filePath)) {
+      console.error("[Avatar Upload] File was not saved properly!");
+      return res.status(500).json({ error: "File upload failed." });
+    }
     
     // Store avatar path in user document (URL string, not base64)
-    await db.collection("users").updateOne(
+    const result = await db.collection("users").updateOne(
       { email },
       { $set: { profileImage: avatarUrl, profilePicture: avatarUrl } }
     );
-
+    
+    console.log(`[Avatar Upload] DB update result:`, result);
     console.log(`[Avatar Upload] Updated profile image for ${email}: ${avatarUrl}`);
+    
     res.json({ avatarUrl, message: "Profile picture updated successfully." });
   } catch (error) {
     console.error("[Avatar Upload] Error:", error);
@@ -137,6 +154,106 @@ async function insertStudentNotification(db, { userEmail, userId, type, title, m
     read: false,
     createdAt: new Date(),
   });
+}
+
+/**
+ * Background hook: notify pre-filtered eligible students about a new scholarship.
+ * Runs asynchronously so it never delays the admin's HTTP response.
+ */
+async function notifyUsersOfNewScholarship(db, scholarship) {
+  try {
+    const criteria = scholarship.eligibilityCriteria || {};
+
+    // Build a MongoDB filter that matches only student accounts.
+    // Students are stored with userType:"student" (SCHOLAR registration) OR role:"customer"/"student" (legacy).
+    const baseStudentFilter = {
+      $or: [
+        { userType: { $in: ["student", "customer"] } },
+        { role: { $in: ["student", "customer", "Student"] } },
+      ],
+    };
+
+    // Education-level pre-filter
+    const edLevels = criteria.educationLevel && criteria.educationLevel.length > 0
+      ? criteria.educationLevel
+      : null;
+
+    let userFilter = baseStudentFilter;
+
+    if (edLevels) {
+      const edMap = {
+        "Junior High School": "junior-high",
+        "Senior High School": "senior-high",
+        "College / Undergraduate": "college",
+        "Vocational / TESDA": "vocational",
+        "Postgraduate (Masters / Doctorate)": "postgraduate",
+      };
+      const mappedLevels = edLevels.map((l) => edMap[l] || l);
+      userFilter = { $and: [baseStudentFilter, { educationLevel: { $in: mappedLevels } }] };
+    }
+
+    const students = await db.collection("users").find(userFilter, {
+      projection: { email: 1, userName: 1, gpa: 1, gwa: 1, educationLevel: 1, _id: 1 },
+    }).toArray();
+
+    console.log(`[NewScholarship] Found ${students.length} candidate student(s) for "${scholarship.name}"`);
+
+    let notified = 0;
+    let skipped = 0;
+
+    for (const student of students) {
+      try {
+        // GWA pre-filter — only skip if both sides are set and student clearly fails.
+        // Philippine GWA: 1.0 (best) → 5.0 (worst). Student PASSES when gwa <= required max.
+        const minGWA = criteria.minGWA || criteria.minGPA || scholarship.minimumGPA || null;
+        const rawGrade = student.gwa || student.GWA || student.gpa || student.GPA || null;
+        if (minGWA && rawGrade) {
+          const studentGWA = parseFloat(rawGrade);
+          const isPercentageScale = minGWA > 50;
+          if (Number.isFinite(studentGWA)) {
+            const fails = isPercentageScale
+              ? studentGWA < minGWA   // percentage: fail if student grade is below minimum
+              : studentGWA > minGWA;  // GWA scale: fail if student GWA exceeds allowed maximum
+            if (fails) { skipped++; continue; }
+          }
+        }
+
+        const studentEmail = String(student.email || "").trim().toLowerCase();
+        if (!studentEmail) { skipped++; continue; }
+
+        // Fire-and-forget individual email (errors per student are caught)
+        sendNewScholarshipEmail({
+          to: studentEmail,
+          studentName: student.userName || "Scholar",
+          scholarshipName: scholarship.name,
+          amount: scholarship.amount,
+          deadline: scholarship.deadline,
+          provider: scholarship.provider || scholarship.organization,
+          description: scholarship.description,
+        }).catch((err) =>
+          console.error(`[NewScholarship] Email failed for ${maskEmail(studentEmail)}:`, err.message)
+        );
+
+        // In-app notification
+        await insertStudentNotification(db, {
+          userEmail: studentEmail,
+          userId: student._id,
+          type: "new_scholarship",
+          title: "New Scholarship Available",
+          message: `🎓 A new scholarship matching your profile has been posted: "${scholarship.name}". Award: ₱${Number(scholarship.amount || 0).toLocaleString("en-PH")}. Deadline: ${scholarship.deadline ? new Date(scholarship.deadline).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" }) : "See details"}. Log in to view and apply!`,
+          scholarshipName: scholarship.name,
+        });
+
+        notified++;
+      } catch (studentErr) {
+        console.error(`[NewScholarship] Error processing student ${student._id}:`, studentErr.message);
+      }
+    }
+
+    console.log(`[NewScholarship] Notifications dispatched — notified: ${notified}, skipped (pre-filter): ${skipped}`);
+  } catch (err) {
+    console.error("[NewScholarship] Background notification hook failed:", err.message);
+  }
 }
 
 // Serve uploads folder as static files
@@ -189,6 +306,10 @@ app.get("/api/scholarships", async (req, res) => {
       const student = await db.collection("users").findOne({ email: studentEmail.toLowerCase() });
       
       if (student) {
+        // Mirror gwa/gpa in-memory so existing accounts with only one field still evaluate correctly
+        const rawGrade = student.gwa || student.GWA || student.gpa || student.GPA || null;
+        if (rawGrade) { student.gwa = String(rawGrade); student.gpa = String(rawGrade); }
+
         // Apply eligibility filtering
         const eligibleScholarships = eligibilityMatching.filterScholarshipsByEligibility(scholarships, student);
         res.json({ 
@@ -507,6 +628,11 @@ app.get("/api/scholarships/:id/check-eligibility", async (req, res) => {
       return res.status(404).json({ error: "Student not found." });
     }
 
+    // Normalise grade fields in-memory — mirror whichever field exists so the
+    // engine always finds the value regardless of which key was persisted.
+    const _rawGrade = student.gwa || student.GWA || student.gpa || student.GPA || null;
+    if (_rawGrade) { student.gwa = String(_rawGrade); student.gpa = String(_rawGrade); }
+
     const eligibility = eligibilityMatching.checkEligibility(student, scholarship);
     const deadline = new Date(scholarship.deadline);
     const openingDate = scholarship.openingDate ? new Date(scholarship.openingDate) : null;
@@ -562,9 +688,28 @@ app.post("/api/scholarships", async (req, res) => {
 app.get("/api/admin/scholarships", async (_, res) => {
   try {
     const db = await getDb();
-    const scholarships = dedupeScholarshipsByName(
-      await db.collection("scholarships").find({}).sort({ createdAt: -1 }).toArray(),
-    );
+
+    // Fetch scholarships and live application counts in parallel
+    const [rawScholarships, appCounts] = await Promise.all([
+      db.collection("scholarships").find({}).sort({ createdAt: -1 }).toArray(),
+      db.collection("applications").aggregate([
+        { $group: { _id: "$scholarshipId", count: { $sum: 1 } } },
+      ]).toArray(),
+    ]);
+
+    // Build a map: scholarshipId string -> count
+    const countMap = {};
+    for (const entry of appCounts) {
+      if (entry._id) countMap[String(entry._id)] = entry.count;
+    }
+
+    // Merge live counts into scholarship docs
+    const merged = rawScholarships.map((s) => ({
+      ...s,
+      applicationsCount: countMap[String(s._id)] ?? 0,
+    }));
+
+    const scholarships = dedupeScholarshipsByName(merged);
     res.json({ data: scholarships });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch scholarships." });
@@ -592,7 +737,16 @@ app.post("/api/admin/scholarships", async (req, res) => {
     };
 
     const result = await db.collection("scholarships").insertOne(scholarship);
-    res.status(201).json({ data: { ...scholarship, _id: result.insertedId } });
+    const savedScholarship = { ...scholarship, _id: result.insertedId };
+
+    // Fire background notification only for Active scholarships
+    if (scholarship.status === "Active") {
+      notifyUsersOfNewScholarship(db, savedScholarship).catch((err) =>
+        console.error("[NewScholarship] Unhandled hook error:", err.message)
+      );
+    }
+
+    res.status(201).json({ data: savedScholarship });
   } catch (error) {
     res.status(500).json({ error: "Failed to create scholarship." });
   }
@@ -848,6 +1002,7 @@ app.post("/api/auth/signup", async (req, res) => {
       phone: String(payload.phone || ""),
       location: String(payload.location || ""),
       userType,
+      role: userType, // mirror so all DB queries find the user regardless of which field they check
       avatar: "",
       createdAt: new Date(),
     };
@@ -973,7 +1128,11 @@ app.post("/api/auth/verify-otp", async (req, res) => {
     }
 
     // Check OTP value
-    if (String(otp) !== String(otpRecord.otp)) {
+    const submittedOtp = String(otp).trim();
+    const storedOtp = String(otpRecord.otp).trim();
+    console.log(`[OTP Debug] Submitted: "${submittedOtp}" | Stored: "${storedOtp}" | Match: ${submittedOtp === storedOtp}`);
+    
+    if (submittedOtp !== storedOtp) {
       await db.collection("otps").updateOne(
         { _id: otpRecord._id },
         { $inc: { attempts: 1 } }
@@ -1005,9 +1164,33 @@ app.post("/api/auth/verify-otp", async (req, res) => {
         phone: user.phone || "",
         location: user.location || "",
         userType: user.userType || "student",
+        role: user.role || user.userType || "student",
         avatar: profileImage,
         profileImage,
         profilePicture: profileImage,
+        // Academic profile fields — populated after profile setup
+        gwa: user.gwa || user.gpa || "",
+        gpa: user.gpa || user.gwa || "",
+        educationLevel: user.educationLevel || "",
+        yearLevel: user.yearLevel || "",
+        fieldOfStudy: user.fieldOfStudy || "",
+        graduationYear: user.graduationYear || "",
+        schoolName: user.schoolName || "",
+        schoolLocation: user.schoolLocation || "",
+        enrolledInQCSchool: user.enrolledInQCSchool || false,
+        hasAcademicHonors: user.hasAcademicHonors || false,
+        academic_rank: user.academic_rank || null,
+        // Financial / eligibility fields
+        incomeCategory: user.incomeCategory || "",
+        financialNeed: user.financialNeed || [],
+        is_qc_resident: user.is_qc_resident || false,
+        isAthlete: user.isAthlete || false,
+        isArtist: user.isArtist || false,
+        isSKOfficial: user.isSKOfficial || false,
+        isStudentLeader: user.isStudentLeader || false,
+        isIndigent: user.isIndigent || false,
+        isPWD: user.isPWD || false,
+        isSoloParent: user.isSoloParent || false,
       },
     });
   } catch (error) {
@@ -1518,8 +1701,8 @@ const handleUserProfileUpdate = async (req, res) => {
     if (fullName !== undefined) updatedUser.fullName = String(fullName);
     if (phone !== undefined) updatedUser.phone = String(phone);
     if (location !== undefined) updatedUser.location = String(location);
-    if (gpa !== undefined) updatedUser.gpa = String(gpa);
-    if (gwa !== undefined) updatedUser.gwa = String(gwa);
+    if (gpa !== undefined) { updatedUser.gpa = String(gpa); updatedUser.gwa = String(gpa); }
+    if (gwa !== undefined) { updatedUser.gwa = String(gwa); updatedUser.gpa = String(gwa); }
     if (educationLevel !== undefined) updatedUser.educationLevel = String(educationLevel);
     if (yearLevel !== undefined) updatedUser.yearLevel = String(yearLevel);
     if (fieldOfStudy !== undefined) updatedUser.fieldOfStudy = String(fieldOfStudy);
@@ -1801,6 +1984,7 @@ app.patch("/api/users/profile/academic", async (req, res) => {
 
     const {
       gpa,
+      gwa,           // primary field sent by the frontend profile form
       educationLevel,
       yearLevel,
       fieldOfStudy,
@@ -1813,18 +1997,30 @@ app.patch("/api/users/profile/academic", async (req, res) => {
       academic_rank,
     } = req.body;
 
-    // Validate GPA when provided: must be numeric and 1.00 <= value <= 5.00
-    if (gpa !== undefined) {
-      const gpaNum = Number(gpa);
-      if (isNaN(gpaNum) || gpaNum < 1.0 || gpaNum > 5.0) {
-        return res.status(400).json({ error: "GPA must be between 1.00 and 5.00." });
+    // Accept either gwa or gpa; prefer gwa (sent by profile form)
+    const gradeValue = gwa !== undefined ? gwa : gpa;
+
+    // Validate grade when provided: must be numeric.
+    // Philippine GWA scale: 1.00 (best) to 5.00 (worst). SHS percentage: 70-100.
+    if (gradeValue !== undefined && String(gradeValue).trim() !== "") {
+      const gradeNum = Number(gradeValue);
+      const isSHS = String(educationLevel || "").toLowerCase().includes("senior high");
+      const minVal = isSHS ? 70 : 1.0;
+      const maxVal = isSHS ? 100 : 5.0;
+      if (isNaN(gradeNum) || gradeNum < minVal || gradeNum > maxVal) {
+        return res.status(400).json({ error: `GWA must be between ${minVal} and ${maxVal}.` });
       }
     }
 
     // Build $set object — only include fields present in the request body
     const academicFields = {};
 
-    if (gpa !== undefined) academicFields.gpa = String(gpa);
+    // Save grade to BOTH gwa and gpa so all code paths can find it
+    if (gradeValue !== undefined) {
+      const gradeStr = String(gradeValue).trim();
+      academicFields.gwa = gradeStr;
+      academicFields.gpa = gradeStr;
+    }
     if (educationLevel !== undefined) academicFields.educationLevel = String(educationLevel);
     if (yearLevel !== undefined) academicFields.yearLevel = String(yearLevel);
     if (fieldOfStudy !== undefined) academicFields.fieldOfStudy = String(fieldOfStudy);
@@ -1969,6 +2165,214 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
   } catch (error) {
     console.error("[Achievements Update] Error:", error);
     return res.status(500).json({ error: "Failed to update achievements: " + error.message });
+  }
+});
+
+// ===== PROFILE DOCUMENT VAULT API =====
+
+// Configure multer for profile document uploads
+const profileDocStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const { email, docType } = req.body;
+    const uploadDir = path.join(__dirname, "uploads", "profile-documents", 
+      email ? email.replace(/[^a-zA-Z0-9]/g, "_") : "unknown"
+    );
+    fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const { docType } = req.body;
+    const timestamp = Date.now();
+    const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9.]/g, "_");
+    cb(null, `${docType}_${timestamp}_${sanitizedFilename}`);
+  }
+});
+
+const uploadProfileDoc = multer({
+  storage: profileDocStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF, JPG, JPEG, and PNG files are allowed'), false);
+    }
+  }
+});
+
+// POST /api/users/profile/documents - Upload a profile document
+app.post("/api/users/profile/documents", uploadProfileDoc.single("document"), async (req, res) => {
+  try {
+    const { email, docType } = req.body;
+    const file = req.file;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    if (!docType || !['gradesTranscript', 'enrollmentProof', 'qCitizenId'].includes(docType)) {
+      return res.status(400).json({ error: "Invalid document type. Must be gradesTranscript, enrollmentProof, or qCitizenId." });
+    }
+
+    if (!file) {
+      return res.status(400).json({ error: "No file uploaded." });
+    }
+
+    const db = await getDb();
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    // Check user exists
+    const user = await db.collection("users").findOne({ email: normalizedEmail });
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    // Build the document object
+    const docObject = {
+      fileName: file.originalname,
+      filePath: file.path,
+      fileSize: file.size,
+      mimeType: file.mimetype,
+      uploadedAt: new Date(),
+      status: "pending",
+      rejectionReason: null,
+    };
+
+    // Update user document
+    const updatePath = `profileDocuments.${docType}`;
+    await db.collection("users").updateOne(
+      { email: normalizedEmail },
+      { 
+        $set: { 
+          [updatePath]: docObject,
+          "profileDocuments.lastUpdatedAt": new Date(),
+        }
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Document uploaded successfully.",
+      document: docObject,
+    });
+  } catch (error) {
+    console.error("[Profile Document Upload] Error:", error);
+    return res.status(500).json({ error: "Failed to upload document: " + error.message });
+  }
+});
+
+// GET /api/users/profile/documents - Fetch user's profile documents
+app.get("/api/users/profile/documents", async (req, res) => {
+  try {
+    const email = String(req.query.email || "").trim().toLowerCase();
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    const db = await getDb();
+    const user = await db.collection("users").findOne(
+      { email },
+      { projection: { profileDocuments: 1, email: 1 } }
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    const docs = user.profileDocuments || {};
+    const documentTypes = [
+      { key: 'gradesTranscript', label: 'Copy of Grades / Transcript of Records / Form 137 or 138' },
+      { key: 'enrollmentProof', label: 'Proof of school enrollment/registration/acceptance' },
+      { key: 'qCitizenId', label: 'Valid QCitizen ID' },
+    ];
+
+    const documents = documentTypes.map(({ key, label }) => ({
+      type: key,
+      label,
+      fileName: docs[key]?.fileName || null,
+      fileSize: docs[key]?.fileSize || null,
+      uploadedAt: docs[key]?.uploadedAt || null,
+      status: docs[key]?.status || null,
+      rejectionReason: docs[key]?.rejectionReason || null,
+    }));
+
+    const isComplete = documents.every(d => d.fileName !== null);
+
+    return res.status(200).json({
+      success: true,
+      documents,
+      isComplete,
+      lastUpdatedAt: docs.lastUpdatedAt || null,
+    });
+  } catch (error) {
+    console.error("[Profile Documents Fetch] Error:", error);
+    return res.status(500).json({ error: "Failed to fetch documents: " + error.message });
+  }
+});
+
+// DELETE /api/users/profile/documents/:docType - Delete a profile document
+app.delete("/api/users/profile/documents/:docType", async (req, res) => {
+  try {
+    const { docType } = req.params;
+    const email = String(req.query.email || "").trim().toLowerCase();
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    if (!['gradesTranscript', 'enrollmentProof', 'qCitizenId'].includes(docType)) {
+      return res.status(400).json({ error: "Invalid document type." });
+    }
+
+    const db = await getDb();
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    // Get user to find file path for deletion
+    const user = await db.collection("users").findOne({ email: normalizedEmail });
+    if (!user) {
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    const docPath = user.profileDocuments?.[docType]?.filePath;
+    
+    // Delete file from disk if exists
+    if (docPath && fs.existsSync(docPath)) {
+      try {
+        fs.unlinkSync(docPath);
+      } catch (e) {
+        console.error("[Profile Doc Delete] Failed to delete file:", e.message);
+      }
+    }
+
+    // Clear document from database
+    const updatePath = `profileDocuments.${docType}`;
+    await db.collection("users").updateOne(
+      { email: normalizedEmail },
+      { 
+        $set: { 
+          [updatePath]: {
+            fileName: null,
+            filePath: null,
+            fileSize: null,
+            mimeType: null,
+            uploadedAt: null,
+            status: "pending",
+            rejectionReason: null,
+          },
+          "profileDocuments.lastUpdatedAt": new Date(),
+        }
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Document deleted successfully.",
+    });
+  } catch (error) {
+    console.error("[Profile Document Delete] Error:", error);
+    return res.status(500).json({ error: "Failed to delete document: " + error.message });
   }
 });
 
@@ -2397,7 +2801,9 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
             { userType: { $in: ["student", "customer"] } },
           ],
         }),
-        applicationsCollection.countDocuments({ status: "Pending" }),
+        applicationsCollection.countDocuments({
+          status: { $in: ["Pending", "System Qualified", "Under Review", "Action Required: Submit Specific Requirements"] },
+        }),
         scholarshipsCollection.countDocuments({ status: "Active" }),
       ]);
 
@@ -2582,6 +2988,10 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
       if (existingApplication) {
         return res.status(409).json({ error: "You have already applied for this scholarship." });
       }
+
+      // Normalise grade fields before eligibility check
+      const _rg1 = student.gwa || student.GWA || student.gpa || student.GPA || null;
+      if (_rg1) { student.gwa = String(_rg1); student.gpa = String(_rg1); }
 
       // Perform eligibility check
       const eligibility = eligibilityMatching.checkEligibility(student, scholarship);
@@ -2904,6 +3314,15 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
         return res.json({ data: scholarships.map(s => ({ ...s, eligibilityStatus: "unknown" })) });
       }
 
+      // Normalise grade fields in-memory so both gwa and gpa are always populated.
+      // Existing accounts may only have one of the two fields saved; mirror them here
+      // without a DB write so eligibility checks always find the grade value.
+      const rawGrade = student.gwa || student.GWA || student.gpa || student.GPA || null;
+      if (rawGrade) {
+        student.gwa = String(rawGrade);
+        student.gpa = String(rawGrade);
+      }
+
       // Debug logging - log FULL user object for debugging
       console.log("[scholarships-with-eligibility] FULL Student object from DB:", JSON.stringify(student, null, 2));
       console.log("[scholarships-with-eligibility] Student profile fields:", {
@@ -2936,6 +3355,10 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
             deadlineStatus = "closing-soon";
           }
         }
+
+        // Normalise grade fields before eligibility check
+        const _rg2 = student.gwa || student.GWA || student.gpa || student.GPA || null;
+        if (_rg2) { student.gwa = String(_rg2); student.gpa = String(_rg2); }
 
         // Check eligibility + match score (single source of truth on server)
         const eligibility = eligibilityMatching.checkEligibility(student, scholarship);
@@ -3031,21 +3454,17 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
     }
   });
 
-  // POST /api/applications/submit - Submit scholarship application with documents
-  app.post("/api/applications/submit", upload.fields([
-    { name: 'documents', maxCount: 10 }
-  ]), async (req, res) => {
+  // POST /api/applications/submit - Submit scholarship application (Stage 1)
+  // Uses profile documents from Document Vault instead of file uploads
+  app.post("/api/applications/submit", async (req, res) => {
     try {
       const db = await getDb();
       const { studentEmail, scholarshipId, declaration } = req.body;
-      const files = req.files?.documents || [];
       
       console.log("[Application Submit] Request received:", {
         studentEmail,
         scholarshipId,
         declaration,
-        fileCount: files.length,
-        documentTypes: req.body.documentTypes
       });
 
       if (!studentEmail) {
@@ -3064,6 +3483,24 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
       const student = await db.collection("users").findOne({ email: studentEmail.toLowerCase() });
       if (!student) {
         return res.status(404).json({ error: "Student not found." });
+      }
+
+      // Check that required profile documents are uploaded
+      const profileDocs = student.profileDocuments || {};
+      const requiredProfileDocs = ['gradesTranscript', 'enrollmentProof', 'qCitizenId'];
+      const missingDocs = requiredProfileDocs.filter(docType => !profileDocs[docType]?.fileName);
+      
+      if (missingDocs.length > 0) {
+        const docLabels = {
+          gradesTranscript: 'Copy of Grades / Transcript of Records',
+          enrollmentProof: 'Proof of school enrollment/registration/acceptance',
+          qCitizenId: 'Valid QCitizen ID'
+        };
+        return res.status(400).json({
+          error: "Missing required profile documents",
+          missingDocuments: missingDocs.map(d => docLabels[d]),
+          message: `Please upload the following documents in your Profile > Document Vault: ${missingDocs.map(d => docLabels[d]).join(', ')}`
+        });
       }
 
       // Import ObjectId
@@ -3087,66 +3524,49 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
         return res.status(400).json({ error: "You have already applied for this scholarship." });
       }
 
-      // Process uploaded files with AI analysis
-      const documentTypes = req.body.documentTypes || [];
-      const submittedDocuments = [];
+      // Link profile documents (from Document Vault) to application
+      const generalDocuments = [
+        {
+          documentType: 'gradesTranscript',
+          fileName: profileDocs.gradesTranscript.fileName,
+          filePath: profileDocs.gradesTranscript.filePath,
+          fileSize: profileDocs.gradesTranscript.fileSize,
+          mimeType: profileDocs.gradesTranscript.mimeType,
+          uploadedAt: profileDocs.gradesTranscript.uploadedAt,
+          status: profileDocs.gradesTranscript.status || 'pending',
+          rejectionReason: profileDocs.gradesTranscript.rejectionReason,
+        },
+        {
+          documentType: 'enrollmentProof',
+          fileName: profileDocs.enrollmentProof.fileName,
+          filePath: profileDocs.enrollmentProof.filePath,
+          fileSize: profileDocs.enrollmentProof.fileSize,
+          mimeType: profileDocs.enrollmentProof.mimeType,
+          uploadedAt: profileDocs.enrollmentProof.uploadedAt,
+          status: profileDocs.enrollmentProof.status || 'pending',
+          rejectionReason: profileDocs.enrollmentProof.rejectionReason,
+        },
+        {
+          documentType: 'qCitizenId',
+          fileName: profileDocs.qCitizenId.fileName,
+          filePath: profileDocs.qCitizenId.filePath,
+          fileSize: profileDocs.qCitizenId.fileSize,
+          mimeType: profileDocs.qCitizenId.mimeType,
+          uploadedAt: profileDocs.qCitizenId.uploadedAt,
+          status: profileDocs.qCitizenId.status || 'pending',
+          rejectionReason: profileDocs.qCitizenId.rejectionReason,
+        },
+      ];
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const docType = Array.isArray(documentTypes) ? documentTypes[i] : documentTypes;
-
-        // Read file for AI analysis
-        let aiAnalysis = null;
-        try {
-          const fileBuffer = fs.readFileSync(file.path);
-          console.log(`[AI Analysis] Analyzing ${file.originalname} (${fileBuffer.length} bytes)...`);
-          aiAnalysis = await analyzeDocumentFile(fileBuffer, file.originalname, docType || "unknown");
-          console.log(`[AI Analysis] ${file.originalname} result:`, JSON.stringify(aiAnalysis, null, 2));
-        } catch (err) {
-          console.error(`[AI Analysis] Error analyzing ${file.originalname}:`, err.message);
-        }
-
-        const doc = {
-          documentType: docType || "Document",
-          fileName: file.originalname,
-          filePath: file.path,
-          fileSize: file.size,
-          mimeType: file.mimetype,
-          uploadedAt: new Date(),
-          status: "uploaded"
-        };
-
-        // Add AI analysis results if available
-        if (aiAnalysis?.success) {
-          doc.confidence_score = Math.round(aiAnalysis.authenticity?.confidence || 0);
-          doc.extracted_gwa = aiAnalysis.extracted_gwa || null;
-          doc.matched_keywords = aiAnalysis.authenticity?.matched_keywords || [];
-          doc.match_scores = aiAnalysis.authenticity?.match_scores || {};
-          doc.total_expected_terms = aiAnalysis.authenticity?.total_expected_terms || 0;
-          doc.fuzzy_threshold = aiAnalysis.authenticity?.fuzzy_threshold || 80;
-          console.log(`[AI Analysis] Stored for ${file.originalname}:`, {
-            confidence: doc.confidence_score,
-            gwa: doc.extracted_gwa,
-            keywords: doc.matched_keywords?.length || 0
-          });
-        } else {
-          console.log(`[AI Analysis] No results for ${file.originalname}, aiAnalysis:`, aiAnalysis);
-        }
-
-        submittedDocuments.push(doc);
-      }
+      // Normalise grade fields before eligibility check
+      const _rg3 = student.gwa || student.GWA || student.gpa || student.GPA || null;
+      if (_rg3) { student.gwa = String(_rg3); student.gpa = String(_rg3); }
 
       // Check eligibility
       const eligibilityResult = eligibilityMatching.checkEligibility(student, scholarship);
       
       // Block submission if not eligible and not may-be-eligible
       if (!eligibilityResult.isEligible && !eligibilityResult.mayBeEligible) {
-        // Clean up uploaded files
-        if (req.files?.documents) {
-          req.files.documents.forEach(file => {
-            try { fs.unlinkSync(file.path); } catch (e) {}
-          });
-        }
         return res.status(403).json({
           error: "You do not meet the eligibility criteria for this scholarship.",
           unmetCriteria: eligibilityResult.unmetCriteria
@@ -3158,16 +3578,19 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
       const appCount = await db.collection("applications").countDocuments({}) + 1;
       const referenceNumber = `APP-${year}-${String(appCount).padStart(5, "0")}`;
 
-      // Create application
+      // Create application (Stage 1: Initial submission with general docs)
       const application = {
         referenceNumber,
         studentId: student._id.toString(),
+        studentName: student.fullName || student.name || studentEmail.split("@")[0],
         studentEmail: studentEmail.toLowerCase(),
         scholarshipId: scholarshipId,
         scholarshipName: scholarship.name,
-        status: eligibilityResult.isEligible ? "System Qualified" : "Needs Review",
+        status: eligibilityResult.isEligible ? "System Qualified" : "Under Review",
+        stage: "initial",
         submittedAt: new Date(),
-        submittedDocuments,
+        generalDocuments,
+        specificDocuments: [], // Will be populated in Stage 2 after acceptance
         eligibilityCheck: {
           isEligible: eligibilityResult.isEligible,
           reasons: eligibilityResult.reasons,
@@ -3181,7 +3604,13 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
       };
 
       const result = await db.collection("applications").insertOne(application);
-      
+
+      // Increment applicationsCount on the scholarship document
+      await db.collection("scholarships").updateOne(
+        { _id: new ObjectId(scholarshipId) },
+        { $inc: { applicationsCount: 1 } }
+      );
+
       // Create notification for student
       await insertStudentNotification(db, {
         userEmail: studentEmail.toLowerCase(),
@@ -3195,26 +3624,122 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
       console.log("[Application Submit] Success:", result.insertedId);
 
       res.status(201).json({
-        message: "Application submitted successfully.",
+        message: "Application submitted successfully. Scholarship-specific documents will be required after your application is accepted.",
         applicationId: result.insertedId.toString(),
         status: application.status,
-        matchScore: application.matchScore
+        matchScore: application.matchScore,
+        stage: "initial",
+        generalDocumentsLinked: generalDocuments.length,
       });
     } catch (error) {
       console.error("[Application Submit] Error:", error);
+      res.status(500).json({ error: "Failed to submit application: " + error.message });
+    }
+  });
+
+  // POST /api/applications/:id/specific-documents - Submit Stage 2 specific documents (post-acceptance)
+  app.post("/api/applications/:id/specific-documents", upload.fields([
+    { name: 'documents', maxCount: 10 }
+  ]), async (req, res) => {
+    try {
+      const db = await getDb();
+      const { ObjectId } = await import("mongodb");
+      const applicationId = req.params.id;
+      const { studentEmail } = req.body;
+      const files = req.files?.documents || [];
+      
+      console.log("[Stage 2 Specific Documents] Request received:", {
+        applicationId,
+        studentEmail,
+        fileCount: files.length,
+      });
+
+      if (!applicationId || !ObjectId.isValid(applicationId)) {
+        return res.status(400).json({ error: "Invalid application ID." });
+      }
+
+      if (!studentEmail) {
+        return res.status(400).json({ error: "Student email is required." });
+      }
+
+      // Find the application
+      const application = await db.collection("applications").findOne({
+        _id: new ObjectId(applicationId),
+        studentEmail: studentEmail.toLowerCase(),
+      });
+
+      if (!application) {
+        return res.status(404).json({ error: "Application not found." });
+      }
+
+      // Only allow specific document submission for accepted applications
+      if (application.status !== "Approved" && application.status !== "Action Required: Submit Specific Requirements") {
+        return res.status(400).json({
+          error: "Cannot submit specific documents. Application must be approved first.",
+          currentStatus: application.status,
+        });
+      }
+
+      // Process uploaded files
+      const documentTypes = req.body.documentTypes || [];
+      const submittedSpecificDocs = [];
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const docType = Array.isArray(documentTypes) ? documentTypes[i] : documentTypes;
+
+        const doc = {
+          documentType: docType || "Scholarship-Specific Document",
+          fileName: file.originalname,
+          filePath: file.path,
+          fileSize: file.size,
+          mimeType: file.mimetype,
+          uploadedAt: new Date(),
+          status: "pending",
+        };
+
+        submittedSpecificDocs.push(doc);
+      }
+
+      // Update application with specific documents
+      await db.collection("applications").updateOne(
+        { _id: new ObjectId(applicationId) },
+        {
+          $push: { specificDocuments: { $each: submittedSpecificDocs } },
+          $set: {
+            stage: "completed",
+            status: "Under Review", // Move to review after specific docs submitted
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      // Create notification for student
+      await insertStudentNotification(db, {
+        userEmail: studentEmail.toLowerCase(),
+        type: "documents_submitted",
+        title: "Specific Documents Submitted",
+        message: `Your scholarship-specific documents for ${application.scholarshipName} have been submitted and are now under review.`,
+        scholarshipName: application.scholarshipName,
+      });
+
+      res.status(200).json({
+        message: "Specific documents submitted successfully. Your application is now complete and under final review.",
+        applicationId: applicationId,
+        documentsSubmitted: submittedSpecificDocs.length,
+        stage: "completed",
+      });
+    } catch (error) {
+      console.error("[Stage 2 Specific Documents] Error:", error);
       
       // Clean up uploaded files on error
-      if (req.files) {
-        req.files.forEach(file => {
-          try {
-            fs.unlinkSync(file.path);
-          } catch (e) {
-            // Ignore cleanup errors
-          }
+      if (req.files?.documents) {
+        req.files.documents.forEach(file => {
+          try { fs.unlinkSync(file.path); } catch (e) {}
         });
       }
       
-      res.status(500).json({ error: "Failed to submit application: " + error.message });
+      res.status(500).json({ error: "Failed to submit specific documents: " + error.message });
     }
   });
 
@@ -3412,11 +3937,31 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
         _id: new ObjectId(application.scholarshipId),
       });
 
+      // Format student profile documents for admin view
+      const profileDocs = student?.profileDocuments || {};
+      const documentTypes = [
+        { key: 'gradesTranscript', label: 'Copy of Grades / Transcript of Records / Form 137 or 138' },
+        { key: 'enrollmentProof', label: 'Proof of school enrollment/registration/acceptance' },
+        { key: 'qCitizenId', label: 'Valid QCitizen ID' },
+      ];
+      const studentProfileDocuments = documentTypes.map(({ key, label }) => ({
+        type: key,
+        label,
+        fileName: profileDocs[key]?.fileName || null,
+        fileSize: profileDocs[key]?.fileSize || null,
+        uploadedAt: profileDocs[key]?.uploadedAt || null,
+        status: profileDocs[key]?.status || null,
+        rejectionReason: profileDocs[key]?.rejectionReason || null,
+      }));
+      const hasCompleteProfileDocuments = studentProfileDocuments.every(d => d.fileName !== null);
+
       res.json({
         data: {
           ...application,
           studentProfile: student || null,
           scholarshipData: scholarship || null,
+          studentProfileDocuments,
+          hasCompleteProfileDocuments,
         },
       });
     } catch (error) {
@@ -3469,22 +4014,23 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
     }
   });
 
-  // PATCH /api/admin/applications/:applicationId/qualify - Qualify with final screening
+  // PATCH /api/admin/applications/:applicationId/qualify - Qualify with recorded video interview
   app.patch("/api/admin/applications/:applicationId/qualify", async (req, res) => {
     try {
       const db = await getDb();
       const { ObjectId } = await import("mongodb");
-      const { scheduledDate, scheduledTime, meetingPlatform, meetingLink, notes } = req.body;
+      const { googleDriveLink, submissionDeadline, notes } = req.body;
 
-      if (!scheduledDate || !scheduledTime || !String(meetingLink || "").trim()) {
+      // Validate required fields
+      if (!String(googleDriveLink || "").trim() || !submissionDeadline) {
         return res.status(400).json({
-          error: "scheduledDate, scheduledTime, and meetingLink are required for final screening.",
+          error: "googleDriveLink and submissionDeadline are required for video interview screening.",
         });
       }
 
-      const link = String(meetingLink).trim();
+      const link = String(googleDriveLink).trim();
       if (!/^https?:\/\//i.test(link)) {
-        return res.status(400).json({ error: "meetingLink must start with http:// or https://" });
+        return res.status(400).json({ error: "googleDriveLink must start with http:// or https://" });
       }
 
       const application = await db.collection("applications").findOne({
@@ -3492,13 +4038,18 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
       });
       if (!application) return res.status(404).json({ error: "Application not found." });
 
+      // Build final screening data with recorded video interview fields
       const finalScreening = {
         scheduled: true,
-        scheduledDate: scheduledDate ? new Date(scheduledDate) : null,
-        scheduledTime: scheduledTime || "",
-        meetingPlatform: meetingPlatform || "Google Meet",
-        meetingLink: link,
+        videoSubmissionType: "recorded",
+        googleDriveLink: link,
+        submissionDeadline: new Date(submissionDeadline),
         notes: notes || "",
+        // Keep legacy fields null for backward compatibility
+        scheduledDate: null,
+        scheduledTime: "",
+        meetingPlatform: "",
+        meetingLink: "",
       };
 
       await db.collection("applications").updateOne(
@@ -3512,10 +4063,51 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
         }
       );
 
-      // Create notification
-      const notifMsg = `🎉 Congratulations! You have qualified for the final screening of ${application.scholarshipName}.\n\nYour final screening details:\n📅 Date: ${scheduledDate ? new Date(scheduledDate).toLocaleDateString() : "TBD"}\n⏰ Time: ${scheduledTime || "TBD"}\n💻 Platform: ${meetingPlatform || "Google Meet"}\n🔗 Meeting Link: ${link}\n\n${notes ? `Notes: ${notes}\n\n` : ""}Please make sure you have your original documents ready for verification during the call. Good luck!`;
+      // Get applicant details for email
+      const applicant = await db.collection("users").findOne({ 
+        email: String(application.studentEmail || "").toLowerCase() 
+      });
 
-      const applicant = await db.collection("users").findOne({ email: String(application.studentEmail || "").toLowerCase() });
+      const studentName = applicant?.fullName || applicant?.firstName || "Scholar";
+      const scholarshipName = application.scholarshipName || "the scholarship";
+      const formattedDeadline = new Date(submissionDeadline).toLocaleString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      const dateNotified = new Date().toLocaleString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+      const timeNotified = new Date().toLocaleString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+
+      // Send HTML email notification
+      try {
+        await sendScreeningEmail({
+          to: application.studentEmail,
+          studentName,
+          scholarshipName,
+          googleDriveLink: link,
+          submissionDeadline: formattedDeadline,
+          dateNotified,
+          timeNotified,
+          notes: notes || "",
+        });
+      } catch (emailErr) {
+        console.error("[Qualify] Failed to send screening email:", emailErr);
+        // Continue - don't fail the qualification if email fails
+      }
+
+      // Create in-app notification
+      const notifMsg = `🎉 Congratulations! You have qualified for the final screening of ${scholarshipName}.\n\nVideo Interview Submission Details:\n🔗 Google Drive Link: ${link}\n📅 Submission Deadline: ${formattedDeadline}\n\n${notes ? `Notes: ${notes}\n\n` : ""}Please upload your recorded video introduction before the deadline. Good luck!`;
 
       await insertStudentNotification(db, {
         userEmail: application.studentEmail,
@@ -3526,8 +4118,12 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
         scholarshipName: application.scholarshipName,
       });
 
-      res.json({ message: "Virtual screening scheduled and student notified.", data: finalScreening });
+      res.json({ 
+        message: "Video interview screening configured and student notified via email.", 
+        data: finalScreening 
+      });
     } catch (error) {
+      console.error("[Qualify] Error:", error);
       res.status(500).json({ error: "Failed to qualify application." });
     }
   });
@@ -4193,4 +4789,12 @@ app.use((err, req, res, next) => {
 const port = Number(process.env.PORT || 4000);
 app.listen(port, () => {
   console.log(`API listening on ${port}`);
+  const emailUser = process.env.EMAIL_USER || process.env.GMAIL_USER;
+  const emailPass = process.env.EMAIL_PASS || process.env.GMAIL_PASS;
+  if (emailUser && emailPass) {
+    console.log(`[Email] ✅ Credentials loaded for: ${emailUser}`);
+  } else {
+    console.warn("[Email] ⚠️  EMAIL_USER / EMAIL_PASS not set — email notifications will fail silently.");
+    console.warn("[Email]    Add EMAIL_USER and EMAIL_PASS to Backend/.env and restart the server.");
+  }
 });

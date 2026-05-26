@@ -47,7 +47,6 @@ export function DashboardLayout() {
   const [matchCount, setMatchCount] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [sidebarNotifications, setSidebarNotifications] = useState<NotificationItem[]>([]);
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
   // FIX 7: Fetch actual scholarship matches
   useEffect(() => {
@@ -82,17 +81,6 @@ export function DashboardLayout() {
       .then((result) => setNotifications((result.data as NotificationItem[]) || []))
       .catch(() => {});
   }, [notificationPanelOpen, user?.email]);
-
-  useEffect(() => {
-    if (!user?.email) return;
-    fetchNotifications(user.email)
-      .then((result) => {
-        const list = ((result.data as NotificationItem[]) || []).slice();
-        const unreadFirst = list.filter((n) => !n.read).slice(0, 3);
-        setSidebarNotifications(unreadFirst);
-      })
-      .catch(() => {});
-  }, [user?.email, unreadCount]);
 
   const handleMarkRead = async (id: string) => {
     try {
@@ -164,7 +152,10 @@ export function DashboardLayout() {
           <div className="mb-6 pt-2">
             <div className="flex items-center gap-3 mb-1">
               <Avatar className="h-14 w-14 border-2 border-blue-100">
-                <AvatarImage src={resolvePublicAssetUrl(user?.profileImage || user?.profilePicture)} />
+                <AvatarImage
+                  key={user?.profileImage || user?.profilePicture}
+                  src={resolvePublicAssetUrl(user?.profileImage || user?.profilePicture, true)}
+                />
                 <AvatarFallback className="bg-blue-100 text-blue-700 text-lg font-semibold">
                   {getInitials(user)}
                 </AvatarFallback>
@@ -180,7 +171,7 @@ export function DashboardLayout() {
                 size="sm"
                 onClick={() => {
                   clearStoredUser();
-                  navigate("/auth/signin", { replace: true });
+                  navigate("/", { replace: true });
                 }}
                 className="w-full justify-start"
               >
@@ -246,52 +237,6 @@ export function DashboardLayout() {
             </div>
           </div>
 
-          {/* Notifications preview (sidebar) */}
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <div className="flex items-center justify-between px-3 mb-3">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                Notifications {unreadCount > 0 && `(${unreadCount})`}
-              </h3>
-              {unreadCount > 0 && (
-                <Badge className="bg-red-500 text-white text-xs px-1.5 py-0">{unreadCount}</Badge>
-              )}
-            </div>
-            {sidebarNotifications.length === 0 ? (
-              <p className="px-3 text-sm text-gray-500">No unread notifications.</p>
-            ) : (
-              <div className="space-y-2 px-2">
-                {sidebarNotifications.map((n) => (
-                  <button
-                    key={n._id}
-                    type="button"
-                    className="w-full text-left rounded-lg px-2 py-2 hover:bg-gray-50 transition-colors"
-                    onClick={() => {
-                      setNotificationPanelOpen(true);
-                      if (!n.read && user?.email) handleMarkRead(n._id);
-                    }}
-                  >
-                    <div className="flex items-start gap-2">
-                      {!n.read && <span className="mt-1.5 h-2 w-2 rounded-full bg-blue-600 flex-shrink-0" />}
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-gray-900 truncate">{n.title}</p>
-                        {(n.scholarshipName || "").trim() ? (
-                          <p className="text-xs text-gray-600 truncate">{n.scholarshipName}</p>
-                        ) : null}
-                        <p className="text-xs text-gray-400 mt-0.5">{formatTimeAgo(n.createdAt)}</p>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="w-full text-center text-sm text-blue-600 font-medium py-2 hover:underline"
-                  onClick={() => setNotificationPanelOpen(true)}
-                >
-                  View all
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       </aside>
 

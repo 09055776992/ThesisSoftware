@@ -177,6 +177,39 @@ const userSchema = new mongoose.Schema(
       fullProfileCompleted: { type: Boolean, default: false },
       completedAt: { type: Date, default: null },
     },
+
+    // Global Profile Documents (Document Vault) - Stage 1 of application
+    profileDocuments: {
+      gradesTranscript: {
+        fileName: { type: String, default: null },
+        filePath: { type: String, default: null },
+        fileSize: { type: Number, default: null },
+        mimeType: { type: String, default: null },
+        uploadedAt: { type: Date, default: null },
+        status: { type: String, enum: ["pending", "verified", "rejected"], default: "pending" },
+        rejectionReason: { type: String, default: null },
+      },
+      enrollmentProof: {
+        fileName: { type: String, default: null },
+        filePath: { type: String, default: null },
+        fileSize: { type: Number, default: null },
+        mimeType: { type: String, default: null },
+        uploadedAt: { type: Date, default: null },
+        status: { type: String, enum: ["pending", "verified", "rejected"], default: "pending" },
+        rejectionReason: { type: String, default: null },
+      },
+      qCitizenId: {
+        fileName: { type: String, default: null },
+        filePath: { type: String, default: null },
+        fileSize: { type: Number, default: null },
+        mimeType: { type: String, default: null },
+        uploadedAt: { type: Date, default: null },
+        status: { type: String, enum: ["pending", "verified", "rejected"], default: "pending" },
+        rejectionReason: { type: String, default: null },
+      },
+      uploadedAt: { type: Date, default: null },
+      lastUpdatedAt: { type: Date, default: null },
+    },
   },
   { timestamps: true }
 );

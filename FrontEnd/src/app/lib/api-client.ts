@@ -5,12 +5,13 @@ import API_BASE_URL from "../../config/api";
 export const API_URL = API_BASE_URL.replace(/\/$/, "");
 
 /** Absolute URL for uploaded assets served by the API (avatar, documents). */
-export function resolvePublicAssetUrl(src: string | undefined | null): string {
+export function resolvePublicAssetUrl(src: string | undefined | null, bustCache = false): string {
   const s = String(src ?? "").trim();
   if (!s || s.startsWith("data:")) return "";
   if (/^https?:\/\//i.test(s)) return s;
   const path = s.startsWith("/") ? s : `/${s}`;
-  return `${API_URL}${path}`;
+  const cacheBust = bustCache ? `?t=${Date.now()}` : "";
+  return `${API_URL}${path}${cacheBust}`;
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -180,7 +181,8 @@ export function updateUserProfile(payload: {
   about?: string;
   headline?: string;
   skills?: string[] | string;
-  gpa?: string;
+  gwa?: string;
+  gpa?: string; // Legacy field - prefer gwa
   educationLevel?: string;
   yearLevel?: string;
   fieldOfStudy?: string;
@@ -401,10 +403,14 @@ export function fetchApplicationReview(applicationId: string) {
 export function qualifyApplication(
   applicationId: string,
   screeningData: {
-    scheduledDate: string;
-    scheduledTime: string;
-    meetingPlatform: string;
-    meetingLink: string;
+    // Legacy fields for backward compatibility
+    scheduledDate?: string;
+    scheduledTime?: string;
+    meetingPlatform?: string;
+    meetingLink?: string;
+    // New recorded video interview fields
+    googleDriveLink: string;
+    submissionDeadline: string;
     notes?: string;
   }
 ) {
@@ -567,7 +573,8 @@ export function patchPersonalProfile(payload: PersonalProfilePayload) {
 
 export interface AcademicProfilePayload {
   email: string;
-  gpa?: string;
+  gwa?: string;
+  gpa?: string; // Legacy field - prefer gwa
   educationLevel?: string;
   yearLevel?: string;
   fieldOfStudy?: string;
@@ -610,4 +617,98 @@ export function patchAchievementsProfile(payload: AchievementsProfilePayload) {
     "/api/users/profile/achievements",
     { method: "PATCH", body: JSON.stringify(payload) }
   );
+}
+
+// ===== PROFILE DOCUMENT VAULT API =====
+
+export type ProfileDocumentResponse = {
+  type: string;
+  label: string;
+  fileName: string | null;
+  fileSize: number | null;
+  uploadedAt: string | null;
+  status: string | null;
+  rejectionReason: string | null;
+};
+
+export function fetchProfileDocuments(email: string) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  return request<{
+    success: boolean;
+    documents: ProfileDocumentResponse[];
+    isComplete: boolean;
+    lastUpdatedAt: string | null;
+  }>(`/api/users/profile/documents?email=${encodeURIComponent(normalizedEmail)}`);
+}
+
+export async function uploadProfileDocument(
+  email: string,
+  docType: "gradesTranscript" | "enrollmentProof" | "qCitizenId",
+  file: File
+) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const formData = new FormData();
+  formData.append("email", normalizedEmail);
+  formData.append("docType", docType);
+  formData.append("document", file);
+
+  const response = await fetch(`${API_URL}/api/users/profile/documents`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || "Failed to upload document");
+  }
+
+  return (await response.json()) as { success: boolean; message: string; document: Record<string, unknown> };
+}
+
+export function deleteProfileDocument(
+  email: string,
+  docType: "gradesTranscript" | "enrollmentProof" | "qCitizenId"
+) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  return request<{
+    success: boolean;
+    message: string;
+  }>(
+    `/api/users/profile/documents/${docType}?email=${encodeURIComponent(normalizedEmail)}`,
+    { method: "DELETE" }
+  );
+}
+
+// Submit Stage 2 specific documents (post-acceptance)
+export async function submitSpecificDocuments(
+  applicationId: string,
+  studentEmail: string,
+  documents: Array<{ type: string; file: File }>
+) {
+  const formData = new FormData();
+  formData.append("studentEmail", studentEmail);
+  documents.forEach((doc, index) => {
+    formData.append("documents", doc.file);
+    formData.append("documentTypes", doc.type);
+  });
+
+  const response = await fetch(
+    `${API_URL}/api/applications/${applicationId}/specific-documents`,
+    {
+      method: "POST",
+      body: formData,
+    }
+  );
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || "Failed to submit specific documents");
+  }
+
+  return (await response.json()) as {
+    message: string;
+    applicationId: string;
+    documentsSubmitted: number;
+    stage: string;
+  };
 }

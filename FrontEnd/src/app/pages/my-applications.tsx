@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { FileText, Calendar, ExternalLink, Award, AlertCircle, CheckCircle, Clock, XCircle, Trophy, Brain, TrendingUp, TrendingDown } from "lucide-react";
 import { fetchMyApplications, fetchMyScore, type MyScoreResponse, type ShapContribution } from "../lib/api-client";
+import { ApplicationStatusTracker } from "../components/ApplicationStatusTracker";
 import { getStoredUser } from "../lib/user-storage";
 import { useNavigate } from "react-router";
 
@@ -18,6 +19,7 @@ interface Application {
   status: string;
   submittedAt: string;
   matchScore: number;
+  stage?: "initial" | "accepted" | "completed";
   submittedDocuments?: Array<{
     documentType: string;
     fileName: string;
@@ -25,10 +27,15 @@ interface Application {
     rejectionReason?: string;
   }>;
   finalScreening?: {
-    scheduledDate: string;
-    scheduledTime: string;
-    meetingPlatform: string;
-    meetingLink: string;
+    // Legacy fields for backward compatibility
+    scheduledDate?: string;
+    scheduledTime?: string;
+    meetingPlatform?: string;
+    meetingLink?: string;
+    // New recorded video interview fields
+    videoSubmissionType?: "recorded";
+    googleDriveLink?: string;
+    submissionDeadline?: string;
     notes?: string;
   };
   rejectionReason?: string;
@@ -150,7 +157,7 @@ export function MyApplications() {
                     </div>
                     <div className="flex-1 p-6">
                       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-                        <div>
+                        <div className="flex-1">
                           <h3 className="text-xl font-bold mb-1">{app.scholarshipName}</h3>
                           <p className="text-muted-foreground text-sm mb-3">
                             {app.scholarshipData?.provider || "Quezon City Youth Development Office"}
@@ -165,8 +172,17 @@ export function MyApplications() {
                               Ref: {app.referenceNumber || app._id.slice(-8).toUpperCase()}
                             </span>
                           </div>
+                          {/* Status Tracker - Compact View */}
+                          <div className="mt-4 pt-4 border-t border-gray-100">
+                            <ApplicationStatusTracker
+                              applicationStatus={app.status}
+                              submittedAt={app.submittedAt}
+                              finalScreening={app.finalScreening}
+                              stage={app.stage}
+                            />
+                          </div>
                         </div>
-                        <div className="flex flex-col items-start sm:items-end gap-3">
+                        <div className="flex flex-col items-start sm:items-end gap-3 sm:pl-4">
                           <Badge className={`${statusConfig[app.status]?.bg || "bg-gray-100"} ${statusConfig[app.status]?.color || "text-gray-700"}`}>
                             {statusConfig[app.status]?.label || app.status}
                           </Badge>
@@ -237,32 +253,46 @@ export function MyApplications() {
                   </div>
                 </div>
 
+                {/* Application Status Tracker */}
+                <div className="bg-gray-50 p-4 rounded-lg border">
+                  <h4 className="font-semibold text-gray-800 mb-4">Application Progress</h4>
+                  <ApplicationStatusTracker
+                    applicationStatus={selectedApp.status}
+                    submittedAt={selectedApp.submittedAt}
+                    finalScreening={selectedApp.finalScreening}
+                    stage={selectedApp.stage}
+                  />
+                </div>
+
                 {/* Final Screening Details */}
                 {selectedApp.status === "Qualified for Final Screening" && selectedApp.finalScreening && (
                   <div className="bg-green-50 p-4 rounded-lg border border-green-200">
                     <h4 className="font-semibold text-green-800 flex items-center gap-2 mb-3">
                       <Award className="h-4 w-4" />
-                      Final Screening Scheduled
+                      Video Interview Submission
                     </h4>
                     <div className="space-y-2 text-sm">
-                      <p><span className="font-medium">📅 Date:</span> {formatDate(selectedApp.finalScreening.scheduledDate)}</p>
-                      <p><span className="font-medium">⏰ Time:</span> {selectedApp.finalScreening.scheduledTime}</p>
-                      <p><span className="font-medium">💻 Platform:</span> {selectedApp.finalScreening.meetingPlatform || "Google Meet"}</p>
-                      {selectedApp.finalScreening.meetingLink && (
+                      {selectedApp.finalScreening.googleDriveLink && (
                         <p>
-                          <span className="font-medium">🔗 Meeting Link:</span>{" "}
+                          <span className="font-medium">🔗 Google Drive Upload Link:</span>{" "}
                           <a
-                            href={selectedApp.finalScreening.meetingLink}
+                            href={selectedApp.finalScreening.googleDriveLink}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-blue-600 hover:underline inline-flex items-center gap-1"
                           >
-                            Join Meeting <ExternalLink className="h-3 w-3" />
+                            Upload Your Video <ExternalLink className="h-3 w-3" />
                           </a>
                         </p>
                       )}
+                      <p>
+                        <span className="font-medium">📅 Submission Deadline:</span>{" "}
+                        {selectedApp.finalScreening.submissionDeadline
+                          ? formatDate(selectedApp.finalScreening.submissionDeadline)
+                          : "TBD"}
+                      </p>
                       {selectedApp.finalScreening.notes && (
-                        <p><span className="font-medium">📝 Notes:</span> {selectedApp.finalScreening.notes}</p>
+                        <p><span className="font-medium">📝 Instructions:</span> {selectedApp.finalScreening.notes}</p>
                       )}
                     </div>
                   </div>
@@ -328,7 +358,7 @@ export function MyApplications() {
                       <div className="space-y-2">
                         <p className="text-sm font-medium">Score Breakdown</p>
                         {[
-                          { label: "GPA", key: "gpa_score", weight: 30 },
+                          { label: "GWA", key: "gpa_score", weight: 30 },
                           { label: "Financial Need", key: "financial_score", weight: 25 },
                           { label: "Document Completeness", key: "document_completeness", weight: 20 },
                           { label: "Document Authenticity", key: "document_authenticity", weight: 15 },

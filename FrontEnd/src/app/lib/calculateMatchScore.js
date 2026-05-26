@@ -99,19 +99,34 @@ export const calculateMatchScore = (student, scholarship) => {
     return { score: 0, qualified: false, failedReasons };
   }
 
-  // === GPA CHECK (Philippine scale — lower is better) ===
-  if (scholarship?.minimumGPA) {
+  // === GWA CHECK (supports both SHS percentage and College GWA scales) ===
+  if (scholarship?.minimumGPA || scholarship?.minimumGWA) {
     totalCriteria++;
-    const studentGPA = parseFloat(student?.gpa);
-    const requiredGPA = parseFloat(scholarship.minimumGPA);
-    // IMPORTANT: Philippine scale — 1.00 is best, 5.00 is failing
-    // Student passes if their GPA number is <= required minimum
-    if (!isNaN(studentGPA) && studentGPA <= requiredGPA) {
+    // Check both gwa (preferred) and gpa (legacy) fields
+    const studentGWA = parseFloat(student?.gwa || student?.gpa);
+    const requiredGrade = parseFloat(scholarship.minimumGWA || scholarship.minimumGPA);
+    
+    // Determine scale: > 50 is percentage (SHS), <= 5.0 is GWA (College)
+    const isPercentageScale = requiredGrade > 50;
+    
+    let passed = false;
+    if (!isNaN(studentGWA)) {
+      if (isPercentageScale) {
+        // SHS percentage scale: 70-100, higher is better
+        passed = studentGWA >= requiredGrade;
+      } else {
+        // College GWA scale: 1.0-5.0, lower is better (1.0 = best)
+        passed = studentGWA <= requiredGrade;
+      }
+    }
+    
+    if (passed) {
       metCriteria++;
     } else {
-      failedReasons.push(
-        `GPA requirement not met. Required: ${requiredGPA} or better, Yours: ${studentGPA || 'Not provided'}`
-      );
+      const msg = isPercentageScale
+        ? `Grade requirement not met. Minimum: ${requiredGrade}%, Yours: ${isNaN(studentGWA) ? 'Not provided' : studentGWA + '%'}`
+        : `GWA requirement not met. Maximum: ${requiredGrade}, Yours: ${isNaN(studentGWA) ? 'Not provided' : studentGWA}`;
+      failedReasons.push(msg);
     }
   }
 

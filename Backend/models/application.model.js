@@ -33,8 +33,14 @@ const applicationSchema = new Schema(
     },
     status: {
       type: String,
-      enum: ["Pending", "System Qualified", "Under Review", "Approved", "Rejected"],
+      enum: ["Pending", "System Qualified", "Under Review", "Approved", "Rejected", "Action Required: Submit Specific Requirements"],
       default: "Pending",
+    },
+    // Application stage tracking
+    stage: {
+      type: String,
+      enum: ["initial", "accepted", "completed"],
+      default: "initial",
     },
     matchScore: {
       type: Number,
@@ -108,6 +114,33 @@ const applicationSchema = new Schema(
         trim: true,
       },
     },
+    // Stage 1: Initial application documents (from profile vault)
+    generalDocuments: [
+      {
+        documentType: String,
+        fileName: String,
+        filePath: String,
+        fileSize: Number,
+        mimeType: String,
+        uploadedAt: { type: Date, default: Date.now },
+        status: { type: String, enum: ["pending", "verified", "rejected"], default: "pending" },
+        rejectionReason: { type: String, default: null },
+      },
+    ],
+    // Stage 2: Scholarship-specific documents (uploaded after acceptance)
+    specificDocuments: [
+      {
+        documentType: String,
+        fileName: String,
+        filePath: String,
+        fileSize: Number,
+        mimeType: String,
+        uploadedAt: { type: Date, default: Date.now },
+        status: { type: String, enum: ["pending", "verified", "rejected"], default: "pending" },
+        rejectionReason: { type: String, default: null },
+      },
+    ],
+    // Legacy field for backward compatibility
     documents: [
       {
         name: String,

@@ -81,8 +81,10 @@ export function Dashboard() {
           <div className="flex gap-3">
             <Avatar>
               <AvatarImage
+                key={pickProfileImageUrl(user as Record<string, unknown>) || user?.profileImage}
                 src={resolvePublicAssetUrl(
                   pickProfileImageUrl(user as Record<string, unknown>) || user?.profileImage,
+                  true,
                 )}
               />
               <AvatarFallback>{getInitials(user)}</AvatarFallback>

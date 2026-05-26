@@ -2,6 +2,7 @@ import { createBrowserRouter } from "react-router";
 import { SignUp } from "./pages/sign-up";
 import { SignIn } from "./pages/sign-in";
 import { Redirect } from "./pages/redirect";
+import { LandingPage } from "./pages/landing";
 import { ProfileSetup } from "./pages/profile-setup";
 import { Dashboard } from "./pages/dashboard";
 import { Profile } from "./pages/profile";
@@ -25,6 +26,7 @@ import { AuthLayout } from "./layouts/auth-layout";
 import { DashboardLayout } from "./layouts/dashboard-layout";
 import { AdminLayout } from "./layouts/admin-layout";
 
+
 function RedirectToSignIn() {
   return <Redirect to="/auth/signin" />;
 }
@@ -36,7 +38,7 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        Component: RedirectToSignIn,
+        Component: LandingPage,
       },
       {
         path: "auth",

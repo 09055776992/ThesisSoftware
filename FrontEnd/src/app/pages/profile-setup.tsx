@@ -393,7 +393,10 @@ export function ProfileSetup() {
                 <div className="flex flex-col items-center">
                   <div className="relative">
                     <Avatar className="h-32 w-32">
-                      <AvatarImage src={resolvePublicAssetUrl(profileImage)} />
+                      <AvatarImage
+                        key={profileImage}
+                        src={resolvePublicAssetUrl(profileImage, true)}
+                      />
                       <AvatarFallback className="bg-muted">
                         <Camera className="h-12 w-12 text-muted-foreground" />
                       </AvatarFallback>

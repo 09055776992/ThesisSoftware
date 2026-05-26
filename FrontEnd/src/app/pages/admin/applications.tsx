@@ -25,8 +25,10 @@ import {
   resolvePublicAssetUrl,
   generateAIRankings,
   fetchSavedRankings,
+  fetchProfileDocuments,
   type AIRanking,
   type ShapContribution,
+  type ProfileDocumentResponse,
 } from "../../lib/api-client";
 
 // ===== Types =====
@@ -58,12 +60,27 @@ interface SubmittedDocument {
   fuzzy_threshold?: number;
 }
 
+interface ProfileDocument {
+  type: string;
+  label: string;
+  fileName: string | null;
+  fileSize: number | null;
+  uploadedAt: string | null;
+  status: string | null;
+  rejectionReason: string | null;
+}
+
 interface ScreeningData {
   scheduled: boolean;
+  // Legacy fields for backward compatibility
   scheduledDate?: string;
   scheduledTime?: string;
   meetingPlatform?: string;
   meetingLink?: string;
+  // New recorded video interview fields
+  videoSubmissionType?: "recorded";
+  googleDriveLink?: string;
+  submissionDeadline?: string;
   notes?: string;
 }
 
@@ -77,7 +94,13 @@ interface Application {
   submittedAt: string;
   status: string;
   matchScore: number;
+  stage?: "initial" | "accepted" | "completed";
+  // Legacy field - replaced by generalDocuments and specificDocuments
   submittedDocuments?: SubmittedDocument[];
+  // Stage 1: General documents from profile vault
+  generalDocuments?: SubmittedDocument[];
+  // Stage 2: Scholarship-specific documents (post-acceptance)
+  specificDocuments?: SubmittedDocument[];
   eligibilityCheck?: {
     isEligible?: boolean;
     reasons?: string[];
@@ -88,6 +111,9 @@ interface Application {
   rejectionReason?: string;
   studentProfile?: Record<string, any>;
   scholarshipData?: Record<string, any>;
+  // Student's profile documents from Document Vault (for admin view)
+  studentProfileDocuments?: ProfileDocument[];
+  hasCompleteProfileDocuments?: boolean;
 }
 
 // ===== Helper Components =====
@@ -213,7 +239,7 @@ function RankingCard({ ranking }: { ranking: AIRanking }) {
 
         {/* Score bars — always visible */}
         <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <ScoreBar label="GPA" score={bd.gpa_score} weight={30} />
+          <ScoreBar label="GWA" score={bd.gpa_score} weight={30} />
           <ScoreBar label="Financial Need" score={bd.financial_score} weight={25} />
           <ScoreBar label="Document Completeness" score={bd.document_completeness} weight={20} />
           <ScoreBar label="Document Authenticity" score={bd.document_authenticity} weight={15} />
@@ -293,6 +319,10 @@ export function AdminApplications() {
   // Review page
   const [reviewApplication, setReviewApplication] = useState<Application | null>(null);
   const [documentStatuses, setDocumentStatuses] = useState<Record<string, { status: string; reason: string }>>({});
+  // Student's profile documents from Document Vault
+  const [profileDocuments, setProfileDocuments] = useState<ProfileDocument[]>([]);
+  const [hasCompleteProfileDocs, setHasCompleteProfileDocs] = useState(false);
+  const [isLoadingProfileDocs, setIsLoadingProfileDocs] = useState(false);
 
   // Modals
   const [showScheduler, setShowScheduler] = useState(false);
@@ -303,12 +333,10 @@ export function AdminApplications() {
   const [rejectedDocs, setRejectedDocs] = useState<Array<{ index: number; name: string; reason: string }>>([]);
   const [isUpdating, setIsUpdating] = useState(false);
 
-  // Screening form
+  // Screening form - Recorded Video Interview Submission
   const [screeningForm, setScreeningForm] = useState({
-    scheduledDate: "",
-    scheduledTime: "",
-    meetingPlatform: "Google Meet",
-    meetingLink: "",
+    googleDriveLink: "",
+    submissionDeadline: "",
     notes: "",
   });
 
@@ -361,10 +389,11 @@ export function AdminApplications() {
       const data = result.data as any;
       setReviewApplication(data as Application);
 
-      // Init document statuses
+      // Init document statuses for Stage 2 (scholarship-specific) documents
       const statuses: Record<string, { status: string; reason: string }> = {};
-      if (data.submittedDocuments) {
-        data.submittedDocuments.forEach((doc: any, idx: number) => {
+      const docsToProcess = data.specificDocuments || data.submittedDocuments || [];
+      if (docsToProcess) {
+        docsToProcess.forEach((doc: any, idx: number) => {
           statuses[String(idx)] = {
             status: doc.status || "pending_review",
             reason: doc.rejectionReason || "",
@@ -372,6 +401,27 @@ export function AdminApplications() {
         });
       }
       setDocumentStatuses(statuses);
+
+      // Use profile documents from API response (populated from student's Document Vault)
+      if (data.studentProfileDocuments) {
+        setProfileDocuments(data.studentProfileDocuments as ProfileDocument[]);
+        setHasCompleteProfileDocs(data.hasCompleteProfileDocuments || false);
+        setIsLoadingProfileDocs(false);
+      } else {
+        // Fallback: fetch separately if not in response
+        setIsLoadingProfileDocs(true);
+        try {
+          const profileDocsResult = await fetchProfileDocuments(data.studentEmail);
+          setProfileDocuments(profileDocsResult.documents as ProfileDocument[]);
+          setHasCompleteProfileDocs(profileDocsResult.isComplete);
+        } catch (err) {
+          console.error("Error fetching profile documents:", err);
+          setProfileDocuments([]);
+          setHasCompleteProfileDocs(false);
+        } finally {
+          setIsLoadingProfileDocs(false);
+        }
+      }
     } catch (err) {
       console.error("Error fetching review:", err);
     }
@@ -421,12 +471,10 @@ export function AdminApplications() {
 
   const openScreeningScheduler = (existing?: ScreeningData) => {
     setScreeningForm({
-      scheduledDate: existing?.scheduledDate
-        ? new Date(existing.scheduledDate).toISOString().slice(0, 10)
+      googleDriveLink: existing?.googleDriveLink || "",
+      submissionDeadline: existing?.submissionDeadline
+        ? new Date(existing.submissionDeadline).toISOString().slice(0, 16)
         : "",
-      scheduledTime: existing?.scheduledTime || "",
-      meetingPlatform: existing?.meetingPlatform || "Google Meet",
-      meetingLink: existing?.meetingLink || "",
       notes: existing?.notes || "",
     });
     setShowScheduler(true);
@@ -439,25 +487,25 @@ export function AdminApplications() {
 
   const handleScheduleScreening = async () => {
     if (!reviewApplication?._id) return;
-    if (!screeningForm.scheduledDate || !screeningForm.scheduledTime || !screeningForm.meetingLink.trim()) {
-      alert("Please enter the screening date, time, and virtual meeting link.");
+    if (!screeningForm.googleDriveLink.trim() || !screeningForm.submissionDeadline) {
+      alert("Please provide the Google Drive upload link and submission deadline.");
       return;
     }
-    const link = screeningForm.meetingLink.trim();
+    const link = screeningForm.googleDriveLink.trim();
     if (!/^https?:\/\//i.test(link)) {
-      alert("Meeting link must start with http:// or https://");
+      alert("Google Drive link must start with http:// or https://");
       return;
     }
     try {
       setIsUpdating(true);
       await qualifyApplication(reviewApplication._id, {
-        ...screeningForm,
-        meetingLink: link,
+        googleDriveLink: link,
+        submissionDeadline: screeningForm.submissionDeadline,
         notes: screeningForm.notes.trim(),
       });
       setShowScheduler(false);
       await fetchReview();
-      alert("Student qualified for final screening. Virtual meeting details were sent to the student.");
+      alert("Student qualified for final screening. Video submission instructions were sent to the student.");
     } catch (err) {
       console.error("Error scheduling screening:", err);
       alert(err instanceof Error ? err.message : "Failed to schedule screening.");
@@ -556,9 +604,11 @@ export function AdminApplications() {
     }
   };
 
-  const docsVerified = reviewApplication?.submittedDocuments?.every((d) => d.status === "verified") ?? false;
-  const docsSomePending = reviewApplication?.submittedDocuments?.some((d) => d.status === "pending_review" || d.status === "uploaded") ?? false;
-  const docsAnyRejected = reviewApplication?.submittedDocuments?.some((d) => d.status === "rejected") ?? false;
+  // Check Stage 2 (scholarship-specific) documents status
+  const stage2Docs = reviewApplication?.specificDocuments || reviewApplication?.submittedDocuments || [];
+  const docsVerified = stage2Docs.every((d) => d.status === "verified") ?? false;
+  const docsSomePending = stage2Docs.some((d) => d.status === "pending_review" || d.status === "uploaded") ?? false;
+  const docsAnyRejected = stage2Docs.some((d) => d.status === "rejected") ?? false;
 
   // ===== RENDER: Scholarship List =====
   if (viewMode === "scholarships") {
@@ -946,7 +996,7 @@ export function AdminApplications() {
             <CardContent>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                 {student.gwa || student.GWA ? (
-                  <div><span className="text-muted-foreground">GPA:</span> <span className="font-medium">{student.gwa || student.GWA}</span></div>
+                  <div><span className="text-muted-foreground">GWA:</span> <span className="font-medium">{student.gwa || student.GWA}</span></div>
                 ) : null}
                 {student.educationLevel ? (
                   <div><span className="text-muted-foreground">Education Level:</span> <span className="font-medium">{student.educationLevel}</span></div>
@@ -981,154 +1031,215 @@ export function AdminApplications() {
           </Card>
         )}
 
-        {/* Section 3 - Submitted Documents */}
+        {/* Section 3 - Documents */}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">Submitted Documents</CardTitle>
-              {app.submittedDocuments && app.submittedDocuments.length > 0 && (
-                <Badge variant={docsVerified ? "default" : docsAnyRejected ? "destructive" : "secondary"} className={docsVerified ? "bg-green-600" : docsAnyRejected ? "" : "bg-amber-500"}>
-                  {docsVerified ? "All Verified" : docsAnyRejected ? "Rejected" : "Pending"}
+              <CardTitle className="text-lg">Documents</CardTitle>
+              {hasCompleteProfileDocs && (
+                <Badge className="bg-green-600">
+                  Profile Documents Linked
                 </Badge>
               )}
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Documents Status Banner */}
-            {app.submittedDocuments && app.submittedDocuments.length > 0 && (
-              <div className={`p-3 rounded-lg text-sm font-medium ${
-                docsVerified ? "bg-green-50 text-green-700 border border-green-200" :
-                docsAnyRejected ? "bg-red-50 text-red-700 border border-red-200" :
-                "bg-amber-50 text-amber-700 border border-amber-200"
-              }`}>
-                {docsVerified && "All Documents Verified ✓"}
-                {docsSomePending && !docsAnyRejected && "Documents Under Review ⏳"}
-                {docsAnyRejected && "Some Documents Rejected ✗"}
-              </div>
-            )}
+          <CardContent className="space-y-6">
+            {/* Stage 1: Profile Documents from Document Vault */}
+            <div>
+              <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-semibold">STAGE 1</span>
+                General Profile Documents
+              </h4>
 
-            {(!app.submittedDocuments || app.submittedDocuments.length === 0) ? (
-              <p className="text-muted-foreground text-sm py-4">No documents submitted.</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Document Type</TableHead>
-                    <TableHead>File</TableHead>
-                    <TableHead>Uploaded</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {app.submittedDocuments.map((doc, idx) => {
-                    const docStatus = documentStatuses[String(idx)]?.status || doc.status;
-                    const docReason = documentStatuses[String(idx)]?.reason || doc.rejectionReason || "";
-
-                    return (
-                      <TableRow key={idx}>
-                        <TableCell className="font-medium">{doc.documentType}</TableCell>
-                        <TableCell className="text-sm">
-                          <div>{doc.fileName}</div>
-                          <div className="text-xs text-muted-foreground">{formatFileSize(doc.fileSize)}</div>
-                          {doc.extracted_gwa !== undefined && (
-                            <Badge variant="outline" className="mt-1 text-xs bg-blue-50 text-blue-700 border-blue-200">
-                              Extracted GWA: {doc.extracted_gwa}
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-sm">{doc.uploadedAt ? formatDate(doc.uploadedAt) : ""}</TableCell>
-                        <TableCell>
-                          <Select
-                            value={docStatus}
-                            onValueChange={(v) => handleDocumentStatusChange(idx, v)}
-                          >
-                            <SelectTrigger className="w-[140px] h-8">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="pending_review">⏳ Pending Review</SelectItem>
-                              <SelectItem value="verified">✅ Verified</SelectItem>
-                              <SelectItem value="rejected">❌ Rejected</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          {doc.confidence_score !== undefined ? (
-                            <span className={`font-medium ${
-                              doc.confidence_score >= 70 ? "text-green-600" :
-                              doc.confidence_score >= 40 ? "text-amber-500" :
-                              "text-red-500"
-                            }`}>
-                              {doc.confidence_score}%
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground text-sm">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => window.open(getDocumentUrl(doc.filePath), "_blank")}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                const url = getDocumentUrl(doc.filePath);
-                                if (url) {
-                                  const a = document.createElement("a");
-                                  a.href = url;
-                                  a.download = doc.fileName;
-                                  a.click();
-                                }
-                              }}
-                            >
-                              <Download className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant={docStatus !== (doc.status || "pending_review") ? "default" : "outline"}
-                              onClick={() => saveDocumentStatus(idx)}
-                              disabled={isUpdating}
-                            >
-                              Save
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            )}
-
-            {/* Rejection reasons and save buttons */}
-            {app.submittedDocuments?.map((doc, idx) => {
-              const docStatus = documentStatuses[String(idx)]?.status || doc.status;
-              const docReason = documentStatuses[String(idx)]?.reason || doc.rejectionReason || "";
-              if (docStatus !== "rejected") return null;
-              return (
-                <div key={idx} className="flex items-start gap-2 pl-2">
-                  <Input
-                    placeholder="Reason for rejection..."
-                    className="flex-1 h-8 text-sm"
-                    value={docReason}
-                    onChange={(e) => handleDocumentReasonChange(idx, e.target.value)}
-                  />
-                  <Button size="sm" variant="outline" onClick={() => saveDocumentStatus(idx)} disabled={isUpdating}>
-                    Save
-                  </Button>
+              {isLoadingProfileDocs ? (
+                <div className="flex items-center justify-center py-4">
+                  <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2" />
+                  <span className="text-sm text-gray-600">Loading profile documents...</span>
                 </div>
-              );
-            })}
+              ) : profileDocuments.length === 0 ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-sm text-amber-700">
+                    No profile documents found. Student has not uploaded documents to their Document Vault.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {profileDocuments.map((doc, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
+                      <div className="flex items-center gap-3">
+                        <FileText className="h-4 w-4 text-gray-500" />
+                        <div>
+                          <p className="text-sm font-medium">{doc.label}</p>
+                          {doc.fileName ? (
+                            <p className="text-xs text-gray-500">{doc.fileName}</p>
+                          ) : (
+                            <p className="text-xs text-amber-600">Not uploaded</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {doc.fileName ? (
+                          <>
+                            <Badge className="bg-green-100 text-green-700 text-xs">
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Linked from Profile
+                            </Badge>
+                            {doc.uploadedAt && (
+                              <span className="text-xs text-muted-foreground">
+                                {new Date(doc.uploadedAt).toLocaleDateString()}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <Badge variant="outline" className="text-xs text-amber-600 border-amber-300">
+                            Missing
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
-            {/* Document Accuracy Summary */}
-            {app.submittedDocuments && app.submittedDocuments.length > 0 && (
+              {/* Workflow Indicator Note */}
+              {hasCompleteProfileDocs && (
+                <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <div className="flex items-start gap-2">
+                    <span className="text-blue-600">💡</span>
+                    <p className="text-sm text-blue-700">
+                      General profile documents verified. Scholarship-specific documents will be requested upon clicking "Qualify for Final Screening".
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Stage 2: Scholarship-Specific Documents (if any) */}
+            {(app.specificDocuments && app.specificDocuments.length > 0) || (app.submittedDocuments && app.submittedDocuments.length > 0) ? (
+              <div className="pt-4 border-t">
+                <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                  <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-semibold">STAGE 2</span>
+                  Scholarship-Specific Documents
+                </h4>
+
+                {/* Documents Status Banner */}
+                <div className={`p-3 rounded-lg text-sm font-medium mb-3 ${
+                  docsVerified ? "bg-green-50 text-green-700 border border-green-200" :
+                  docsAnyRejected ? "bg-red-50 text-red-700 border border-red-200" :
+                  "bg-amber-50 text-amber-700 border border-amber-200"
+                }`}>
+                  {docsVerified && "All Documents Verified ✓"}
+                  {docsSomePending && !docsAnyRejected && "Documents Under Review ⏳"}
+                  {docsAnyRejected && "Some Documents Rejected ✗"}
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Document Type</TableHead>
+                      <TableHead>File</TableHead>
+                      <TableHead>Uploaded</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(app.specificDocuments || app.submittedDocuments || []).map((doc, idx) => {
+                      const docStatus = documentStatuses[String(idx)]?.status || doc.status || "pending_review";
+                      const docReason = documentStatuses[String(idx)]?.reason || doc.rejectionReason || "";
+
+                      return (
+                        <TableRow key={idx}>
+                          <TableCell className="font-medium">{doc.documentType}</TableCell>
+                          <TableCell className="text-sm">
+                            <div>{doc.fileName}</div>
+                            <div className="text-xs text-muted-foreground">{formatFileSize(doc.fileSize)}</div>
+                            {doc.extracted_gwa !== undefined && (
+                              <Badge variant="outline" className="mt-1 text-xs bg-blue-50 text-blue-700 border-blue-200">
+                                Extracted GWA: {doc.extracted_gwa}
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-sm">{doc.uploadedAt ? formatDate(doc.uploadedAt) : ""}</TableCell>
+                          <TableCell>
+                            <Select
+                              value={docStatus}
+                              onValueChange={(v) => handleDocumentStatusChange(idx, v)}
+                            >
+                              <SelectTrigger className="w-[140px] h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="pending_review">⏳ Pending Review</SelectItem>
+                                <SelectItem value="verified">✅ Verified</SelectItem>
+                                <SelectItem value="rejected">❌ Rejected</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => window.open(getDocumentUrl(doc.filePath), "_blank")}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  const url = getDocumentUrl(doc.filePath);
+                                  if (url) {
+                                    const a = document.createElement("a");
+                                    a.href = url;
+                                    a.download = doc.fileName;
+                                    a.click();
+                                  }
+                                }}
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={docStatus !== (doc.status || "pending_review") ? "default" : "outline"}
+                                onClick={() => saveDocumentStatus(idx)}
+                                disabled={isUpdating}
+                              >
+                                Save
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+
+                {/* Rejection reasons for Stage 2 documents */}
+                {(app.specificDocuments || app.submittedDocuments || []).map((doc, idx) => {
+                  const docStatus = documentStatuses[String(idx)]?.status || doc.status || "pending_review";
+                  const docReason = documentStatuses[String(idx)]?.reason || doc.rejectionReason || "";
+                  if (docStatus !== "rejected") return null;
+                  return (
+                    <div key={idx} className="flex items-start gap-2 pl-2 mt-2">
+                      <Input
+                        placeholder={`Reason for rejecting ${doc.documentType}...`}
+                        className="flex-1 h-8 text-sm"
+                        value={docReason}
+                        onChange={(e) => handleDocumentReasonChange(idx, e.target.value)}
+                      />
+                      <Button size="sm" variant="outline" onClick={() => saveDocumentStatus(idx)} disabled={isUpdating}>
+                        Save
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {/* Document Accuracy Summary - only for Stage 2 documents */}
+            {(app.specificDocuments && app.specificDocuments.length > 0) || (app.submittedDocuments && app.submittedDocuments.length > 0) ? (
               <div className="mt-6 pt-6 border-t">
                 <div className="flex items-center gap-2 mb-4">
                   <ShieldCheck className="h-5 w-5 text-primary" />
@@ -1380,7 +1491,7 @@ export function AdminApplications() {
                   );
                 })()}
               </div>
-            )}
+            ) : null}
 
             {/* Save all document statuses */}
             {app.submittedDocuments && app.submittedDocuments.length > 0 && (
@@ -1465,7 +1576,7 @@ export function AdminApplications() {
                 <CardContent className="pt-4">
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2 text-blue-700 font-medium">
-                      <Video className="h-5 w-5" /> Virtual Screening Scheduled
+                      <Video className="h-5 w-5" /> Video Interview Setup
                     </div>
                     <Button
                       type="button"
@@ -1475,16 +1586,14 @@ export function AdminApplications() {
                       onClick={() => openScreeningScheduler(app.finalScreening)}
                       disabled={isUpdating}
                     >
-                      <Calendar className="h-4 w-4 mr-1" /> Update meeting details
+                      <Calendar className="h-4 w-4 mr-1" /> Update details
                     </Button>
                   </div>
                   <div className="text-sm text-blue-800 space-y-1">
-                    <p>Date: {app.finalScreening.scheduledDate ? formatDate(app.finalScreening.scheduledDate) : "TBD"}</p>
-                    <p>Time: {app.finalScreening.scheduledTime || "TBD"}</p>
-                    <p>Platform: {app.finalScreening.meetingPlatform || "TBD"}</p>
-                    {app.finalScreening.meetingLink && (
-                      <p>Link: <a href={app.finalScreening.meetingLink} target="_blank" rel="noopener noreferrer" className="underline">{app.finalScreening.meetingLink}</a></p>
+                    {app.finalScreening.googleDriveLink && (
+                      <p>Google Drive Link: <a href={app.finalScreening.googleDriveLink} target="_blank" rel="noopener noreferrer" className="underline">{app.finalScreening.googleDriveLink}</a></p>
                     )}
+                    <p>Submission Deadline: {app.finalScreening.submissionDeadline ? formatDate(app.finalScreening.submissionDeadline) : "TBD"}</p>
                     {app.finalScreening.notes && <p>Notes: {app.finalScreening.notes}</p>}
                   </div>
                 </CardContent>
@@ -1495,67 +1604,38 @@ export function AdminApplications() {
         <Dialog open={showScheduler} onOpenChange={setShowScheduler}>
           <DialogContent className="sm:max-w-lg">
             <DialogHeader>
-              <DialogTitle>Schedule final virtual screening</DialogTitle>
+              <DialogTitle>Set up recorded video interview screening</DialogTitle>
               <DialogDescription>
-                Enter the exact date, time, and meeting link. The student will receive these details by notification.
+                Provide the Google Drive upload link and submission deadline. The student will receive instructions via email.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="screening-date">Screening date *</Label>
-                  <Input
-                    id="screening-date"
-                    type="date"
-                    className="mt-1"
-                    value={screeningForm.scheduledDate}
-                    onChange={(e) => setScreeningForm((f) => ({ ...f, scheduledDate: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="screening-time">Screening time *</Label>
-                  <Input
-                    id="screening-time"
-                    type="time"
-                    className="mt-1"
-                    value={screeningForm.scheduledTime}
-                    onChange={(e) => setScreeningForm((f) => ({ ...f, scheduledTime: e.target.value }))}
-                  />
-                </div>
-              </div>
               <div>
-                <Label htmlFor="screening-platform">Platform</Label>
-                <Select
-                  value={screeningForm.meetingPlatform}
-                  onValueChange={(v) => setScreeningForm((f) => ({ ...f, meetingPlatform: v }))}
-                >
-                  <SelectTrigger id="screening-platform" className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Google Meet">Google Meet</SelectItem>
-                    <SelectItem value="Zoom">Zoom</SelectItem>
-                    <SelectItem value="Microsoft Teams">Microsoft Teams</SelectItem>
-                    <SelectItem value="Other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="screening-link">Virtual meeting link *</Label>
+                <Label htmlFor="gdrive-link">Google Drive Upload Link *</Label>
                 <Input
-                  id="screening-link"
+                  id="gdrive-link"
                   type="url"
-                  placeholder="https://meet.google.com/..."
+                  placeholder="https://drive.google.com/..."
                   className="mt-1"
-                  value={screeningForm.meetingLink}
-                  onChange={(e) => setScreeningForm((f) => ({ ...f, meetingLink: e.target.value }))}
+                  value={screeningForm.googleDriveLink}
+                  onChange={(e) => setScreeningForm((f) => ({ ...f, googleDriveLink: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label htmlFor="submission-deadline">Video Submission Deadline *</Label>
+                <Input
+                  id="submission-deadline"
+                  type="datetime-local"
+                  className="mt-1"
+                  value={screeningForm.submissionDeadline}
+                  onChange={(e) => setScreeningForm((f) => ({ ...f, submissionDeadline: e.target.value }))}
                 />
               </div>
               <div>
                 <Label htmlFor="screening-notes">Message to student (optional)</Label>
                 <Textarea
                   id="screening-notes"
-                  placeholder="e.g. Please join 5 minutes early with your original documents ready."
+                  placeholder="e.g., Please upload a 3-minute video introduction addressing the prompts sent to your dashboard."
                   className="mt-1"
                   rows={3}
                   value={screeningForm.notes}

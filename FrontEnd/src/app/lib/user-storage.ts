@@ -1,3 +1,19 @@
+export type ProfileDocument = {
+  fileName?: string;
+  fileSize?: number;
+  uploadedAt?: string;
+  status?: "pending" | "verified" | "rejected";
+  rejectionReason?: string;
+};
+
+export type UserProfileDocuments = {
+  gradesTranscript?: ProfileDocument;
+  enrollmentProof?: ProfileDocument;
+  qCitizenId?: ProfileDocument;
+  uploadedAt?: string;
+  lastUpdatedAt?: string;
+};
+
 export type UserProfile = {
   fullName?: string;
   email?: string;
@@ -7,7 +23,8 @@ export type UserProfile = {
   headline?: string;
   location?: string;
   dateOfBirth?: string;
-  gpa?: string;
+  gwa?: string; // Preferred field
+  gpa?: string; // Legacy - use gwa instead
   gpaScale?: string;
   educationLevel?: string;
   yearLevel?: string;
@@ -25,6 +42,9 @@ export type UserProfile = {
   schoolType?: string;
   schoolLocation?: string;
   enrolledInQCSchool?: boolean;
+  
+  // Profile Document Vault
+  profileDocuments?: UserProfileDocuments;
   
   // Special categories for scholarship eligibility
   isAthlete?: boolean;

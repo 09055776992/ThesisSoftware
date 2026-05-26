@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Button } from "../components/ui/button";
@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Checkbox } from "../components/ui/checkbox";
-import { MapPin, Mail, Calendar, Award, BookOpen, DollarSign, Pencil, Loader2, Lock } from "lucide-react";
+import { MapPin, Mail, Calendar, Award, BookOpen, DollarSign, Pencil, Loader2, Lock, FileText, CheckCircle, Trash2, Upload } from "lucide-react";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { getDisplayName, getInitials, getStoredUser, saveStoredUser } from "../lib/user-storage";
 import type { UserProfile } from "../lib/user-storage";
@@ -28,6 +28,10 @@ import {
   patchAcademicProfile,
   patchAchievementsProfile,
   uploadUserAvatar,
+  fetchProfileDocuments,
+  uploadProfileDocument,
+  deleteProfileDocument,
+  type ProfileDocumentResponse,
 } from "../lib/api-client";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
@@ -111,10 +115,21 @@ const classRankOptions = [
   "Rank 6", "Rank 7", "Rank 8", "Rank 9", "Rank 10",
 ];
 
-function getGpaLabel(gpa: string | undefined): string {
-  if (!gpa) return "";
-  const n = parseFloat(gpa);
+function getGwaLabel(gwa: string | undefined, educationLevel?: string): string {
+  if (!gwa) return "";
+  const n = parseFloat(gwa);
   if (!isFinite(n)) return "";
+  
+  // For SHS (percentage scale 70-100), higher is better
+  if (educationLevel === "Senior High School") {
+    if (n >= 95) return "Excellent";
+    if (n >= 90) return "Very Good";
+    if (n >= 85) return "Good";
+    if (n >= 80) return "Satisfactory";
+    return "Needs Improvement";
+  }
+  
+  // For College (GWA scale 1.00-5.00), lower is better
   if (n <= 1.5) return "Excellent";
   if (n <= 2.0) return "Very Good";
   if (n <= 2.5) return "Good";
@@ -260,7 +275,9 @@ function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps
     try {
       let avatarUrl: string | undefined;
       if (draftAvatarFile) {
+        console.log("[Avatar] Uploading avatar for:", user?.email);
         avatarUrl = await uploadUserAvatar(draftAvatarFile, user?.email ?? "");
+        console.log("[Avatar] Upload successful, URL:", avatarUrl);
       }
 
       const skillList = draftSkills.split(",").map((s) => s.trim()).filter(Boolean);
@@ -288,6 +305,7 @@ function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps
       if (avatarUrl) {
         savedFields.profileImage = avatarUrl;
         savedFields.profilePicture = avatarUrl;
+        console.log("[Avatar] Saving avatar to profile:", avatarUrl);
       }
 
       onSaveSuccess(savedFields);
@@ -295,6 +313,7 @@ function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps
       toast.success("Personal info saved.");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      console.error("[Avatar] Error saving profile:", err);
       if (msg.includes("404") || msg.toLowerCase().includes("not found")) {
         toast.error("Session expired. Please sign in again.");
         navigate("/auth/signin");
@@ -440,7 +459,7 @@ interface EducationViewProps {
 }
 
 function EducationView({ user, onEditToggle }: EducationViewProps) {
-  const hasData = user?.educationLevel || user?.fieldOfStudy || user?.graduationYear || user?.gpa || user?.schoolName;
+  const hasData = user?.educationLevel || user?.fieldOfStudy || user?.graduationYear || user?.gwa || user?.gpa || user?.schoolName;
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -477,10 +496,10 @@ function EducationView({ user, onEditToggle }: EducationViewProps) {
               {user?.graduationYear && (
                 <p className="text-sm text-gray-500">Expected graduation {user.graduationYear}</p>
               )}
-              {user?.gpa && (
+              {(user?.gwa || user?.gpa) && (
                 <p className="text-sm font-semibold">
-                  GPA: {user.gpa}
-                  {getGpaLabel(user.gpa) ? <span className="ml-1 text-gray-500 font-normal">({getGpaLabel(user.gpa)})</span> : null}
+                  GWA: {user?.gwa || user?.gpa}
+                  {getGwaLabel(user?.gwa || user?.gpa, user?.educationLevel) ? <span className="ml-1 text-gray-500 font-normal">({getGwaLabel(user?.gwa || user?.gpa, user?.educationLevel)})</span> : null}
                 </p>
               )}
               <div className="flex flex-wrap gap-2 mt-2">
@@ -511,7 +530,7 @@ interface EducationEditFormProps {
 }
 
 function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditFormProps) {
-  const [draftGpa, setDraftGpa] = useState(user?.gpa ?? "");
+  const [draftGwa, setDraftGwa] = useState(user?.gwa ?? user?.gpa ?? "");
   const [draftEducationLevel, setDraftEducationLevel] = useState(user?.educationLevel ?? "");
   const [draftYearLevel, setDraftYearLevel] = useState(user?.yearLevel ?? "");
   const [draftFieldOfStudy, setDraftFieldOfStudy] = useState(user?.fieldOfStudy ?? "");
@@ -522,20 +541,70 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
   const [draftSchoolLocation, setDraftSchoolLocation] = useState(user?.schoolLocation ?? "");
   const [draftHasHonors, setDraftHasHonors] = useState(user?.hasAcademicHonors === true);
   const [draftAcademicRank, setDraftAcademicRank] = useState(user?.academic_rank ? String(user.academic_rank) : "");
-  const [gpaError, setGpaError] = useState("");
+  const [gwaError, setGwaError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const handleGpaBlur = () => {
-    if (!draftGpa) return;
-    const n = parseFloat(draftGpa);
-    if (!isFinite(n)) { setGpaError("Enter a valid number."); return; }
-    const clamped = Math.min(5, Math.max(1, n));
-    setDraftGpa(clamped.toFixed(2));
-    setGpaError("");
+  // Dynamic GWA validation based on education level
+  const isSeniorHighSchool = draftEducationLevel === "Senior High School";
+  
+  // SHS: 70-100 scale (percentage), College: 1.00-5.00 scale (GWA)
+  const gwaMin = isSeniorHighSchool ? 70 : 1.00;
+  const gwaMax = isSeniorHighSchool ? 100 : 5.00;
+  const gwaStep = isSeniorHighSchool ? 0.01 : 0.01;
+  const gwaPlaceholder = isSeniorHighSchool ? "e.g., 92" : "e.g., 1.75";
+  const gwaHelperText = isSeniorHighSchool 
+    ? "SHS Percentage scale: 70-100 (70 = Passing, 100 = Highest)"
+    : "Philippine GWA scale: 1.00 = Highest (Excellent), 3.00 = Passing, 5.00 = Failing.";
+
+  // Real-time GWA validation
+  const validateGwa = (value: string): string => {
+    if (!value) return "";
+    const n = parseFloat(value);
+    if (!isFinite(n)) return "Enter a valid number.";
+    
+    if (isSeniorHighSchool) {
+      // SHS: 70-100 scale
+      if (n < 70) return "SHS grade must be at least 70 (passing).";
+      if (n > 100) return "SHS grade cannot exceed 100.";
+    } else {
+      // College: 1.00-5.00 scale
+      if (n < 1) return "GWA must be at least 1.00.";
+      if (n > 5) return "GWA cannot exceed 5.00.";
+    }
+    return "";
   };
 
+  const handleGwaBlur = () => {
+    const error = validateGwa(draftGwa);
+    setGwaError(error);
+    if (error || !draftGwa) return;
+    
+    const n = parseFloat(draftGwa);
+    
+    // Clamp to valid range based on education level
+    let clamped: number;
+    if (isSeniorHighSchool) {
+      // SHS: clamp between 70-100
+      clamped = Math.min(100, Math.max(70, n));
+    } else {
+      // College: clamp between 1-5
+      clamped = Math.min(5, Math.max(1, n));
+    }
+    
+    // Format: 2 decimal places for college, 0 or 2 for SHS
+    setDraftGwa(isSeniorHighSchool ? clamped.toFixed(0) : clamped.toFixed(2));
+  };
+
+  // Validate on education level change
+  useEffect(() => {
+    if (draftGwa) {
+      const error = validateGwa(draftGwa);
+      setGwaError(error);
+    }
+  }, [draftEducationLevel, draftGwa]);
+
   const handleCancel = () => {
-    setDraftGpa(user?.gpa ?? "");
+    setDraftGwa(user?.gwa ?? user?.gpa ?? "");
     setDraftEducationLevel(user?.educationLevel ?? "");
     setDraftYearLevel(user?.yearLevel ?? "");
     setDraftFieldOfStudy(user?.fieldOfStudy ?? "");
@@ -546,17 +615,17 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
     setDraftSchoolLocation(user?.schoolLocation ?? "");
     setDraftHasHonors(user?.hasAcademicHonors === true);
     setDraftAcademicRank(user?.academic_rank ? String(user.academic_rank) : "");
-    setGpaError("");
+    setGwaError("");
     onEditToggle();
   };
 
   const handleSave = async () => {
     setSaving(true);
-    setGpaError("");
+    setGwaError("");
     try {
       await patchAcademicProfile({
         email: user?.email ?? "",
-        gpa: draftGpa.trim() || undefined,
+        gwa: draftGwa.trim() || undefined,
         educationLevel: draftEducationLevel || undefined,
         yearLevel: draftYearLevel || undefined,
         fieldOfStudy: draftFieldOfStudy.trim() || undefined,
@@ -569,7 +638,7 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
         academic_rank: draftAcademicRank || null,
       });
       const savedFields: Partial<UserProfile> = {
-        gpa: draftGpa.trim(),
+        gwa: draftGwa.trim(),
         educationLevel: draftEducationLevel,
         yearLevel: draftYearLevel,
         fieldOfStudy: draftFieldOfStudy.trim(),
@@ -586,8 +655,8 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
       toast.success("Academic info saved.");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.toLowerCase().includes("gpa")) {
-        setGpaError(msg);
+      if (msg.toLowerCase().includes("gwa") || msg.toLowerCase().includes("gpa")) {
+        setGwaError(msg);
       } else {
         toast.error("Failed to save. Please try again.");
       }
@@ -603,11 +672,31 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-1">
-          <Label htmlFor="edu-gpa">GPA <span className="text-red-500">*</span></Label>
-          <Input id="edu-gpa" type="number" min="1" max="5" step="0.01" value={draftGpa}
-            onChange={(e) => setDraftGpa(e.target.value)} onBlur={handleGpaBlur} placeholder="1.75" />
-          <p className="text-xs text-gray-500">Philippine GPA scale: 1.00 = Highest (Excellent), 3.00 = Minimum Passing, 5.00 = Failing.</p>
-          {gpaError && <p className="text-sm text-red-500">{gpaError}</p>}
+          <Label htmlFor="edu-gwa">GWA (General Weighted Average) <span className="text-red-500">*</span></Label>
+          <Input 
+            id="edu-gwa" 
+            type="number" 
+            min={gwaMin} 
+            max={gwaMax} 
+            step={gwaStep} 
+            value={draftGwa}
+            onChange={(e) => {
+              setDraftGwa(e.target.value);
+              // Real-time validation
+              const error = validateGwa(e.target.value);
+              setGwaError(error);
+            }} 
+            onBlur={handleGwaBlur} 
+            placeholder={gwaPlaceholder}
+            className={gwaError ? "border-red-500 focus-visible:ring-red-500" : ""}
+          />
+          <p className="text-xs text-gray-500">{gwaHelperText}</p>
+          {gwaError && (
+            <div className="flex items-center gap-1.5 text-sm text-red-500">
+              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-100 text-red-500 text-xs">!</span>
+              {gwaError}
+            </div>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-1">
@@ -1002,6 +1091,278 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
   );
 }
 
+// ─── DocumentVaultTab ─────────────────────────────────────────────────────────
+
+interface DocumentVaultTabProps {
+  user: UserProfile | null;
+}
+
+const documentConfig = [
+  {
+    key: "gradesTranscript" as const,
+    label: "Copy of Grades / Transcript of Records / Form 137 or 138",
+    description: "Upload your most recent grades, transcript, or school records",
+  },
+  {
+    key: "enrollmentProof" as const,
+    label: "Proof of school enrollment/registration/acceptance",
+    description: "Certificate of enrollment or registration from your school",
+  },
+  {
+    key: "qCitizenId" as const,
+    label: "Valid QCitizen ID",
+    description: "Your valid Quezon City resident ID or proof of residency",
+  },
+];
+
+function DocumentVaultTab({ user }: DocumentVaultTabProps) {
+  const [documents, setDocuments] = useState<ProfileDocumentResponse[]>([]);
+  const [isComplete, setIsComplete] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadDocuments();
+  }, [user?.email]);
+
+  const loadDocuments = async () => {
+    if (!user?.email) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const result = await fetchProfileDocuments(user.email);
+      setDocuments(result.documents);
+      setIsComplete(result.isComplete);
+    } catch (err) {
+      toast.error("Failed to load documents");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFileUpload = async (docType: "gradesTranscript" | "enrollmentProof" | "qCitizenId", file: File) => {
+    if (!user?.email) return;
+    
+    // Validate file
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("File size must be less than 5MB");
+      return;
+    }
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error("Only PDF, JPG, JPEG, and PNG files are allowed");
+      return;
+    }
+
+    setUploading(docType);
+    try {
+      await uploadProfileDocument(user.email, docType, file);
+      toast.success("Document uploaded successfully");
+      await loadDocuments();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      toast.error(msg);
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const handleDelete = async (docType: "gradesTranscript" | "enrollmentProof" | "qCitizenId") => {
+    if (!user?.email) return;
+    if (!confirm("Are you sure you want to delete this document?")) return;
+
+    try {
+      await deleteProfileDocument(user.email, docType);
+      toast.success("Document deleted");
+      await loadDocuments();
+    } catch (err) {
+      toast.error("Failed to delete document");
+    }
+  };
+
+  const formatFileSize = (bytes: number | null) => {
+    if (!bytes) return "";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return "";
+    return new Date(dateStr).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <span className="ml-2 text-muted-foreground">Loading documents...</span>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Document Vault
+              </CardTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                Upload your general documents once. These will be automatically linked to all your scholarship applications.
+              </p>
+            </div>
+            {isComplete && (
+              <Badge className="bg-green-100 text-green-700">
+                <CheckCircle className="h-3 w-3 mr-1" />
+                Complete
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Status Banner */}
+          <div className={`p-4 rounded-lg border ${isComplete ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+            <div className="flex items-start gap-3">
+              {isComplete ? (
+                <>
+                  <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-green-800">All documents uploaded!</p>
+                    <p className="text-sm text-green-700">
+                      Your general documents are ready. When you apply for scholarships, these will be automatically linked.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="h-5 w-5 rounded-full bg-amber-100 flex items-center justify-center mt-0.5">
+                    <span className="text-amber-600 text-xs">!</span>
+                  </div>
+                  <div>
+                    <p className="font-medium text-amber-800">Complete your document vault</p>
+                    <p className="text-sm text-amber-700">
+                      Please upload all 3 required documents to enable quick scholarship applications.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Document Upload Cards */}
+          <div className="space-y-4">
+            {documentConfig.map((config) => {
+              const doc = documents.find((d) => d.type === config.key);
+              const hasFile = doc?.fileName;
+
+              return (
+                <div
+                  key={config.key}
+                  className={`border rounded-lg p-4 ${hasFile ? 'bg-gray-50' : 'bg-white'}`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium text-sm">{config.label}</h4>
+                        {hasFile ? (
+                          <Badge className="bg-green-100 text-green-700 text-xs">
+                            <CheckCircle className="h-3 w-3 mr-1" />
+                            Uploaded
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs text-amber-600 border-amber-300">
+                            Required
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">{config.description}</p>
+
+                      {hasFile && doc && (
+                        <div className="mt-3 p-3 bg-white rounded border">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <FileText className="h-4 w-4 text-gray-500" />
+                              <span className="text-sm font-medium">{doc.fileName}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground">
+                                {formatFileSize(doc.fileSize)} • {formatDate(doc.uploadedAt)}
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDelete(config.key)}
+                                className="text-red-500 hover:text-red-600"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          {doc.status === "rejected" && doc.rejectionReason && (
+                            <p className="text-xs text-red-600 mt-2">
+                              Rejected: {doc.rejectionReason}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {!hasFile && (
+                      <div className="relative">
+                        <input
+                          type="file"
+                          id={`file-${config.key}`}
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleFileUpload(config.key, file);
+                            e.target.value = "";
+                          }}
+                          disabled={uploading === config.key}
+                        />
+                        <label
+                          htmlFor={`file-${config.key}`}
+                          className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3 cursor-pointer"
+                        >
+                          {uploading === config.key ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Uploading...
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="h-4 w-4 mr-2" />
+                              Upload
+                            </>
+                          )}
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ─── Main Profile Component ───────────────────────────────────────────────────
 
 export function Profile() {
@@ -1030,7 +1391,7 @@ export function Profile() {
     localUser?.schoolName ? `${localUser.schoolName}${localUser?.schoolCampus ? ` (${localUser.schoolCampus})` : ""}` : null,
     localUser?.fieldOfStudy ?? null,
     localUser?.educationLevel ? titleCase(localUser.educationLevel) : null,
-    localUser?.gpa ? `GPA ${localUser.gpa}` : null,
+    (localUser?.gwa || localUser?.gpa) ? `GWA ${localUser?.gwa || localUser?.gpa}${localUser?.educationLevel === "Senior High School" ? "%" : ""}` : null,
     (financialNeedVal ?? 0) >= 4 ? "Need-Based Support" : null,
     localUser?.isAthlete ? "🏃 Athlete" : null,
     localUser?.isArtist ? "🎨 Artist" : null,
@@ -1059,7 +1420,10 @@ export function Profile() {
             <div className="flex flex-col md:flex-row gap-6">
               <div className="flex-shrink-0">
                 <Avatar className="h-40 w-40 border-4 border-card">
-                  <AvatarImage src={resolvePublicAssetUrl(pickProfileImageUrl(localUser as Record<string, unknown>) || localUser?.profileImage)} />
+                  <AvatarImage
+                    key={pickProfileImageUrl(localUser as Record<string, unknown>) || localUser?.profileImage}
+                    src={resolvePublicAssetUrl(pickProfileImageUrl(localUser as Record<string, unknown>) || localUser?.profileImage, true)}
+                  />
                   <AvatarFallback>{getInitials(localUser)}</AvatarFallback>
                 </Avatar>
               </div>
@@ -1104,6 +1468,7 @@ export function Profile() {
                 <TabsTrigger value="about">About</TabsTrigger>
                 <TabsTrigger value="education">Education</TabsTrigger>
                 <TabsTrigger value="achievements">Achievements</TabsTrigger>
+                <TabsTrigger value="documents">Documents</TabsTrigger>
                 <TabsTrigger value="activity">Activity</TabsTrigger>
               </TabsList>
 
@@ -1134,6 +1499,10 @@ export function Profile() {
                 />
               </TabsContent>
 
+              <TabsContent value="documents">
+                <DocumentVaultTab user={localUser} />
+              </TabsContent>
+
               <TabsContent value="activity">
                 <Card>
                   <CardContent className="pt-6">
@@ -1157,8 +1526,19 @@ export function Profile() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <div>
-                  <p className="text-sm text-muted-foreground">Current GPA</p>
-                  <p className="text-2xl font-semibold font-mono">{localUser?.gpa || "Not provided"}</p>
+                  <p className="text-sm text-muted-foreground">Current GWA</p>
+                  <p className="text-2xl font-semibold font-mono">
+                    {localUser?.gwa || localUser?.gpa 
+                      ? (localUser.gwa || localUser.gpa) + (localUser.educationLevel === "Senior High School" ? "%" : "")
+                      : "Not provided"}
+                  </p>
+                  {(localUser?.gwa || localUser?.gpa) && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {localUser.educationLevel === "Senior High School" 
+                        ? "SHS Percentage Scale (70-100)"
+                        : "College GWA Scale (1.00-5.00)"}
+                    </p>
+                  )}
                 </div>
                 <Separator />
                 <div>
