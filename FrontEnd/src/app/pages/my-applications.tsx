@@ -130,7 +130,7 @@ export function MyApplications() {
 
         {applications.length === 0 ? (
           <Card className="p-12 text-center">
-            <FileText className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+            <FileText className="size-16 mx-auto mb-4 text-gray-300" />
             <h3 className="text-lg font-semibold mb-2">You haven't applied to any scholarships yet</h3>
             <p className="text-muted-foreground mb-6">
               Browse scholarships to find ones you qualify for
@@ -145,7 +145,7 @@ export function MyApplications() {
               <Card key={app._id} className="overflow-hidden">
                 <CardContent className="p-0">
                   <div className="flex flex-col md:flex-row">
-                    <div className="md:w-48 h-48 shrink-0">
+                    <div className="md:size-48 shrink-0">
                       <img
                         src={app.scholarshipData?.imageUrl || defaultScholarshipImage}
                         alt={app.scholarshipName}
@@ -164,11 +164,11 @@ export function MyApplications() {
                           </p>
                           <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
                             <span className="flex items-center gap-1">
-                              <Calendar className="h-4 w-4" />
+                              <Calendar className="size-4" />
                               Applied: {formatDate(app.submittedAt)}
                             </span>
                             <span className="flex items-center gap-1">
-                              <FileText className="h-4 w-4" />
+                              <FileText className="size-4" />
                               Ref: {app.referenceNumber || app._id.slice(-8).toUpperCase()}
                             </span>
                           </div>
@@ -215,7 +215,7 @@ export function MyApplications() {
                   <img
                     src={selectedApp.scholarshipData?.imageUrl || defaultScholarshipImage}
                     alt={selectedApp.scholarshipName}
-                    className="w-20 h-20 rounded-lg object-cover"
+                    className="size-20 rounded-lg object-cover"
                     onError={(e) => {
                       (e.target as HTMLImageElement).src = defaultScholarshipImage;
                     }}
@@ -268,7 +268,7 @@ export function MyApplications() {
                 {selectedApp.status === "Qualified for Final Screening" && selectedApp.finalScreening && (
                   <div className="bg-green-50 p-4 rounded-lg border border-green-200">
                     <h4 className="font-semibold text-green-800 flex items-center gap-2 mb-3">
-                      <Award className="h-4 w-4" />
+                      <Award className="size-4" />
                       Video Interview Submission
                     </h4>
                     <div className="space-y-2 text-sm">
@@ -281,7 +281,7 @@ export function MyApplications() {
                             rel="noopener noreferrer"
                             className="text-blue-600 hover:underline inline-flex items-center gap-1"
                           >
-                            Upload Your Video <ExternalLink className="h-3 w-3" />
+                            Upload Your Video <ExternalLink className="size-3" />
                           </a>
                         </p>
                       )}
@@ -302,7 +302,7 @@ export function MyApplications() {
                 {selectedApp.status === "Rejected" && selectedApp.rejectionReason && (
                   <div className="bg-red-50 p-4 rounded-lg border border-red-200">
                     <h4 className="font-semibold text-red-800 flex items-center gap-2 mb-2">
-                      <XCircle className="h-4 w-4" />
+                      <XCircle className="size-4" />
                       Rejection Reason
                     </h4>
                     <p className="text-sm text-red-700">{selectedApp.rejectionReason}</p>
@@ -313,7 +313,7 @@ export function MyApplications() {
                 {selectedApp.status === "Needs Resubmission" && selectedApp.resubmissionReason && (
                   <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
                     <h4 className="font-semibold text-orange-800 flex items-center gap-2 mb-2">
-                      <AlertCircle className="h-4 w-4" />
+                      <AlertCircle className="size-4" />
                       Resubmission Required
                     </h4>
                     <p className="text-sm text-orange-700">{selectedApp.resubmissionReason}</p>
@@ -323,7 +323,7 @@ export function MyApplications() {
                 {/* AI Score Section */}
                 {scoreLoading && (
                   <div className="bg-gray-50 rounded-lg p-4 text-center text-sm text-muted-foreground">
-                    <Brain className="h-5 w-5 inline mr-2 animate-pulse" />
+                    <Brain className="size-5 inline mr-2 animate-pulse" />
                     Loading your score...
                   </div>
                 )}
@@ -331,7 +331,7 @@ export function MyApplications() {
                 {!scoreLoading && myScore && myScore.has_score && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-2 font-semibold text-base">
-                      <Trophy className="h-5 w-5 text-primary" />
+                      <Trophy className="size-5 text-primary" />
                       Your Application Score
                     </div>
 
@@ -393,7 +393,7 @@ export function MyApplications() {
                     {myScore.shap_explanation && (
                       <div className="bg-blue-50 rounded-lg p-4 space-y-3">
                         <div className="flex items-center gap-2 text-sm font-semibold text-blue-800">
-                          <Brain className="h-4 w-4" />
+                          <Brain className="size-4" />
                           Why you received this score
                         </div>
                         <p className="text-sm text-blue-700 italic">
@@ -403,8 +403,8 @@ export function MyApplications() {
                           {myScore.shap_explanation.contributions.map((c: ShapContribution) => (
                             <div key={c.factor} className="flex items-start gap-2 text-sm">
                               {c.impact === "positive"
-                                ? <TrendingUp className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                                : <TrendingDown className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                                ? <TrendingUp className="size-4 text-green-600 mt-0.5 flex-shrink-0" />
+                                : <TrendingDown className="size-4 text-red-500 mt-0.5 flex-shrink-0" />
                               }
                               <div>
                                 <span className="font-medium text-gray-800">{c.factor}</span>
@@ -420,7 +420,7 @@ export function MyApplications() {
 
                 {!scoreLoading && myScore && !myScore.has_score && (
                   <div className="bg-gray-50 rounded-lg p-4 text-sm text-muted-foreground text-center">
-                    <Trophy className="h-5 w-5 inline mr-2 opacity-40" />
+                    <Trophy className="size-5 inline mr-2 opacity-40" />
                     Rankings have not been generated yet for this scholarship.
                   </div>
                 )}
@@ -433,7 +433,7 @@ export function MyApplications() {
                       {selectedApp.submittedDocuments.map((doc, idx) => (
                         <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                           <div className="flex items-center gap-2">
-                            <FileText className="h-4 w-4 text-muted-foreground" />
+                            <FileText className="size-4 text-muted-foreground" />
                             <span className="text-sm">{doc.documentType}</span>
                           </div>
                           <div className="flex items-center gap-2">

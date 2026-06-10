@@ -11,14 +11,14 @@ import { AdminSignUp } from "./admin-signup";
 interface AdminAuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: (user: Record<string, unknown>) => void;
+  onSuccess?: (user: Record<string, unknown>, token?: string) => void;
 }
 
 export function AdminAuthModal({ isOpen, onClose, onSuccess }: AdminAuthModalProps) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
 
-  const handleSuccess = (user: Record<string, unknown>) => {
-    onSuccess?.(user);
+  const handleSuccess = (user: Record<string, unknown>, token?: string) => {
+    onSuccess?.(user, token);
   };
 
   return (

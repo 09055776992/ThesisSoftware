@@ -99,11 +99,11 @@ export function Dashboard() {
               <div className="flex items-center justify-between mt-3">
                 <div className="flex gap-2">
                   <Button type="button" variant="ghost" size="sm">
-                    <ImageIcon className="h-4 w-4 mr-2" />
+                    <ImageIcon className="size-4 mr-2" />
                     Photo
                   </Button>
                   <Button type="button" variant="ghost" size="sm">
-                    <FileText className="h-4 w-4 mr-2" />
+                    <FileText className="size-4 mr-2" />
                     Document
                   </Button>
                 </div>
@@ -174,19 +174,19 @@ export function Dashboard() {
 
               <div className="flex items-center justify-around">
                 <Button type="button" variant="ghost" size="sm" className="flex-1">
-                  <Heart className="h-4 w-4 mr-2" />
+                  <Heart className="size-4 mr-2" />
                   Like
                 </Button>
                 <Button type="button" variant="ghost" size="sm" className="flex-1">
-                  <MessageCircle className="h-4 w-4 mr-2" />
+                  <MessageCircle className="size-4 mr-2" />
                   Comment
                 </Button>
                 <Button type="button" variant="ghost" size="sm" className="flex-1">
-                  <Share2 className="h-4 w-4 mr-2" />
+                  <Share2 className="size-4 mr-2" />
                   Share
                 </Button>
                 <Button type="button" variant="ghost" size="sm" className="flex-1">
-                  <Bookmark className="h-4 w-4 mr-2" />
+                  <Bookmark className="size-4 mr-2" />
                   Save
                 </Button>
               </div>

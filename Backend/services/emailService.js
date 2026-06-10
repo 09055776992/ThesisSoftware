@@ -439,3 +439,205 @@ export async function sendNewScholarshipEmail({
   await transporter.sendMail(mailOptions);
   console.log(`[Email] New scholarship alert sent to ${maskEmail(to)}`);
 }
+
+// ---------------------------------------------------------------------------
+// Provider account request received — sent to provider after registration
+// ---------------------------------------------------------------------------
+export async function sendProviderRequestReceivedEmail({ to, providerName, organizationName }) {
+  const displayName = String(providerName || "Provider").trim();
+  const org = String(organizationName || "your organization").trim();
+
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || `SCHOLAR System <${process.env.EMAIL_USER}>`,
+    to,
+    subject: "SCHOLAR — Provider Account Request Received",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;
+                  padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h2 style="color: #1d4ed8; margin: 0;">🎓 SCHOLAR</h2>
+          <p style="color: #6b7280; margin: 4px 0 0;">Scholarship Management System</p>
+        </div>
+        <h3 style="color: #111827;">Hello, ${displayName}!</h3>
+        <p style="color: #374151;">
+          We have received your provider account request for <strong>${org}</strong>.
+        </p>
+        <div style="background: #fef3c7; border-radius: 8px; padding: 16px; margin: 24px 0; border-left: 4px solid #f59e0b;">
+          <p style="color: #92400e; margin: 0; font-weight: 600;">⏳ Pending Admin Approval</p>
+          <p style="color: #78350f; margin: 8px 0 0; font-size: 14px;">
+            Your account is currently under review. You will receive an email once an administrator
+            has approved or rejected your request. This typically takes 1–2 business days.
+          </p>
+        </div>
+        <p style="color: #374151; font-size: 14px;">
+          You will not be able to log in until your account has been approved.
+        </p>
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+        <p style="color: #9ca3af; font-size: 12px; text-align: center;">
+          If you did not submit this request, please ignore this email.<br>
+          © 2026 SCHOLAR — Quezon City Youth Development Office
+        </p>
+      </div>
+    `,
+  };
+
+  await transporter.sendMail(mailOptions);
+  console.log(`[Email] Provider request received sent to ${maskEmail(to)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Provider account approved — sent to provider after admin approves
+// ---------------------------------------------------------------------------
+export async function sendProviderApprovedEmail({ to, providerName, organizationName }) {
+  const displayName = String(providerName || "Provider").trim();
+  const org = String(organizationName || "your organization").trim();
+  const loginUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/auth/signin`;
+
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || `SCHOLAR System <${process.env.EMAIL_USER}>`,
+    to,
+    subject: "SCHOLAR — Your Provider Account Has Been Approved ✅",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;
+                  padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h2 style="color: #1d4ed8; margin: 0;">🎓 SCHOLAR</h2>
+          <p style="color: #6b7280; margin: 4px 0 0;">Scholarship Management System</p>
+        </div>
+        <h3 style="color: #111827;">Hello, ${displayName}!</h3>
+        <div style="background: #f0fdf4; border-radius: 8px; padding: 16px; margin: 24px 0; border-left: 4px solid #22c55e;">
+          <p style="color: #166534; margin: 0; font-weight: 600;">✅ Account Approved</p>
+          <p style="color: #15803d; margin: 8px 0 0; font-size: 14px;">
+            Your SCHOLAR provider account for <strong>${org}</strong> has been approved.
+            You can now log in and start managing scholarships.
+          </p>
+        </div>
+        <div style="text-align: center; margin: 32px 0;">
+          <a href="${loginUrl}"
+             style="display: inline-block; background: #1d4ed8; color: white; text-decoration: none;
+                    padding: 12px 28px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+            Log In to SCHOLAR
+          </a>
+        </div>
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+        <p style="color: #9ca3af; font-size: 12px; text-align: center;">
+          © 2026 SCHOLAR — Quezon City Youth Development Office
+        </p>
+      </div>
+    `,
+  };
+
+  await transporter.sendMail(mailOptions);
+  console.log(`[Email] Provider approved email sent to ${maskEmail(to)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Provider account rejected — sent to provider after admin rejects
+// ---------------------------------------------------------------------------
+export async function sendProviderRejectedEmail({ to, providerName, organizationName, reason }) {
+  const displayName = String(providerName || "Provider").trim();
+  const org = String(organizationName || "your organization").trim();
+  const rejectionReason = String(reason || "").trim();
+
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || `SCHOLAR System <${process.env.EMAIL_USER}>`,
+    to,
+    subject: "SCHOLAR — Provider Account Request Update",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;
+                  padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h2 style="color: #1d4ed8; margin: 0;">🎓 SCHOLAR</h2>
+          <p style="color: #6b7280; margin: 4px 0 0;">Scholarship Management System</p>
+        </div>
+        <h3 style="color: #111827;">Hello, ${displayName}!</h3>
+        <p style="color: #374151;">
+          We have reviewed your provider account request for <strong>${org}</strong>.
+        </p>
+        <div style="background: #fef2f2; border-radius: 8px; padding: 16px; margin: 24px 0; border-left: 4px solid #ef4444;">
+          <p style="color: #991b1b; margin: 0; font-weight: 600;">❌ Account Request Not Approved</p>
+          <p style="color: #7f1d1d; margin: 8px 0 0; font-size: 14px;">
+            Unfortunately, your account request was not approved at this time.
+          </p>
+          ${rejectionReason ? `
+          <p style="color: #7f1d1d; margin: 8px 0 0; font-size: 14px;">
+            <strong>Reason:</strong> ${rejectionReason}
+          </p>
+          ` : ""}
+        </div>
+        <p style="color: #374151; font-size: 14px;">
+          If you believe this is an error or would like to reapply, please contact the SCHOLAR administrator.
+        </p>
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+        <p style="color: #9ca3af; font-size: 12px; text-align: center;">
+          © 2026 SCHOLAR — Quezon City Youth Development Office
+        </p>
+      </div>
+    `,
+  };
+
+  await transporter.sendMail(mailOptions);
+  console.log(`[Email] Provider rejected email sent to ${maskEmail(to)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Admin notification — new provider account request
+// ---------------------------------------------------------------------------
+export async function sendAdminNewProviderRequestEmail({ adminEmail, providerName, organizationName, position, providerEmail }) {
+  const name = String(providerName || "Unknown").trim();
+  const org = String(organizationName || "Unknown Organization").trim();
+  const pos = String(position || "Not specified").trim();
+  const email = String(providerEmail || "").trim();
+  const adminUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/admin/providers`;
+
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || `SCHOLAR System <${process.env.EMAIL_USER}>`,
+    to: adminEmail,
+    subject: `SCHOLAR — New Provider Account Request from ${name}`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;
+                  padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h2 style="color: #1d4ed8; margin: 0;">🎓 SCHOLAR</h2>
+          <p style="color: #6b7280; margin: 4px 0 0;">Scholarship Management System</p>
+        </div>
+        <h3 style="color: #111827;">New Provider Account Request</h3>
+        <p style="color: #374151;">A new provider account request has been submitted and requires your review.</p>
+        <div style="background: #f9fafb; border-radius: 8px; padding: 16px; margin: 24px 0; border: 1px solid #e5e7eb;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280; font-size: 14px; width: 40%;">Full Name</td>
+              <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 600;">${name}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Organization</td>
+              <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 600;">${org}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Position</td>
+              <td style="padding: 8px 0; color: #111827; font-size: 14px;">${pos}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Email</td>
+              <td style="padding: 8px 0; color: #111827; font-size: 14px;">${email}</td>
+            </tr>
+          </table>
+        </div>
+        <div style="text-align: center; margin: 32px 0;">
+          <a href="${adminUrl}"
+             style="display: inline-block; background: #1d4ed8; color: white; text-decoration: none;
+                    padding: 12px 28px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+            Review Request in Admin Panel
+          </a>
+        </div>
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+        <p style="color: #9ca3af; font-size: 12px; text-align: center;">
+          © 2026 SCHOLAR — Quezon City Youth Development Office
+        </p>
+      </div>
+    `,
+  };
+
+  await transporter.sendMail(mailOptions);
+  console.log(`[Email] Admin notified of new provider request from ${maskEmail(email)}`);
+}

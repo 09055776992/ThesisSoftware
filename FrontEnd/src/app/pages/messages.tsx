@@ -141,7 +141,7 @@ export function Messages() {
                       className={`flex items-center gap-3 p-2 rounded hover:bg-gray-50 cursor-pointer ${activeId === c.id ? "bg-gray-100" : ""}`}
                       onClick={() => setActiveId(c.id)}
                     >
-                      <Avatar className="h-10 w-10">
+                      <Avatar className="size-10">
                         <AvatarFallback className="bg-blue-100 text-blue-700">{getInitials({ fullName: c.name })}</AvatarFallback>
                       </Avatar>
                       <div className="min-w-0">

@@ -1,15 +1,17 @@
 import { useState, useEffect } from "react";
 import { Outlet, Link, useLocation } from "react-router";
-import { LayoutDashboard, Users, Award, FileText, MessageSquare, BarChart3, Bell, Settings, Loader2 } from "lucide-react";
+import { LayoutDashboard, Users, Award, FileText, MessageSquare, BarChart3, Settings, Loader2, ShieldCheck } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { Redirect } from "../pages/redirect";
 import { getStoredUser, getDisplayName, getInitials } from "../lib/user-storage";
+import { API_URL } from "../lib/api-client";
 
 interface QuickStats {
   totalScholars: number;
   pendingApplications: number;
   activeScholarships: number;
+  pendingProviders?: number;
 }
 
 export function AdminLayout() {
@@ -19,12 +21,13 @@ export function AdminLayout() {
   const user = getStoredUser();
 
   if (user?.userType !== "admin") {
-    return <Redirect to="/auth/signin" />;
+    return <Redirect to="/" />;
   }
-  
+
   const navItems = [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
     { href: "/admin/users", label: "Manage Users", icon: Users },
+    { href: "/admin/providers", label: "Provider Accounts", icon: ShieldCheck },
     { href: "/admin/scholarships", label: "Scholarships", icon: Award },
     { href: "/admin/applications", label: "Applications", icon: FileText },
     { href: "/admin/messages", label: "Messages", icon: MessageSquare },
@@ -35,7 +38,8 @@ export function AdminLayout() {
   useEffect(() => {
     const fetchQuickStats = async () => {
       try {
-        const response = await fetch("/api/admin/analytics");
+        const API_BASE = API_URL;
+        const response = await fetch(`${API_BASE}/api/admin/analytics`);
         if (response.ok) {
           const data = await response.json();
           setQuickStats(data.quickStats);
@@ -58,7 +62,7 @@ export function AdminLayout() {
           {/* Admin Header */}
           <div className="mb-6 pt-2">
             <div className="flex items-center gap-3 mb-1">
-              <Avatar className="h-14 w-14 border-2 border-orange-100">
+              <Avatar className="size-14 border-2 border-orange-100">
                 <AvatarImage src={user?.profilePicture || user?.profileImage || ""} />
                 <AvatarFallback className="bg-orange-100 text-orange-700 text-lg font-semibold">
                   {getInitials(user)}
@@ -77,7 +81,9 @@ export function AdminLayout() {
           <nav className="space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = location.pathname === item.href;
+              const isActive =
+                location.pathname === item.href ||
+                (item.href !== "/admin" && location.pathname.startsWith(item.href));
               return (
                 <Link
                   key={item.href}
@@ -88,8 +94,13 @@ export function AdminLayout() {
                       : "text-gray-700 hover:bg-gray-100"
                   }`}
                 >
-                  <Icon className="h-5 w-5 flex-shrink-0" />
+                  <Icon className="size-5 flex-shrink-0" />
                   <span className="font-medium text-sm">{item.label}</span>
+                  {item.href === "/admin/providers" && (quickStats?.pendingProviders ?? 0) > 0 && (
+                    <Badge className="ml-auto bg-amber-500 hover:bg-amber-500 text-white text-xs px-1.5 py-0">
+                      {quickStats!.pendingProviders}
+                    </Badge>
+                  )}
                 </Link>
               );
             })}
@@ -103,7 +114,7 @@ export function AdminLayout() {
             <div className="space-y-2.5">
               {loading ? (
                 <div className="flex items-center justify-center px-3 py-4">
-                  <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                  <Loader2 className="size-4 animate-spin text-gray-400" />
                 </div>
               ) : (
                 <>

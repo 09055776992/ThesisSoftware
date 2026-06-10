@@ -166,7 +166,7 @@ function AboutView({ user, onEditToggle }: AboutViewProps) {
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">About</CardTitle>
             <Button variant="outline" size="sm" onClick={onEditToggle}>
-              <Pencil className="h-4 w-4 mr-1" /> Edit
+              <Pencil className="size-4 mr-1" /> Edit
             </Button>
           </div>
         </CardHeader>
@@ -280,7 +280,7 @@ function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps
         console.log("[Avatar] Upload successful, URL:", avatarUrl);
       }
 
-      const skillList = draftSkills.split(",").map((s) => s.trim()).filter(Boolean);
+      const skillList = draftSkills.split(",").flatMap((s) => { const result = s.trim(); return result ? [result] : []; });
 
       await patchPersonalProfile({
         email: user?.email ?? "",
@@ -341,7 +341,7 @@ function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps
         <div className="space-y-2">
           <Label>Profile Picture</Label>
           <div className="flex items-center gap-4">
-            <Avatar className="h-16 w-16">
+            <Avatar className="size-16">
               <AvatarImage src={avatarSrc} />
               <AvatarFallback>{getInitials(user)}</AvatarFallback>
             </Avatar>
@@ -428,7 +428,7 @@ function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps
 
         <div className="flex gap-2 pt-2">
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save Personal Info"}
+            {saving ? <><Loader2 className="size-4 mr-2 animate-spin" />Saving…</> : "Save Personal Info"}
           </Button>
           <Button variant="outline" onClick={handleCancel} disabled={saving}>Cancel</Button>
         </div>
@@ -466,7 +466,7 @@ function EducationView({ user, onEditToggle }: EducationViewProps) {
         <div className="flex items-center justify-between">
           <CardTitle className="text-base">Education</CardTitle>
           <Button variant="outline" size="sm" onClick={onEditToggle}>
-            <Pencil className="h-4 w-4 mr-1" /> Edit
+            <Pencil className="size-4 mr-1" /> Edit
           </Button>
         </div>
       </CardHeader>
@@ -476,8 +476,8 @@ function EducationView({ user, onEditToggle }: EducationViewProps) {
         ) : (
           <div className="flex gap-4">
             <div className="flex-shrink-0">
-              <div className="h-12 w-12 bg-primary/10 rounded-lg flex items-center justify-center">
-                <BookOpen className="h-6 w-6 text-primary" />
+              <div className="size-12 bg-primary/10 rounded-lg flex items-center justify-center">
+                <BookOpen className="size-6 text-primary" />
               </div>
             </div>
             <div className="flex-1 space-y-1">
@@ -693,7 +693,7 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
           <p className="text-xs text-gray-500">{gwaHelperText}</p>
           {gwaError && (
             <div className="flex items-center gap-1.5 text-sm text-red-500">
-              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-100 text-red-500 text-xs">!</span>
+              <span className="inline-flex items-center justify-center size-4 rounded-full bg-red-100 text-red-500 text-xs">!</span>
               {gwaError}
             </div>
           )}
@@ -782,7 +782,7 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
         </div>
         <div className="flex gap-2 pt-2">
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save Academic Info"}
+            {saving ? <><Loader2 className="size-4 mr-2 animate-spin" />Saving…</> : "Save Academic Info"}
           </Button>
           <Button variant="outline" onClick={handleCancel} disabled={saving}>Cancel</Button>
         </div>
@@ -833,7 +833,7 @@ function AchievementsView({ user, onEditToggle }: AchievementsViewProps) {
         <div className="flex items-center justify-between">
           <CardTitle className="text-base">Achievements & Eligibility</CardTitle>
           <Button variant="outline" size="sm" onClick={onEditToggle}>
-            <Pencil className="h-4 w-4 mr-1" /> Edit
+            <Pencil className="size-4 mr-1" /> Edit
           </Button>
         </div>
       </CardHeader>
@@ -853,7 +853,7 @@ function AchievementsView({ user, onEditToggle }: AchievementsViewProps) {
         <div className="border-t pt-3">
           <div className="flex items-center gap-1 mb-2">
             <p className="text-sm font-semibold text-gray-700">Financial Information</p>
-            <Lock className="h-3 w-3 text-gray-400" />
+            <Lock className="size-3 text-gray-400" />
             <span className="text-xs text-gray-400">(Private)</span>
           </div>
           <div className="space-y-1 text-sm text-gray-600">
@@ -1082,7 +1082,7 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
         </div>
         <div className="flex gap-2 pt-2">
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : "Save Achievements & Financial"}
+            {saving ? <><Loader2 className="size-4 mr-2 animate-spin" />Saving…</> : "Save Achievements & Financial"}
           </Button>
           <Button variant="outline" onClick={handleCancel} disabled={saving}>Cancel</Button>
         </div>
@@ -1202,7 +1202,7 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <Loader2 className="size-6 animate-spin text-primary" />
             <span className="ml-2 text-muted-foreground">Loading documents...</span>
           </div>
         </CardContent>
@@ -1217,7 +1217,7 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-base flex items-center gap-2">
-                <FileText className="h-5 w-5" />
+                <FileText className="size-5" />
                 Document Vault
               </CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
@@ -1226,7 +1226,7 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
             </div>
             {isComplete && (
               <Badge className="bg-green-100 text-green-700">
-                <CheckCircle className="h-3 w-3 mr-1" />
+                <CheckCircle className="size-3 mr-1" />
                 Complete
               </Badge>
             )}
@@ -1238,7 +1238,7 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
             <div className="flex items-start gap-3">
               {isComplete ? (
                 <>
-                  <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                  <CheckCircle className="size-5 text-green-600 mt-0.5" />
                   <div>
                     <p className="font-medium text-green-800">All documents uploaded!</p>
                     <p className="text-sm text-green-700">
@@ -1248,7 +1248,7 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
                 </>
               ) : (
                 <>
-                  <div className="h-5 w-5 rounded-full bg-amber-100 flex items-center justify-center mt-0.5">
+                  <div className="size-5 rounded-full bg-amber-100 flex items-center justify-center mt-0.5">
                     <span className="text-amber-600 text-xs">!</span>
                   </div>
                   <div>
@@ -1279,7 +1279,7 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
                         <h4 className="font-medium text-sm">{config.label}</h4>
                         {hasFile ? (
                           <Badge className="bg-green-100 text-green-700 text-xs">
-                            <CheckCircle className="h-3 w-3 mr-1" />
+                            <CheckCircle className="size-3 mr-1" />
                             Uploaded
                           </Badge>
                         ) : (
@@ -1294,7 +1294,7 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
                         <div className="mt-3 p-3 bg-white rounded border">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <FileText className="h-4 w-4 text-gray-500" />
+                              <FileText className="size-4 text-gray-500" />
                               <span className="text-sm font-medium">{doc.fileName}</span>
                             </div>
                             <div className="flex items-center gap-2">
@@ -1307,7 +1307,7 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
                                 onClick={() => handleDelete(config.key)}
                                 className="text-red-500 hover:text-red-600"
                               >
-                                <Trash2 className="h-4 w-4" />
+                                <Trash2 className="size-4" />
                               </Button>
                             </div>
                           </div>
@@ -1340,12 +1340,12 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
                         >
                           {uploading === config.key ? (
                             <>
-                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              <Loader2 className="size-4 mr-2 animate-spin" />
                               Uploading...
                             </>
                           ) : (
                             <>
-                              <Upload className="h-4 w-4 mr-2" />
+                              <Upload className="size-4 mr-2" />
                               Upload
                             </>
                           )}
@@ -1419,7 +1419,7 @@ export function Profile() {
           <CardContent className="pt-6">
             <div className="flex flex-col md:flex-row gap-6">
               <div className="flex-shrink-0">
-                <Avatar className="h-40 w-40 border-4 border-card">
+                <Avatar className="size-40 border-4 border-card">
                   <AvatarImage
                     key={pickProfileImageUrl(localUser as Record<string, unknown>) || localUser?.profileImage}
                     src={resolvePublicAssetUrl(pickProfileImageUrl(localUser as Record<string, unknown>) || localUser?.profileImage, true)}
@@ -1433,14 +1433,14 @@ export function Profile() {
                     <h1 className="text-3xl font-bold mb-2">{getDisplayName(localUser)}</h1>
                     <p className="text-muted-foreground mb-3">{localUser?.headline || "Add a headline in profile setup"}</p>
                     <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-1"><MapPin className="h-4 w-4" />{localUser?.location || "Location not provided"}</div>
-                      <div className="flex items-center gap-1"><Mail className="h-4 w-4" />{localUser?.email || "Email not provided"}</div>
-                      <div className="flex items-center gap-1"><Calendar className="h-4 w-4" />Joined {localUser?.joinDate || "Join date not provided"}</div>
+                      <div className="flex items-center gap-1"><MapPin className="size-4" />{localUser?.location || "Location not provided"}</div>
+                      <div className="flex items-center gap-1"><Mail className="size-4" />{localUser?.email || "Email not provided"}</div>
+                      <div className="flex items-center gap-1"><Calendar className="size-4" />Joined {localUser?.joinDate || "Join date not provided"}</div>
                     </div>
                   </div>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={handleEditProfile}>
-                      <Pencil className="h-4 w-4 mr-1" /> Edit Profile
+                      <Pencil className="size-4 mr-1" /> Edit Profile
                     </Button>
                     <Button variant="outline">Message</Button>
                   </div>
@@ -1520,7 +1520,7 @@ export function Profile() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <BookOpen className="h-5 w-5" />
+                  <BookOpen className="size-5" />
                   Academic Profile
                 </CardTitle>
               </CardHeader>
@@ -1561,7 +1561,7 @@ export function Profile() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Award className="h-5 w-5" />
+                  <Award className="size-5" />
                   Scholarship Eligibility
                 </CardTitle>
               </CardHeader>
@@ -1581,7 +1581,7 @@ export function Profile() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <DollarSign className="h-5 w-5" />
+                  <DollarSign className="size-5" />
                   Financial Profile
                 </CardTitle>
               </CardHeader>

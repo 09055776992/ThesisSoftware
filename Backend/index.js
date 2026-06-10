@@ -7,6 +7,7 @@ import jwt from "jsonwebtoken";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import mongoose from "mongoose";
 import { fileURLToPath } from "url";
 import { getDb } from "./db.js";
 import { rankScholarships } from "./matching-algorithms.js";
@@ -15,6 +16,34 @@ import * as eligibilityMatching from "./eligibility-matching.js";
 import { sendOTPEmail, sendWelcomeEmail, sendScreeningEmail, sendNewScholarshipEmail, maskEmail } from "./services/emailService.js";
 import { generateOTP, getOTPExpiry } from "./utils/otpUtils.js";
 import { analyzeDocumentFile } from "./services/aiService.js";
+import {
+  registerProvider,
+  loginProvider,
+  getProviderProfile,
+  approveProvider,
+  rejectProvider,
+  deactivateProvider,
+  reactivateProvider,
+  getAllProviders,
+} from "./controller/provider-auth.controller.js";
+import {
+  getProviderScholarships,
+  getProviderScholarshipById,
+  createProviderScholarship,
+  updateProviderScholarship,
+  deleteProviderScholarship,
+  getProviderApplications,
+  getApplicantsByScholarship,
+  approveApplicationByProvider,
+  rejectApplicationByProvider,
+  qualifyApplicationByProvider,
+  getProviderDashboardStats,
+  getProviderMe,
+  getProviderProfileHandler,
+  updateProviderProfile,
+  uploadProviderAvatar,
+} from "./controller/provider.controller.js";
+import { requireAdmin, requireProvider } from "./middleware/auth.middleware.js";
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -87,6 +116,32 @@ const uploadAvatar = multer({
       cb(null, true);
     } else {
       cb(new Error('Only image files (JPEG, PNG, GIF, WebP) are allowed'), false);
+    }
+  }
+});
+
+// Provider avatar upload configuration
+const providerAvatarStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, "uploads", "providers");
+    fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".jpg";
+    cb(null, `${req.providerId}-${Date.now()}${ext}`);
+  }
+});
+
+const providerAvatarUpload = multer({
+  storage: providerAvatarStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPG and PNG files are allowed'), false);
     }
   }
 });
@@ -678,9 +733,25 @@ app.post("/api/scholarships", async (req, res) => {
   try {
     const db = await getDb();
     const payload = req.body ?? {};
+    const name = String(payload.name || "").trim();
+    const provider = String(payload.provider || payload.organization || "").trim();
+
+    // Check for existing scholarship with same name and provider (case-insensitive)
+    const existing = await db.collection("scholarships").findOne({
+      name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: "i" },
+      provider: { $regex: `^${provider.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: "i" },
+    });
+
+    if (existing) {
+      return res.status(409).json({ error: "A scholarship with this name from this provider already exists." });
+    }
+
     const result = await db.collection("scholarships").insertOne(payload);
     res.status(201).json({ insertedId: result.insertedId });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: "A scholarship with this name from this provider already exists." });
+    }
     res.status(500).json({ error: "Failed to create scholarship." });
   }
 });
@@ -720,9 +791,22 @@ app.post("/api/admin/scholarships", async (req, res) => {
   try {
     const db = await getDb();
     const payload = req.body ?? {};
+    const name = String(payload.name || "").trim();
+    const provider = String(payload.provider || payload.organization || "").trim();
+
+    // Check for existing scholarship with same name and provider (case-insensitive)
+    const existing = await db.collection("scholarships").findOne({
+      name: { $regex: `^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: "i" },
+      provider: { $regex: `^${provider.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: "i" },
+    });
+
+    if (existing) {
+      return res.status(409).json({ error: "A scholarship with this name from this provider already exists." });
+    }
+
     const scholarship = {
-      name: String(payload.name || "").trim(),
-      provider: String(payload.provider || payload.organization || "").trim(),
+      name,
+      provider,
       organization: String(payload.organization || payload.provider || "").trim(),
       amount: Number(payload.amount || 0),
       deadline: payload.deadline ? new Date(payload.deadline) : new Date(),
@@ -748,6 +832,9 @@ app.post("/api/admin/scholarships", async (req, res) => {
 
     res.status(201).json({ data: savedScholarship });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: "A scholarship with this name from this provider already exists." });
+    }
     res.status(500).json({ error: "Failed to create scholarship." });
   }
 });
@@ -1569,70 +1656,6 @@ app.post("/api/auth/provider/signup", async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ error: "Failed to create provider account." });
-  }
-});
-
-app.get("/api/provider/scholarships", async (req, res) => {
-  try {
-    const db = await getDb();
-    const providerEmail = req.query.email ? String(req.query.email).trim().toLowerCase() : null;
-    
-    if (!providerEmail) {
-      return res.status(400).json({ error: "Provider email is required." });
-    }
-
-    const scholarships = await db
-      .collection("scholarships")
-      .find({ provider: providerEmail })
-      .toArray();
-    
-    res.json({ data: scholarships });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch provider scholarships." });
-  }
-});
-
-app.get("/api/provider/applications", async (req, res) => {
-  try {
-    const db = await getDb();
-    const providerEmail = req.query.email ? String(req.query.email).trim().toLowerCase() : null;
-    
-    if (!providerEmail) {
-      return res.status(400).json({ error: "Provider email is required." });
-    }
-
-    // This assumes applications have a provider field linking to the scholarship provider
-    const applications = await db
-      .collection("applications")
-      .find({ providerEmail })
-      .toArray();
-    
-    res.json({ data: applications });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch provider applications." });
-  }
-});
-
-app.post("/api/provider/scholarships", async (req, res) => {
-  try {
-    const db = await getDb();
-    const payload = req.body ?? {};
-    const providerEmail = String(payload.providerEmail || "").trim().toLowerCase();
-
-    if (!providerEmail) {
-      return res.status(400).json({ error: "Provider email is required." });
-    }
-
-    const scholarship = {
-      ...payload,
-      provider: providerEmail,
-      createdAt: new Date(),
-    };
-
-    const result = await db.collection("scholarships").insertOne(scholarship);
-    res.status(201).json({ insertedId: result.insertedId });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to create scholarship." });
   }
 });
 
@@ -4771,6 +4794,95 @@ app.get("/api/applications/:id/my-score", async (req, res) => {
   }
 });
 
+// ============================================================
+// PROVIDER AUTH ROUTES
+// ============================================================
+
+// POST /api/provider/register — submit account request (no auth required)
+app.post("/api/provider/register", registerProvider);
+
+// POST /api/provider/login — login after approval (no auth required)
+app.post("/api/provider/login", loginProvider);
+
+// GET /api/provider/me — get current provider identity (requires provider auth)
+app.get("/api/provider/me", requireProvider, getProviderMe);
+
+// GET /api/provider/profile — get full provider profile for settings page
+app.get("/api/provider/profile", requireProvider, getProviderProfileHandler);
+
+// PUT /api/provider/profile — update provider profile fields
+app.put("/api/provider/profile", requireProvider, updateProviderProfile);
+
+// POST /api/provider/upload-avatar — upload provider profile picture
+app.post("/api/provider/upload-avatar", requireProvider, providerAvatarUpload.single("avatar"), uploadProviderAvatar);
+// Multer error handler for the avatar upload route (must be a 4-arg middleware directly after the route)
+// eslint-disable-next-line no-unused-vars
+app.use("/api/provider/upload-avatar", (err, req, res, next) => {
+  if (err && err.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({ success: false, message: "File size must not exceed 5 MB" });
+  }
+  if (err && err.message) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+  next(err);
+});
+
+// GET /api/admin/providers — list all providers (requires admin auth)
+app.get("/api/admin/providers", requireAdmin, getAllProviders);
+
+// PATCH /api/admin/providers/:id/approve — approve a provider (requires admin auth)
+app.patch("/api/admin/providers/:id/approve", requireAdmin, approveProvider);
+
+// PATCH /api/admin/providers/:id/reject — reject a provider (requires admin auth)
+app.patch("/api/admin/providers/:id/reject", requireAdmin, rejectProvider);
+
+// PATCH /api/admin/providers/:id/deactivate — deactivate a provider (requires admin auth)
+app.patch("/api/admin/providers/:id/deactivate", requireAdmin, deactivateProvider);
+
+// PATCH /api/admin/providers/:id/reactivate — reactivate a provider (requires admin auth)
+app.patch("/api/admin/providers/:id/reactivate", requireAdmin, reactivateProvider);
+
+// ============================================================
+// PROVIDER SCHOLARSHIP ROUTES
+// ============================================================
+
+// GET /api/provider/dashboard/stats — provider dashboard stats
+app.get("/api/provider/dashboard/stats", requireProvider, getProviderDashboardStats);
+
+// GET /api/provider/scholarships — list provider's own scholarships
+app.get("/api/provider/scholarships", requireProvider, getProviderScholarships);
+
+// POST /api/provider/scholarships — create a new scholarship
+app.post("/api/provider/scholarships", requireProvider, createProviderScholarship);
+
+// GET /api/provider/scholarships/:id — get single scholarship (must own it)
+app.get("/api/provider/scholarships/:id", requireProvider, getProviderScholarshipById);
+
+// PUT /api/provider/scholarships/:id — update scholarship (must own it)
+app.put("/api/provider/scholarships/:id", requireProvider, updateProviderScholarship);
+
+// DELETE /api/provider/scholarships/:id — delete scholarship (must own it)
+app.delete("/api/provider/scholarships/:id", requireProvider, deleteProviderScholarship);
+
+// ============================================================
+// PROVIDER APPLICATION ROUTES
+// ============================================================
+
+// GET /api/provider/applications — all applications for provider's scholarships
+app.get("/api/provider/applications", requireProvider, getProviderApplications);
+
+// GET /api/provider/applications/:scholarshipId/applicants — applicants for one scholarship
+app.get("/api/provider/applications/:scholarshipId/applicants", requireProvider, getApplicantsByScholarship);
+
+// PATCH /api/provider/applications/:id/approve — approve an application
+app.patch("/api/provider/applications/:id/approve", requireProvider, approveApplicationByProvider);
+
+// PATCH /api/provider/applications/:id/reject — reject an application
+app.patch("/api/provider/applications/:id/reject", requireProvider, rejectApplicationByProvider);
+
+// PATCH /api/provider/applications/:id/qualify — qualify for final screening
+app.patch("/api/provider/applications/:id/qualify", requireProvider, qualifyApplicationByProvider);
+
 // Handle unknown /api routes
 app.use('/api', (req, res) => {
   res.status(404).json({
@@ -4787,7 +4899,17 @@ app.use((err, req, res, next) => {
 });
 
 const port = Number(process.env.PORT || 4000);
-app.listen(port, () => {
+app.listen(port, async () => {
+  // Connect Mongoose so controller-based routes (provider, admin) can use User/Scholarship/Application models
+  try {
+    const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGO_URL || process.env.DATABASE_URL;
+    const mongooseDbName = process.env.MONGODB_DB || process.env.MONGO_DB || "thesis_software";
+    await mongoose.connect(mongoUri, { dbName: mongooseDbName });
+    console.log(`[Mongoose] ✅ Connected to MongoDB (db: ${mongooseDbName})`);
+  } catch (err) {
+    console.error("[Mongoose] ❌ Connection failed:", err.message);
+  }
+
   console.log(`API listening on ${port}`);
   const emailUser = process.env.EMAIL_USER || process.env.GMAIL_USER;
   const emailPass = process.env.EMAIL_PASS || process.env.GMAIL_PASS;

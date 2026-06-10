@@ -3,7 +3,7 @@ import { Outlet, useNavigate, useLocation } from "react-router";
 import { AdminAuthModal } from "../pages/admin-auth/admin-auth-modal";
 import { ProviderAuthModal } from "../pages/provider-auth/provider-auth-modal";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
-import { clearStoredUser, saveStoredUser, getStoredUser, getAuthToken } from "../lib/user-storage";
+import { saveRoleSession, saveStoredUser, getStoredUser, getAuthToken } from "../lib/user-storage";
 import { fetchUserProfile, pickProfileImageUrl } from "../lib/api-client";
 
 export function RootLayout() {
@@ -30,11 +30,17 @@ export function RootLayout() {
     const finishRestore = (profileUser: typeof user) => {
       // Only redirect authenticated users if they're NOT on the landing page
       if (token && profileUser && !isLandingPage) {
-        if (profileUser.userType === "admin") {
+        const path = location.pathname;
+        if (profileUser.userType === "admin" && !path.startsWith("/admin")) {
           navigate("/admin", { replace: true });
-        } else if (profileUser.userType === "provider") {
+        } else if (profileUser.userType === "provider" && !path.startsWith("/provider")) {
           navigate("/provider/dashboard", { replace: true });
-        } else {
+        } else if (
+          profileUser.userType !== "admin" &&
+          profileUser.userType !== "provider" &&
+          !path.startsWith("/dashboard") &&
+          path !== "/profile-setup"
+        ) {
           navigate("/dashboard", { replace: true });
         }
       }
@@ -42,6 +48,12 @@ export function RootLayout() {
     };
 
     if (!token || !user?.email) {
+      finishRestore(user);
+      return;
+    }
+
+    // Admin/provider sessions use role-specific auth — do not load student profile (can overwrite userType)
+    if (user.userType === "admin" || user.userType === "provider") {
       finishRestore(user);
       return;
     }
@@ -61,29 +73,29 @@ export function RootLayout() {
         finishRestore(getStoredUser());
       })
       .catch(() => finishRestore(user));
-  }, [navigate, isLandingPage]);
+  }, [navigate, isLandingPage, location.pathname]);
 
   // Don't render until auth is restored to prevent flash, except on landing page
   if (!isAuthRestored && !isLandingPage) {
     return null;
   }
 
-  const handleAdminSuccess = (user: Record<string, unknown>) => {
-    clearStoredUser();
-    saveStoredUser({
+  const handleAdminSuccess = (user: Record<string, unknown>, token?: string) => {
+    const sessionToken = token || getAuthToken();
+    saveRoleSession(sessionToken, {
       email: user.email as string,
-      fullName: user.fullName as string || "Admin",
+      fullName: (user.fullName as string) || "Admin",
       userType: "admin",
     });
     setShowAdminModal(false);
     navigate("/admin");
   };
 
-  const handleProviderSuccess = (user: Record<string, unknown>) => {
-    clearStoredUser();
-    saveStoredUser({
+  const handleProviderSuccess = (user: Record<string, unknown>, token?: string) => {
+    const sessionToken = token || getAuthToken();
+    saveRoleSession(sessionToken, {
       email: user.email as string,
-      fullName: user.fullName as string || "Provider",
+      fullName: (user.fullName as string) || "Provider",
       userType: "provider",
     });
     setShowProviderModal(false);

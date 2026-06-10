@@ -44,7 +44,7 @@ export function AdminModeration() {
                 <p className="text-sm text-muted-foreground">Pending Review</p>
                 <p className="text-3xl font-bold font-mono">24</p>
               </div>
-              <AlertTriangle className="h-8 w-8 text-amber-500" />
+              <AlertTriangle className="size-8 text-amber-500" />
             </div>
           </CardContent>
         </Card>
@@ -55,7 +55,7 @@ export function AdminModeration() {
                 <p className="text-sm text-muted-foreground">Approved</p>
                 <p className="text-3xl font-bold font-mono">145</p>
               </div>
-              <CheckCircle className="h-8 w-8 text-accent" />
+              <CheckCircle className="size-8 text-accent" />
             </div>
           </CardContent>
         </Card>
@@ -66,7 +66,7 @@ export function AdminModeration() {
                 <p className="text-sm text-muted-foreground">Removed</p>
                 <p className="text-3xl font-bold font-mono">38</p>
               </div>
-              <XCircle className="h-8 w-8 text-destructive" />
+              <XCircle className="size-8 text-destructive" />
             </div>
           </CardContent>
         </Card>
@@ -94,7 +94,7 @@ export function AdminModeration() {
                       </div>
                       <p className="text-muted-foreground mb-3">{item.content}</p>
                       <div className="flex items-center gap-2 text-sm">
-                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                        <AlertTriangle className="size-4 text-amber-500" />
                         <span>
                           Reported by <span className="font-semibold">{item.reportedBy}</span> for:{" "}
                           <span className="text-destructive">{item.reason}</span>
@@ -104,11 +104,11 @@ export function AdminModeration() {
                   </div>
                   <div className="flex gap-3">
                     <Button className="bg-accent">
-                      <CheckCircle className="h-4 w-4 mr-2" />
+                      <CheckCircle className="size-4 mr-2" />
                       Approve Content
                     </Button>
                     <Button variant="destructive">
-                      <XCircle className="h-4 w-4 mr-2" />
+                      <XCircle className="size-4 mr-2" />
                       Remove Content
                     </Button>
                     <Button variant="outline">Warn User</Button>

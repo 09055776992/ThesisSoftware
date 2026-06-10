@@ -155,6 +155,42 @@ const applicationSchema = new Schema(
       type: String,
       trim: true,
     },
+
+    // Who approved/rejected this application and their role
+    // Replaces the old admin-only approval — now done by providers
+    approvedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    approvedByRole: {
+      type: String,
+      enum: ["admin", "provider", null],
+      default: null,
+    },
+    approvedAt: {
+      type: Date,
+      default: null,
+    },
+    rejectedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    rejectedByRole: {
+      type: String,
+      enum: ["admin", "provider", null],
+      default: null,
+    },
+    rejectedAt: {
+      type: Date,
+      default: null,
+    },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      default: null,
+    },
   },
   {
     timestamps: true,

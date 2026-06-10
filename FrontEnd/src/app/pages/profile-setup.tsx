@@ -392,20 +392,20 @@ export function ProfileSetup() {
               <div className="space-y-6">
                 <div className="flex flex-col items-center">
                   <div className="relative">
-                    <Avatar className="h-32 w-32">
+                    <Avatar className="size-32">
                       <AvatarImage
                         key={profileImage}
                         src={resolvePublicAssetUrl(profileImage, true)}
                       />
                       <AvatarFallback className="bg-muted">
-                        <Camera className="h-12 w-12 text-muted-foreground" />
+                        <Camera className="size-12 text-muted-foreground" />
                       </AvatarFallback>
                     </Avatar>
                     <label
                       htmlFor="photo-upload"
                       className="absolute bottom-0 right-0 bg-primary text-primary-foreground p-2 rounded-full cursor-pointer hover:bg-primary/90"
                     >
-                      <Camera className="h-4 w-4" />
+                      <Camera className="size-4" />
                     </label>
                     <input
                       id="photo-upload"

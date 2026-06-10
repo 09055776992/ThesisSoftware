@@ -1,5 +1,6 @@
 import React, { Fragment, useEffect, type ReactNode } from 'react';
 import { RouterProvider } from 'react-router';
+import { MotionConfig } from 'motion/react';
 import { router } from './routes';
 import { Toaster } from './components/ui/sonner';
 import { getStoredUser } from './lib/user-storage';
@@ -30,10 +31,12 @@ function ThemeProvider({ children }: { children: ReactNode }) {
 
 function App() {
   return (
-    <ThemeProvider>
-      <RouterProvider router={router} />
-      <Toaster />
-    </ThemeProvider>
+    <MotionConfig reducedMotion="user">
+      <ThemeProvider>
+        <RouterProvider router={router} />
+        <Toaster />
+      </ThemeProvider>
+    </MotionConfig>
   );
 }
 

@@ -69,7 +69,7 @@ export function ApplicationStatusTracker({
       id: 1,
       title: "Application Submitted",
       description: "Profile documents linked successfully",
-      icon: <CheckCircle className="h-5 w-5" />,
+      icon: <CheckCircle className="size-5" />,
       status: currentStep >= 1 ? "completed" : "pending",
       timestamp: formatDate(submittedAt),
       subLabel: currentStep === 1 ? "Pending admin review" : null,
@@ -78,7 +78,7 @@ export function ApplicationStatusTracker({
       id: 2,
       title: "Under Evaluation",
       description: "System analyzing eligibility & ranking",
-      icon: <Loader2 className="h-5 w-5" />,
+      icon: <Loader2 className="size-5" />,
       status: currentStep === 2 ? "current" : currentStep > 2 ? "completed" : "pending",
       timestamp: currentStep > 2 ? "Completed" : null,
       subLabel: currentStep === 2 ? "Gale-Shapley matching in progress" : null,
@@ -87,7 +87,7 @@ export function ApplicationStatusTracker({
       id: 3,
       title: "Qualified for Final Screening",
       description: "Stage 1 approved - specific docs required",
-      icon: <FileCheck className="h-5 w-5" />,
+      icon: <FileCheck className="size-5" />,
       status: currentStep === 3 ? "current" : currentStep > 3 ? "completed" : "pending",
       timestamp: finalScreening?.submissionDeadline
         ? formatDate(finalScreening.submissionDeadline)
@@ -106,7 +106,7 @@ export function ApplicationStatusTracker({
       id: 4,
       title: "Slot Secured & Awarded",
       description: "Scholarship officially granted",
-      icon: <Award className="h-5 w-5" />,
+      icon: <Award className="size-5" />,
       status: currentStep === 4 ? "current" : "pending",
       timestamp: applicationStatus === "Approved" ? new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null,
       subLabel: applicationStatus === "Approved" ? "Congratulations!" : null,
@@ -118,8 +118,8 @@ export function ApplicationStatusTracker({
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg p-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-            <Clock className="h-5 w-5 text-red-600" />
+          <div className="size-10 rounded-full bg-red-100 flex items-center justify-center">
+            <Clock className="size-5 text-red-600" />
           </div>
           <div>
             <h4 className="font-semibold text-red-800">Application Not Selected</h4>
@@ -171,7 +171,7 @@ export function ApplicationStatusTracker({
               >
                 {/* Circle Icon */}
                 <div
-                  className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
+                  className={`relative z-10 size-10 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
                     isCompleted
                       ? "bg-green-500 text-white"
                       : isCurrent
@@ -180,7 +180,7 @@ export function ApplicationStatusTracker({
                   }`}
                 >
                   {isCompleted ? (
-                    <CheckCircle className="h-5 w-5" />
+                    <CheckCircle className="size-5" />
                   ) : (
                     step.icon
                   )}
@@ -227,7 +227,7 @@ export function ApplicationStatusTracker({
                         isCurrent ? "text-blue-600 animate-pulse" : "text-muted-foreground"
                       }`}
                     >
-                      {isCurrent && <span className="inline-block w-1.5 h-1.5 bg-blue-500 rounded-full mr-1.5 animate-pulse" />}
+                      {isCurrent && <span className="inline-block size-1.5 bg-blue-500 rounded-full mr-1.5 animate-pulse" />}
                       {step.subLabel}
                     </p>
                   )}

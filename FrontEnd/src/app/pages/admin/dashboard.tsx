@@ -187,7 +187,7 @@ export function AdminDashboard() {
                     <p className="text-sm text-accent">{stat.change}</p>
                   </div>
                   <div className={`p-3 rounded-lg bg-muted ${stat.color}`}>
-                    <Icon className="h-6 w-6" />
+                    <Icon className="size-6" />
                   </div>
                 </div>
               </CardContent>
@@ -277,7 +277,7 @@ export function AdminDashboard() {
             <div className="space-y-4">
               {recentActivity.map((activity, index) => (
                 <div key={index} className="flex items-start gap-3">
-                  <div className="h-2 w-2 rounded-full bg-primary mt-2" />
+                  <div className="size-2 rounded-full bg-primary mt-2" />
                   <div className="flex-1">
                     <p className="text-sm">
                       <span className="font-semibold">{activity.user}</span> {activity.action}
@@ -299,22 +299,22 @@ export function AdminDashboard() {
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <button className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
-              <Users className="h-8 w-8 text-primary mb-2" />
+              <Users className="size-8 text-primary mb-2" />
               <p className="font-semibold">Manage Users</p>
               <p className="text-xs text-muted-foreground">View and edit user accounts</p>
             </button>
             <button className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
-              <Award className="h-8 w-8 text-accent mb-2" />
+              <Award className="size-8 text-accent mb-2" />
               <p className="font-semibold">Add Scholarship</p>
               <p className="text-xs text-muted-foreground">Create new scholarship</p>
             </button>
             <button className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
-              <CheckCircle className="h-8 w-8 text-green-600 mb-2" />
+              <CheckCircle className="size-8 text-green-600 mb-2" />
               <p className="font-semibold">Review Applications</p>
               <p className="text-xs text-muted-foreground">Process pending applications</p>
             </button>
             <button className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
-              <TrendingUp className="h-8 w-8 text-purple-600 mb-2" />
+              <TrendingUp className="size-8 text-purple-600 mb-2" />
               <p className="font-semibold">View Analytics</p>
               <p className="text-xs text-muted-foreground">Detailed reports</p>
             </button>

@@ -107,7 +107,7 @@ function PasswordField({ id, label, value, onChange, visible, onToggle, placehol
           className="absolute top-1/2 right-1 -translate-y-1/2"
           aria-label={visible ? `Hide ${label}` : `Show ${label}`}
         >
-          {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
         </Button>
       </div>
     </div>

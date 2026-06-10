@@ -4,12 +4,13 @@ import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Eye, EyeOff } from "lucide-react";
-import { clearStoredUser, saveAuthToken, saveStoredUser } from "../../lib/user-storage";
+import { clearStoredUser, saveRoleSession } from "../../lib/user-storage";
+import { API_URL } from "../../lib/api-client";
 
 interface ProviderSignInProps {
   onSwitch: () => void;
   onClose: () => void;
-  onSuccess?: (user: Record<string, unknown>) => void;
+  onSuccess?: (user: Record<string, unknown>, token?: string) => void;
 }
 
 export function ProviderSignIn({ onSwitch, onClose, onSuccess }: ProviderSignInProps) {
@@ -27,9 +28,9 @@ export function ProviderSignIn({ onSwitch, onClose, onSuccess }: ProviderSignInP
 
     try {
       setIsSubmitting(true);
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+      const API_BASE_URL = API_URL;
       
-      const response = await fetch(`${API_BASE_URL}/api/auth/provider/signin`, {
+      const response = await fetch(`${API_BASE_URL}/api/provider/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -40,18 +41,25 @@ export function ProviderSignIn({ onSwitch, onClose, onSuccess }: ProviderSignInP
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.error || "Sign in failed");
+        if (payload.pending) {
+          throw new Error("Your account is pending admin approval. You will receive an email once it has been reviewed.");
+        }
+        if (payload.deactivated) {
+          throw new Error("Your provider account has been deactivated. Please contact the administrator.");
+        }
+        throw new Error(payload.message || payload.error || "Sign in failed");
       }
 
       const result = await response.json();
-      clearStoredUser();
-      saveAuthToken(result.token ?? null);
-      saveStoredUser({
+      const token = result.token ?? "";
+      saveRoleSession(token, {
         email: result.user.email,
-        fullName: result.user.fullName,
+        fullName: result.user.name,
         userType: "provider",
+        organizationName: result.user.organizationName,
+        position: result.user.position,
       });
-      onSuccess?.(result.user);
+      onSuccess?.(result.user, token);
       onClose();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to sign in");
@@ -96,7 +104,7 @@ export function ProviderSignIn({ onSwitch, onClose, onSuccess }: ProviderSignInP
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>
             </div>
           </div>

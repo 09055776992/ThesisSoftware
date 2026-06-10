@@ -79,8 +79,7 @@ export const calculateMatchScore = (student, scholarship) => {
     ? requiredEducationRaw
     : (typeof requiredEducationRaw === "string" ? [requiredEducationRaw] : []);
   const requiredEducationNormalized = requiredEducationLevels
-    .map(normalizeEducationLevel)
-    .filter(Boolean);
+    .flatMap((level) => { const result = normalizeEducationLevel(level); return result ? [result] : []; });
 
   let eduMatch = false;
   if (requiredEducationNormalized.length === 0 || requiredEducationNormalized.includes("all")) {

@@ -4,12 +4,12 @@ import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Eye, EyeOff } from "lucide-react";
-import { clearStoredUser, saveAuthToken, saveStoredUser } from "../../lib/user-storage";
+import { saveRoleSession } from "../../lib/user-storage";
 
 interface AdminSignUpProps {
   onSwitch: () => void;
   onClose: () => void;
-  onSuccess?: (user: Record<string, unknown>) => void;
+  onSuccess?: (user: Record<string, unknown>, token?: string) => void;
 }
 
 export function AdminSignUp({ onSwitch, onClose, onSuccess }: AdminSignUpProps) {
@@ -53,14 +53,13 @@ export function AdminSignUp({ onSwitch, onClose, onSuccess }: AdminSignUpProps) 
       }
 
       const result = await response.json();
-      clearStoredUser();
-      saveAuthToken(result.token ?? null);
-      saveStoredUser({
+      const token = result.token ?? "";
+      saveRoleSession(token, {
         email: result.user.email,
         fullName: result.user.fullName,
         userType: "admin",
       });
-      onSuccess?.(result.user);
+      onSuccess?.(result.user, token);
       onClose();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to create admin account");
@@ -116,7 +115,7 @@ export function AdminSignUp({ onSwitch, onClose, onSuccess }: AdminSignUpProps) 
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>
             </div>
           </div>
@@ -137,7 +136,7 @@ export function AdminSignUp({ onSwitch, onClose, onSuccess }: AdminSignUpProps) 
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showConfirmPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>
             </div>
           </div>

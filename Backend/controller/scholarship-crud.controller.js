@@ -36,9 +36,21 @@ export const createScholarship = async (req, res) => {
       eligibilityCriteria,
     } = req.body;
 
+    // Check for existing scholarship with same name and provider (case-insensitive)
+    const normalizedName = name.trim();
+    const normalizedProvider = (provider || organization || "").trim();
+    const existing = await Scholarship.findOne({
+      name: { $regex: `^${normalizedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: "i" },
+      provider: { $regex: `^${normalizedProvider.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: "i" },
+    });
+
+    if (existing) {
+      return res.status(409).json({ error: "A scholarship with this name from this provider already exists." });
+    }
+
     const scholarship = new Scholarship({
-      name,
-      provider,
+      name: normalizedName,
+      provider: normalizedProvider,
       organization,
       amount: Number(amount),
       deadline: new Date(deadline),
@@ -54,6 +66,9 @@ export const createScholarship = async (req, res) => {
     const saved = await scholarship.save();
     res.status(201).json({ data: saved });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ error: "A scholarship with this name from this provider already exists." });
+    }
     res.status(400).json({ message: error.message });
   }
 };

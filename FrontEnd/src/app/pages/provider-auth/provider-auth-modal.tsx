@@ -11,14 +11,14 @@ import { ProviderSignUp } from "./provider-signup";
 interface ProviderAuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: (user: Record<string, unknown>) => void;
+  onSuccess?: (user: Record<string, unknown>, token?: string) => void;
 }
 
 export function ProviderAuthModal({ isOpen, onClose, onSuccess }: ProviderAuthModalProps) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
 
-  const handleSuccess = (user: Record<string, unknown>) => {
-    onSuccess?.(user);
+  const handleSuccess = (user: Record<string, unknown>, token?: string) => {
+    onSuccess?.(user, token);
   };
 
   return (

@@ -8,6 +8,10 @@ const userSchema = new mongoose.Schema(
       unique: true,
       trim: true,
     },
+    fullName: {
+      type: String,
+      trim: true,
+    },
     email: {
       type: String,
       required: true,
@@ -33,6 +37,26 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      enum: ["student", "customer", "admin", "provider"],
+    },
+
+    // Provider-specific details (only populated when role === "provider")
+    providerDetails: {
+      organizationName: { type: String, default: null, trim: true },
+      position: { type: String, default: null, trim: true },
+      isApproved: { type: Boolean, default: false },
+      isActive: { type: Boolean, default: true },
+      approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      approvedAt: { type: Date, default: null },
+      rejectedAt: { type: Date, default: null },
+      rejectionReason: { type: String, default: null },
+      requestedAt: { type: Date, default: null },
+      deactivatedAt: { type: Date, default: null },
+      // Extended provider profile fields (Requirement 7)
+      phone: { type: String, default: null, trim: true, maxlength: 30 },
+      officeAddress: { type: String, default: null, trim: true, maxlength: 300 },
+      description: { type: String, default: null, trim: true, maxlength: 2000 },
+      website: { type: String, default: null, trim: true, maxlength: 2048 },
     },
     loginAttempts: {
       type: Number,

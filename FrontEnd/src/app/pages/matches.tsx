@@ -45,7 +45,7 @@ function ShapBar({ contribution }: { contribution: ShapContribution }) {
 
   return (
     <div className="flex items-center gap-2 text-xs">
-      <ImpactIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <ImpactIcon className="size-3 shrink-0 text-muted-foreground" />
       <span className="w-[110px] shrink-0 truncate text-muted-foreground">
         {contribution.factor}
       </span>
@@ -254,7 +254,7 @@ export function Matches() {
           <>
             {rankedMatches.length === 0 && (
               <div className="mb-8 flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-gray-50 py-14 px-6 text-center">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-4xl">
+                <div className="mb-4 flex size-16 items-center justify-center rounded-full bg-blue-50 text-4xl">
                   🔍
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">No Perfect Matches Right Now</h3>
@@ -331,11 +331,11 @@ export function Matches() {
                             </div>
                             <div className="flex items-center gap-2 mt-3">
                               <Button size="sm" className="flex-1 h-7 text-xs bg-blue-600 hover:bg-blue-700">
-                                <ExternalLink className="h-3 w-3 mr-1" />
+                                <ExternalLink className="size-3 mr-1" />
                                 View Details
                               </Button>
-                              <Button size="sm" variant="outline" className="h-7 w-7 p-0 shrink-0">
-                                <Bookmark className="h-3.5 w-3.5" />
+                              <Button size="sm" variant="outline" className="size-7 p-0 shrink-0">
+                                <Bookmark className="size-3.5" />
                               </Button>
                             </div>
                           </div>
@@ -369,7 +369,7 @@ export function Matches() {
                       {/* #1 Recommendation Badge — shown only for top-ranked */}
                       {s.isTopRecommendation && (
                         <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 mt-1">
-                          <Star className="h-4 w-4 text-blue-600 shrink-0 mt-0.5 fill-blue-600" />
+                          <Star className="size-4 text-blue-600 shrink-0 mt-0.5 fill-blue-600" />
                           <p className="text-xs text-blue-800">
                             <span className="font-semibold">System Recommendation:</span>{" "}
                             Optimized to provide the highest financial coverage based on your household income and economic dependency.
@@ -388,7 +388,7 @@ export function Matches() {
                 <div className="flex items-center gap-3 mb-5">
                   <div className="flex-1 border-t border-gray-200" />
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 border border-orange-200 rounded-full">
-                    <AlertCircle className="h-4 w-4 text-orange-500" />
+                    <AlertCircle className="size-4 text-orange-500" />
                     <span className="text-sm font-semibold text-orange-700">Other Active Scholarship Programs</span>
                   </div>
                   <div className="flex-1 border-t border-gray-200" />
@@ -436,7 +436,7 @@ export function Matches() {
                           <div className="space-y-1 mt-2">
                             {s.eligibility.unmetCriteria.slice(0, 3).map((criterion: string, idx: number) => (
                               <div key={idx} className="flex items-start gap-1.5 text-xs text-red-600">
-                                <XCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                <XCircle className="size-3.5 shrink-0 mt-0.5" />
                                 <span className="leading-snug">{criterion}</span>
                               </div>
                             ))}

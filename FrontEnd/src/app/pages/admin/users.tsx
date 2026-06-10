@@ -92,11 +92,11 @@ export function AdminUsers() {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <CardTitle>
               All Users ({filteredUsers.length})
-              {loading && <Loader2 className="inline h-4 w-4 ml-2 animate-spin" />}
+              {loading && <Loader2 className="inline size-4 ml-2 animate-spin" />}
             </CardTitle>
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1 sm:w-[300px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                 <Input
                   placeholder="Search users..."
                   className="pl-9"
@@ -128,7 +128,7 @@ export function AdminUsers() {
                 </SelectContent>
               </Select>
               <Button disabled={loading}>
-                <Download className="h-4 w-4 mr-2" />
+                <Download className="size-4 mr-2" />
                 Export
               </Button>
             </div>
@@ -137,7 +137,7 @@ export function AdminUsers() {
         <CardContent>
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <Loader2 className="size-8 animate-spin text-muted-foreground" />
             </div>
           ) : filteredUsers.length === 0 ? (
             <div className="text-center py-8">
@@ -196,20 +196,20 @@ export function AdminUsers() {
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="sm">
-                            <MoreVertical className="h-4 w-4" />
+                            <MoreVertical className="size-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={() => setSelectedUser(user)}>
-                            <Eye className="h-4 w-4 mr-2" />
+                            <Eye className="size-4 mr-2" />
                             View Details
                           </DropdownMenuItem>
                           <DropdownMenuItem>
-                            <Edit className="h-4 w-4 mr-2" />
+                            <Edit className="size-4 mr-2" />
                             Edit User
                           </DropdownMenuItem>
                           <DropdownMenuItem className="text-destructive">
-                            <UserX className="h-4 w-4 mr-2" />
+                            <UserX className="size-4 mr-2" />
                             Suspend User
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -230,7 +230,7 @@ export function AdminUsers() {
             <>
               <DialogHeader>
                 <div className="flex items-center gap-4 mb-4">
-                  <Avatar className="h-20 w-20">
+                  <Avatar className="size-20">
                     <AvatarImage src={resolvePublicAssetUrl(selectedUser.avatar)} />
                     <AvatarFallback>{initialsFromName(selectedUser.name)}</AvatarFallback>
                   </Avatar>

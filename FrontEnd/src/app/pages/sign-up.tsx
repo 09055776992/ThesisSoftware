@@ -92,7 +92,7 @@ export function SignUp() {
       <CardHeader className="text-center">
         <div className="mb-2">
           <div className="inline-block p-3 bg-primary/10 rounded-full mb-4">
-            <div className="w-12 h-12 bg-primary rounded-full" />
+            <div className="size-12 bg-primary rounded-full" />
           </div>
         </div>
         <CardTitle>Create Your Account</CardTitle>
@@ -136,7 +136,7 @@ export function SignUp() {
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>
             </div>
             {formData.password && (
@@ -164,7 +164,7 @@ export function SignUp() {
                 onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showConfirmPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>
             </div>
           </div>
@@ -218,7 +218,7 @@ export function SignUp() {
 
           <div className="grid grid-cols-2 gap-3">
             <Button type="button" variant="outline">
-              <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
+              <svg className="size-5 mr-2" viewBox="0 0 24 24">
                 <path
                   fill="currentColor"
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -239,7 +239,7 @@ export function SignUp() {
               Google
             </Button>
             <Button type="button" variant="outline">
-              <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="currentColor">
+              <svg className="size-5 mr-2" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M11.5 0h1.02c3.45.252 6.463 2.035 8.512 4.573l-3.72 3.72c-1.14-1.39-2.91-2.293-4.812-2.293-3.514 0-6.293 2.78-6.293 6.293s2.78 6.293 6.293 6.293c2.573 0 4.658-1.369 5.598-3.366H12v-5.22h11c.165.825.25 1.68.25 2.562 0 6.902-5.348 12.438-12.25 12.438C5.373 25 .5 20.127.5 14.5S5.373 4 11 4h.5z"/>
               </svg>
               Microsoft

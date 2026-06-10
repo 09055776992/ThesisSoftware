@@ -260,8 +260,8 @@ export function SignIn() {
           {step === "login" && (
             <>
               <div className="flex justify-center mb-8">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl">
-                  <GraduationCap className="w-9 h-9 text-white" />
+                <div className="inline-flex items-center justify-center size-16 bg-blue-600 rounded-2xl">
+                  <GraduationCap className="size-9 text-white" />
                 </div>
               </div>
 
@@ -304,7 +304,7 @@ export function SignIn() {
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
                       aria-label={showPassword ? "Hide password" : "Show password"}
                     >
-                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      {showPassword ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
                     </button>
                   </div>
                 </div>
@@ -347,8 +347,8 @@ export function SignIn() {
           {step === "otp" && (
             <>
               <div className="flex justify-center mb-6">
-                <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl">
-                  <ShieldCheck className="w-9 h-9 text-white" />
+                <div className="inline-flex items-center justify-center size-16 bg-blue-600 rounded-2xl">
+                  <ShieldCheck className="size-9 text-white" />
                 </div>
               </div>
 
@@ -421,7 +421,7 @@ export function SignIn() {
                   }}
                   className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mx-auto"
                 >
-                  <ArrowLeft className="w-4 h-4" />
+                  <ArrowLeft className="size-4" />
                   Back to Login
                 </button>
               </div>

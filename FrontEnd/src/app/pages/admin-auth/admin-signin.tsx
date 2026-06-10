@@ -4,7 +4,7 @@ import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Eye, EyeOff, ShieldCheck, ArrowLeft } from "lucide-react";
-import { clearStoredUser, saveAuthToken, saveStoredUser } from "../../lib/user-storage";
+import { clearStoredUser, saveRoleSession } from "../../lib/user-storage";
 import { adminSignIn, adminVerifyOTP, adminResendOTP } from "../../lib/api-client";
 
 // ---------------------------------------------------------------------------
@@ -88,7 +88,7 @@ function useCountdown(initial: number) {
 interface AdminSignInProps {
   onSwitch: () => void;
   onClose: () => void;
-  onSuccess?: (user: Record<string, unknown>) => void;
+  onSuccess?: (user: Record<string, unknown>, token?: string) => void;
 }
 
 export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) {
@@ -121,6 +121,8 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
 
     try {
       setIsSubmitting(true);
+      // Clear any stale token before starting a new login
+      clearStoredUser();
       const result = await adminSignIn({
         email: formData.email.trim().toLowerCase(),
         password: formData.password,
@@ -154,14 +156,13 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
       const result = await adminVerifyOTP(userId, otpString);
 
       if (result.success) {
-        clearStoredUser();
-        saveAuthToken(result.token ?? null);
-        saveStoredUser({
+        const token = result.token ?? "";
+        saveRoleSession(token, {
           email: result.user.email as string,
           fullName: result.user.fullName as string,
           userType: "admin",
         });
-        onSuccess?.(result.user);
+        onSuccess?.(result.user, token);
         onClose();
       }
     } catch (error) {
@@ -196,8 +197,8 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
         ) : (
           <>
             <div className="flex justify-center mb-2">
-              <div className="inline-flex items-center justify-center w-12 h-12 bg-primary rounded-xl">
-                <ShieldCheck className="w-6 h-6 text-primary-foreground" />
+              <div className="inline-flex items-center justify-center size-12 bg-primary rounded-xl">
+                <ShieldCheck className="size-6 text-primary-foreground" />
               </div>
             </div>
             <CardTitle>Verify Your Identity</CardTitle>
@@ -240,7 +241,7 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>
               </div>
             </div>
@@ -324,7 +325,7 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
               }}
               className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mx-auto"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="size-4" />
               Back to Login
             </button>
           </div>

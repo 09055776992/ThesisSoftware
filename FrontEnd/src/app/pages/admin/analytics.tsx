@@ -39,7 +39,7 @@ export function AdminAnalytics() {
             </SelectContent>
           </Select>
           <Button>
-            <Download className="h-4 w-4 mr-2" />
+            <Download className="size-4 mr-2" />
             Export Report
           </Button>
         </div>
@@ -53,10 +53,10 @@ export function AdminAnalytics() {
                 <p className="text-sm text-muted-foreground mb-1">Total Users</p>
                 <p className="text-3xl font-bold font-mono mb-1">12,458</p>
                 <p className="text-sm text-accent flex items-center gap-1">
-                  <TrendingUp className="h-3 w-3" /> +12.5% from last month
+                  <TrendingUp className="size-3" /> +12.5% from last month
                 </p>
               </div>
-              <Users className="h-8 w-8 text-primary" />
+              <Users className="size-8 text-primary" />
             </div>
           </CardContent>
         </Card>
@@ -67,10 +67,10 @@ export function AdminAnalytics() {
                 <p className="text-sm text-muted-foreground mb-1">Active Scholarships</p>
                 <p className="text-3xl font-bold font-mono mb-1">156</p>
                 <p className="text-sm text-accent flex items-center gap-1">
-                  <TrendingUp className="h-3 w-3" /> +8 new this month
+                  <TrendingUp className="size-3" /> +8 new this month
                 </p>
               </div>
-              <Award className="h-8 w-8 text-accent" />
+              <Award className="size-8 text-accent" />
             </div>
           </CardContent>
         </Card>
@@ -81,10 +81,10 @@ export function AdminAnalytics() {
                 <p className="text-sm text-muted-foreground mb-1">Applications</p>
                 <p className="text-3xl font-bold font-mono mb-1">3,247</p>
                 <p className="text-sm text-accent flex items-center gap-1">
-                  <TrendingUp className="h-3 w-3" /> +23.1% from last month
+                  <TrendingUp className="size-3" /> +23.1% from last month
                 </p>
               </div>
-              <Award className="h-8 w-8 text-secondary" />
+              <Award className="size-8 text-secondary" />
             </div>
           </CardContent>
         </Card>
@@ -95,10 +95,10 @@ export function AdminAnalytics() {
                 <p className="text-sm text-muted-foreground mb-1">Funds Awarded</p>
                 <p className="text-3xl font-bold font-mono mb-1">$2.4M</p>
                 <p className="text-sm text-accent flex items-center gap-1">
-                  <TrendingUp className="h-3 w-3" /> +15.3% from last month
+                  <TrendingUp className="size-3" /> +15.3% from last month
                 </p>
               </div>
-              <DollarSign className="h-8 w-8 text-amber-600" />
+              <DollarSign className="size-8 text-amber-600" />
             </div>
           </CardContent>
         </Card>

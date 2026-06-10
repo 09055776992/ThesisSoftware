@@ -522,12 +522,12 @@ export function LandingPage() {
               }}
               className="absolute top-4 right-4 text-slate-500 hover:text-slate-700 transition-colors"
             >
-              <X className="h-5 w-5" />
+              <X className="size-5" />
             </button>
             
             <div className="text-center mb-6">
-              <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-                <GraduationCap className="h-6 w-6 text-white" />
+              <div className="size-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+                <GraduationCap className="size-6 text-white" />
               </div>
               <h2 className="text-2xl font-bold text-slate-900">
                 {showOtpVerification ? "Security Verification" : "Welcome Back"}
@@ -604,7 +604,7 @@ export function LandingPage() {
                       value={digit}
                       onChange={(e) => handleOtpChange(index, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                      className="w-12 h-12 text-center text-xl font-bold border border-slate-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                      className="size-12 text-center text-xl font-bold border border-slate-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
                       required
                       disabled={isVerifying}
                     />
@@ -617,7 +617,7 @@ export function LandingPage() {
                 >
                   {isVerifying ? (
                     <span className="flex items-center justify-center gap-2">
-                      <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></span>
+                      <span className="animate-spin rounded-full size-4 border-b-2 border-white"></span>
                       Verifying...
                     </span>
                   ) : (
@@ -698,12 +698,12 @@ export function LandingPage() {
               }}
               className="absolute top-4 right-4 text-slate-500 hover:text-slate-700 transition-colors"
             >
-              <X className="h-5 w-5" />
+              <X className="size-5" />
             </button>
             
             <div className="text-center mb-6">
-              <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
-                <GraduationCap className="h-6 w-6 text-white" />
+              <div className="size-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
+                <GraduationCap className="size-6 text-white" />
               </div>
               <h2 className="text-2xl font-bold text-slate-900">
                 {showSignUpOtpVerification ? "Verify Your Email" : "Create Account"}
@@ -774,7 +774,7 @@ export function LandingPage() {
                 >
                   {isRequestingSignUpOtp ? (
                     <span className="flex items-center justify-center gap-2">
-                      <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></span>
+                      <span className="animate-spin rounded-full size-4 border-b-2 border-white"></span>
                       Creating Account...
                     </span>
                   ) : (
@@ -813,7 +813,7 @@ export function LandingPage() {
                       value={digit}
                       onChange={(e) => handleSignUpOtpChange(index, e.target.value)}
                       onKeyDown={(e) => handleSignUpOtpKeyDown(index, e)}
-                      className="w-12 h-12 text-center text-xl font-bold border border-slate-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                      className="size-12 text-center text-xl font-bold border border-slate-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
                       required
                       disabled={isSignUpVerifying}
                     />
@@ -826,7 +826,7 @@ export function LandingPage() {
                 >
                   {isSignUpVerifying ? (
                     <span className="flex items-center justify-center gap-2">
-                      <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></span>
+                      <span className="animate-spin rounded-full size-4 border-b-2 border-white"></span>
                       Verifying...
                     </span>
                   ) : (
@@ -889,8 +889,8 @@ export function LandingPage() {
             <div className="p-6 border-b border-slate-200">
               <div className="flex justify-between items-center mb-4">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <Award className="h-5 w-5 text-blue-600" />
+                  <div className="size-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <Award className="size-5 text-blue-600" />
                   </div>
                   <div>
                     <h2 className="text-xl font-bold text-slate-900">Explore Scholarships</h2>
@@ -901,13 +901,13 @@ export function LandingPage() {
                   onClick={() => setActiveModal(null)}
                   className="text-slate-500 hover:text-slate-700 transition-colors p-2 hover:bg-slate-100 rounded-lg"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="size-5" />
                 </button>
               </div>
               
               {/* Search Bar */}
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400" />
                 <Input
                   type="text"
                   placeholder="Search scholarships..."
@@ -922,12 +922,12 @@ export function LandingPage() {
             <div className="overflow-y-auto flex-1 p-6">
               {loadingScholarships ? (
                 <div className="flex items-center justify-center py-12">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                  <div className="animate-spin rounded-full size-8 border-b-2 border-blue-600"></div>
                   <span className="ml-3 text-slate-600">Loading scholarships...</span>
                 </div>
               ) : filteredScholarships.length === 0 ? (
                 <div className="text-center py-12">
-                  <Award className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+                  <Award className="size-12 text-slate-300 mx-auto mb-3" />
                   <p className="text-slate-500">No scholarships found matching your search.</p>
                 </div>
               ) : (
@@ -968,7 +968,7 @@ export function LandingPage() {
                               className="flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700 px-3 py-1.5 bg-blue-50 rounded-lg transition-colors"
                             >
                               <span>📋 View Requirements</span>
-                              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              {isExpanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
                             </button>
                           </div>
                           
@@ -976,18 +976,18 @@ export function LandingPage() {
                           <div className="flex flex-wrap gap-2 mt-3">
                             {amount ? (
                               <span className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full">
-                                <DollarSign className="h-3 w-3" />
+                                <DollarSign className="size-3" />
                                 {typeof amount === "number" ? `₱${amount.toLocaleString()}` : String(amount)}
                               </span>
                             ) : null}
                             {deadline ? (
                               <span className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-full">
-                                <Calendar className="h-3 w-3" />
+                                <Calendar className="size-3" />
                                 Deadline: {new Date(String(deadline)).toLocaleDateString()}
                               </span>
                             ) : null}
                             <span className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
-                              <Users className="h-3 w-3" />
+                              <Users className="size-3" />
                               {Array.isArray(educationLevel) ? educationLevel.join(", ") : String(educationLevel)}
                             </span>
                           </div>
@@ -997,7 +997,7 @@ export function LandingPage() {
                         {isExpanded && (
                           <div className="border-t border-slate-200 p-4 bg-white">
                             <h4 className="font-medium text-slate-800 mb-3 flex items-center gap-2">
-                              <FileText className="h-4 w-4 text-blue-600" />
+                              <FileText className="size-4 text-blue-600" />
                               Requirements & Criteria
                             </h4>
                             

@@ -719,7 +719,7 @@ export function Scholarships() {
                 <div className="space-y-2">
                   <Label htmlFor="search">Search</Label>
                   <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                     <Input
                       id="search"
                       placeholder="Search scholarships..."
@@ -849,7 +849,7 @@ export function Scholarships() {
             {/* ── Empty state when zero matches ── */}
             {!loading && recommendedScholarships.length === 0 && (
               <div className="mb-8 flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-gray-50 py-14 px-6 text-center">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-blue-50 text-4xl">
+                <div className="mb-4 flex size-16 items-center justify-center rounded-full bg-blue-50 text-4xl">
                   🔍
                 </div>
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">No Perfect Matches Right Now</h3>
@@ -919,7 +919,7 @@ export function Scholarships() {
                           aria-pressed={savedScholarships.includes(scholarship._id)}
                           aria-label={savedScholarships.includes(scholarship._id) ? "Unsave scholarship" : "Save scholarship"}
                         >
-                          <Bookmark className={`h-4 w-4 ${savedScholarships.includes(scholarship._id) ? "fill-current" : ""}`} />
+                          <Bookmark className={`size-4 ${savedScholarships.includes(scholarship._id) ? "fill-current" : ""}`} />
                           <span className="ml-2 hidden sm:inline">{savedScholarships.includes(scholarship._id) ? "Unsave" : "Save"}</span>
                         </Button>
                       </div>
@@ -934,11 +934,11 @@ export function Scholarships() {
                         <Separator />
                         <div className="space-y-2 text-sm">
                           <div className="flex items-center gap-2 text-muted-foreground">
-                            <Calendar className="h-4 w-4 flex-shrink-0" />
+                            <Calendar className="size-4 flex-shrink-0" />
                             <span className="break-words">Due: {scholarship.deadline}</span>
                           </div>
                           <div className="flex items-center gap-2 text-muted-foreground">
-                            <MapPin className="h-4 w-4 flex-shrink-0" />
+                            <MapPin className="size-4 flex-shrink-0" />
                             <span className="break-words">{scholarship.location || "Quezon City"}</span>
                           </div>
                         </div>
@@ -958,7 +958,7 @@ export function Scholarships() {
                 <div className="flex items-center gap-3 mb-5">
                   <div className="flex-1 border-t border-gray-200" />
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 border border-orange-200 rounded-full">
-                    <AlertCircle className="h-4 w-4 text-orange-500" />
+                    <AlertCircle className="size-4 text-orange-500" />
                     <span className="text-sm font-semibold text-orange-700">Other Active Scholarship Programs</span>
                   </div>
                   <div className="flex-1 border-t border-gray-200" />
@@ -1003,11 +1003,11 @@ export function Scholarships() {
                           <Separator />
                           <div className="space-y-2 text-sm">
                             <div className="flex items-center gap-2 text-muted-foreground">
-                              <Calendar className="h-4 w-4 flex-shrink-0" />
+                              <Calendar className="size-4 flex-shrink-0" />
                               <span className="break-words">Due: {scholarship.deadline}</span>
                             </div>
                             <div className="flex items-center gap-2 text-muted-foreground">
-                              <MapPin className="h-4 w-4 flex-shrink-0" />
+                              <MapPin className="size-4 flex-shrink-0" />
                               <span className="break-words">{scholarship.location || "Quezon City"}</span>
                             </div>
                           </div>
@@ -1015,7 +1015,7 @@ export function Scholarships() {
                             <div className="mt-2 space-y-1">
                               {scholarship.eligibility.unmetCriteria.slice(0, 2).map((criterion, idx) => (
                                 <div key={idx} className="flex items-start gap-1.5 text-xs text-red-600">
-                                  <XCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                                  <XCircle className="size-3.5 shrink-0 mt-0.5" />
                                   <span className="leading-snug">{criterion}</span>
                                 </div>
                               ))}
@@ -1063,8 +1063,8 @@ export function Scholarships() {
                 {selectedScholarship.eligibilityStatus === "eligible" && (
                   <div className="bg-green-50 border border-green-200 rounded-lg p-5">
                     <div className="flex items-start gap-4">
-                      <div className="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="size-8 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <svg className="size-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                         </svg>
                       </div>
@@ -1079,8 +1079,8 @@ export function Scholarships() {
                 {selectedScholarship.eligibilityStatus === "may-be-eligible" && (
                   <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-5">
                     <div className="flex items-start gap-4">
-                      <div className="w-8 h-8 rounded-full bg-yellow-500 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="size-8 rounded-full bg-yellow-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <svg className="size-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                         </svg>
                       </div>
@@ -1102,8 +1102,8 @@ export function Scholarships() {
                 {selectedScholarship.eligibilityStatus === "not-eligible" && (
                   <div className="rounded-xl border border-red-200 bg-red-50 p-5 space-y-4">
                     <div className="flex items-start gap-4">
-                      <div className="w-8 h-8 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="size-8 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <svg className="size-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                         </svg>
                       </div>
@@ -1118,7 +1118,7 @@ export function Scholarships() {
                       <div className="rounded-lg border border-red-200 bg-white divide-y divide-red-100">
                         {selectedScholarship.eligibility.unmetCriteria.map((criterion, idx) => (
                           <div key={idx} className="flex items-start gap-3 px-4 py-3">
-                            <XCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                            <XCircle className="size-4 text-red-500 shrink-0 mt-0.5" />
                             <span className="text-sm text-red-700 leading-snug">{criterion}</span>
                           </div>
                         ))}
@@ -1134,7 +1134,7 @@ export function Scholarships() {
                           <div className="rounded-lg border border-green-200 bg-white divide-y divide-green-100">
                             {passed.map((c, idx) => (
                               <div key={idx} className="flex items-start gap-3 px-4 py-3">
-                                <CheckCircle className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
+                                <CheckCircle className="size-4 text-green-500 shrink-0 mt-0.5" />
                                 <span className="text-sm text-green-700 leading-snug">{c.label || c.message}</span>
                               </div>
                             ))}
@@ -1152,8 +1152,8 @@ export function Scholarships() {
                 {selectedScholarship.deadlineStatus === "closing-soon" && (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-5">
                     <div className="flex items-start gap-4">
-                      <div className="w-8 h-8 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="size-8 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <svg className="size-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                       </div>
@@ -1233,7 +1233,7 @@ export function Scholarships() {
 
                   <div>
                     <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                      <MapPin className="h-5 w-5 text-primary" />
+                      <MapPin className="size-5 text-primary" />
                       Location
                     </h3>
                     <p className="text-muted-foreground leading-[1.7]">
@@ -1255,7 +1255,7 @@ export function Scholarships() {
                 <div className="space-y-6">
                   <div>
                     <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                      <ListChecks className="h-5 w-5 text-primary" />
+                      <ListChecks className="size-5 text-primary" />
                       Requirements
                     </h3>
 
@@ -1263,7 +1263,7 @@ export function Scholarships() {
                     {selectedScholarship.specificCriteria && selectedScholarship.specificCriteria.length > 0 && (
                       <div className="mb-6">
                         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4 text-green-600" />
+                          <CheckCircle className="size-4 text-green-600" />
                           Eligibility Criteria
                         </h4>
                         <ul className="space-y-3">
@@ -1282,7 +1282,7 @@ export function Scholarships() {
                         selectedScholarship.specificCriteria.length === 0) && (
                         <div className="mb-6">
                           <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <CheckCircle className="size-4 text-green-600" />
                             Eligibility Criteria
                           </h4>
                           <ul className="space-y-3">
@@ -1300,7 +1300,7 @@ export function Scholarships() {
                     {selectedScholarship.requiredEducationLevel && selectedScholarship.requiredEducationLevel.length > 0 && (
                       <div className="mb-6">
                         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                          <GraduationCap className="h-4 w-4 text-blue-600" />
+                          <GraduationCap className="size-4 text-blue-600" />
                           Education Level Required
                         </h4>
                         <div className="flex flex-wrap gap-2 mb-3">
@@ -1322,7 +1322,7 @@ export function Scholarships() {
                     {selectedScholarship.generalDocuments && selectedScholarship.generalDocuments.length > 0 && (
                       <div className="mb-6">
                         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-amber-600" />
+                          <FileText className="size-4 text-amber-600" />
                           General Documents (Required for ALL applicants)
                         </h4>
                         <ul className="space-y-3">
@@ -1340,7 +1340,7 @@ export function Scholarships() {
                     {selectedScholarship.requiredDocuments && selectedScholarship.requiredDocuments.length > 0 && (
                       <div className="mb-6">
                         <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-blue-600" />
+                          <FileText className="size-4 text-blue-600" />
                           Scholarship-Specific Documents
                         </h4>
                         <ul className="space-y-3">
@@ -1373,7 +1373,7 @@ export function Scholarships() {
                     selectedScholarship.eligibilityStatus === "may-be-eligible" ? (
                     <div className="bg-gray-50 rounded-lg p-4">
                       <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-primary" />
+                        <FileText className="size-4 text-primary" />
                         Application Documents
                       </h4>
                       <p className="text-sm text-gray-600 mb-2">
@@ -1389,7 +1389,7 @@ export function Scholarships() {
                       </p>
                       {!isLoadingProfileDocs && !hasProfileDocuments && (
                         <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-                          <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                          <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
                           <span>
                             One or more required documents are not yet uploaded. Please go to{" "}
                             <strong>Profile &gt; Document Vault</strong> and upload all three documents before applying.
@@ -1413,7 +1413,7 @@ export function Scholarships() {
                       {/* Error message */}
                       {submitError && (
                         <div className="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
-                          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                          <AlertCircle className="size-4 mt-0.5 shrink-0" />
                           <span>{submitError}</span>
                         </div>
                       )}
@@ -1451,12 +1451,12 @@ export function Scholarships() {
                               >
                                 {isSubmitting ? (
                                   <>
-                                    <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                                    <div className="size-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
                                     Submitting...
                                   </>
                                 ) : (
                                   <>
-                                    <FileText className="h-5 w-5 mr-2" />
+                                    <FileText className="size-5 mr-2" />
                                     Apply Scholarship
                                   </>
                                 )}
@@ -1478,7 +1478,7 @@ export function Scholarships() {
                           className={`flex-1 h-12 text-base ${savedScholarships.includes(selectedScholarship._id) ? "border-green-500 text-green-700 bg-green-50 hover:bg-green-100" : ""}`}
                           onClick={() => toggleSavedScholarship(selectedScholarship._id)}
                         >
-                          <Bookmark className={`h-5 w-5 mr-2 ${savedScholarships.includes(selectedScholarship._id) ? "fill-current" : ""}`} />
+                          <Bookmark className={`size-5 mr-2 ${savedScholarships.includes(selectedScholarship._id) ? "fill-current" : ""}`} />
                           {savedScholarships.includes(selectedScholarship._id) ? "Saved" : "Save for Later"}
                         </Button>
                       </div>

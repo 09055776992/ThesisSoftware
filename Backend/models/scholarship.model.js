@@ -142,10 +142,29 @@ const scholarshipSchema = new Schema(
       type: Number,
       default: 0,
     },
+
+    // Ownership — which provider created this scholarship
+    // null means legacy/unassigned (created before provider role existed)
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    providerName: {
+      type: String,
+      trim: true,
+      default: null,
+    },
   },
   {
     timestamps: true,
   }
+);
+
+// Prevent duplicate scholarship names (case-insensitive) from the same provider
+scholarshipSchema.index(
+  { name: 1, provider: 1 },
+  { unique: true, collation: { locale: "en", strength: 2 } }
 );
 
 const Scholarship = mongoose.model("Scholarship", scholarshipSchema);

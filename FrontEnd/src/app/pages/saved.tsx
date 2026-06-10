@@ -140,8 +140,8 @@ export function SavedItems() {
         {savedList.length === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
             <div className="max-w-md mx-auto">
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="size-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="size-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
                 </svg>
               </div>
@@ -171,7 +171,7 @@ export function SavedItems() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">Due: {formatDeadline(s.deadline)}</span>
                       <Button size="sm" variant="ghost" onClick={() => toggleUnsave(s.id)} className="text-green-600 hover:text-green-700 bg-green-50 hover:bg-green-100">
-                        <Bookmark className="h-4 w-4" />
+                        <Bookmark className="size-4" />
                         <span className="ml-2">Unsave</span>
                       </Button>
                     </div>

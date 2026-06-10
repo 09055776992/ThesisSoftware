@@ -151,7 +151,7 @@ export function DashboardLayout() {
           {/* User Header */}
           <div className="mb-6 pt-2">
             <div className="flex items-center gap-3 mb-1">
-              <Avatar className="h-14 w-14 border-2 border-blue-100">
+              <Avatar className="size-14 border-2 border-blue-100">
                 <AvatarImage
                   key={user?.profileImage || user?.profilePicture}
                   src={resolvePublicAssetUrl(user?.profileImage || user?.profilePicture, true)}
@@ -195,7 +195,7 @@ export function DashboardLayout() {
                       : "text-gray-700 hover:bg-gray-100"
                   }`}
                 >
-                  <Icon className="h-5 w-5 flex-shrink-0" />
+                  <Icon className="size-5 flex-shrink-0" />
                   <span className="font-medium text-sm">{item.label}</span>
                 </Link>
               );
@@ -250,9 +250,9 @@ export function DashboardLayout() {
             className="relative"
             onClick={() => setNotificationPanelOpen(true)}
           >
-            <Bell className="h-5 w-5" />
+            <Bell className="size-5" />
             {unreadCount > 0 && (
-              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-bold">
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full size-5 flex items-center justify-center font-bold">
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>
             )}
@@ -273,7 +273,7 @@ export function DashboardLayout() {
                 </div>
                 {unreadCount > 0 && (
                   <Button variant="ghost" size="sm" onClick={handleMarkAllRead} className="text-xs gap-1">
-                    <CheckCheck className="h-3.5 w-3.5" />
+                    <CheckCheck className="size-3.5" />
                     Mark all read
                   </Button>
                 )}
@@ -283,7 +283,7 @@ export function DashboardLayout() {
               <div className="flex-1 overflow-y-auto">
                 {notifications.length === 0 ? (
                   <div className="p-10 text-center text-sm text-muted-foreground">
-                    <Bell className="h-10 w-10 mx-auto mb-3 text-gray-300" />
+                    <Bell className="size-10 mx-auto mb-3 text-gray-300" />
                     <p>No notifications yet.</p>
                     <p className="text-xs mt-1">You&apos;ll see updates here when you apply for scholarships.</p>
                   </div>
@@ -298,7 +298,7 @@ export function DashboardLayout() {
                         <div className="flex items-start gap-3">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
-                              {!notif.read && <span className="h-2 w-2 rounded-full bg-blue-600 flex-shrink-0" />}
+                              {!notif.read && <span className="size-2 rounded-full bg-blue-600 flex-shrink-0" />}
                               <p className={`text-sm ${!notif.read ? "font-semibold" : "font-normal"} truncate`}>
                                 {notif.title}
                               </p>

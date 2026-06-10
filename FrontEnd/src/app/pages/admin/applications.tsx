@@ -257,7 +257,7 @@ function RankingCard({ ranking }: { ranking: AIRanking }) {
         {expanded && shap && (
           <div className="border-t bg-gray-50 p-4 space-y-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-primary">
-              <Brain className="h-4 w-4" />
+              <Brain className="size-4" />
               AI Explanation (SHAP)
             </div>
             <p className="text-sm text-muted-foreground italic">"{shap.summary}"</p>
@@ -266,8 +266,8 @@ function RankingCard({ ranking }: { ranking: AIRanking }) {
               {shap.contributions.map((c: ShapContribution) => (
                 <div key={c.factor} className="flex items-start gap-2 text-sm">
                   {c.impact === "positive"
-                    ? <TrendingUp className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                    : <TrendingDown className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+                    ? <TrendingUp className="size-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    : <TrendingDown className="size-4 text-red-500 mt-0.5 flex-shrink-0" />
                   }
                   <div>
                     <span className="font-medium">{c.factor}</span>
@@ -624,7 +624,7 @@ export function AdminApplications() {
         ) : scholarshipList.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground">
-              <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <FileText className="size-12 mx-auto mb-4 opacity-50" />
               <p className="text-lg font-medium">No applications received yet</p>
               <p className="text-sm">Scholarships with applications will appear here.</p>
             </CardContent>
@@ -670,7 +670,7 @@ export function AdminApplications() {
                       </TableCell>
                       <TableCell className="text-right">
                         <Button size="sm" onClick={() => handleViewApplicants(s)}>
-                          View Applicants <ChevronRight className="h-4 w-4 ml-1" />
+                          View Applicants <ChevronRight className="size-4 ml-1" />
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -705,7 +705,7 @@ export function AdminApplications() {
         {/* Header */}
         <div className="flex items-center gap-4 mb-2">
           <Button variant="ghost" size="sm" onClick={() => setViewMode("scholarships")}>
-            <ArrowLeft className="h-4 w-4 mr-1" /> Back
+            <ArrowLeft className="size-4 mr-1" /> Back
           </Button>
           <div>
             <h1 className="text-3xl font-bold">{selectedScholarshipName}</h1>
@@ -713,7 +713,7 @@ export function AdminApplications() {
           </div>
           <div className="ml-auto flex gap-2">
             <Button variant="outline" size="sm" onClick={handleExport}>
-              <FileSpreadsheet className="h-4 w-4 mr-1" /> Export to Excel
+              <FileSpreadsheet className="size-4 mr-1" /> Export to Excel
             </Button>
           </div>
         </div>
@@ -728,7 +728,7 @@ export function AdminApplications() {
             }`}
             onClick={() => setApplicantsTab("list")}
           >
-            <FileText className="h-4 w-4 inline mr-1" />
+            <FileText className="size-4 inline mr-1" />
             Applicants List
           </button>
           <button
@@ -739,7 +739,7 @@ export function AdminApplications() {
             }`}
             onClick={() => setApplicantsTab("rankings")}
           >
-            <Trophy className="h-4 w-4 inline mr-1" />
+            <Trophy className="size-4 inline mr-1" />
             AI Rankings
           </button>
         </div>
@@ -766,7 +766,7 @@ export function AdminApplications() {
 
             {/* Search */}
             <div className="relative max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
               <Input
                 placeholder="Search by name or email..."
                 className="pl-9"
@@ -810,7 +810,7 @@ export function AdminApplications() {
                           <TableRow key={app._id}>
                             <TableCell>
                               <div className="flex items-center gap-3">
-                                <Avatar className="h-8 w-8">
+                                <Avatar className="size-8">
                                   <AvatarImage src={studentProfileAvatar(app.studentProfile)} />
                                   <AvatarFallback className="text-xs">{getInitials(app.studentName || app.studentEmail)}</AvatarFallback>
                                 </Avatar>
@@ -857,7 +857,7 @@ export function AdminApplications() {
                 disabled={rankingsLoading}
                 className="gap-2"
               >
-                <Brain className="h-4 w-4" />
+                <Brain className="size-4" />
                 {rankingsLoading ? "Analyzing with AI..." : "Generate AI Rankings"}
               </Button>
               {rankings.length > 0 && (
@@ -875,7 +875,7 @@ export function AdminApplications() {
             {/* Error */}
             {rankingsError && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-                <AlertCircle className="h-4 w-4 inline mr-2" />
+                <AlertCircle className="size-4 inline mr-2" />
                 {rankingsError}
               </div>
             )}
@@ -884,7 +884,7 @@ export function AdminApplications() {
             {rankingsLoading && (
               <Card>
                 <CardContent className="py-12 text-center">
-                  <Brain className="h-12 w-12 mx-auto mb-4 text-primary animate-pulse" />
+                  <Brain className="size-12 mx-auto mb-4 text-primary animate-pulse" />
                   <p className="text-lg font-medium">Analyzing applications with AI...</p>
                   <p className="text-sm text-muted-foreground mt-1">
                     BERT is verifying documents · Scoring 5 criteria · Generating SHAP explanations
@@ -897,7 +897,7 @@ export function AdminApplications() {
             {!rankingsLoading && rankings.length === 0 && !rankingsError && (
               <Card>
                 <CardContent className="py-12 text-center">
-                  <Trophy className="h-12 w-12 mx-auto mb-4 opacity-30" />
+                  <Trophy className="size-12 mx-auto mb-4 opacity-30" />
                   <p className="text-lg font-medium">No rankings yet</p>
                   <p className="text-sm text-muted-foreground mt-1">
                     Click "Generate AI Rankings" to score and rank all qualified applicants.
@@ -933,7 +933,7 @@ export function AdminApplications() {
         {/* Header */}
         <div className="flex items-center gap-4 mb-2">
           <Button variant="ghost" size="sm" onClick={() => setViewMode("applicants")}>
-            <ArrowLeft className="h-4 w-4 mr-1" /> Back to Applicants
+            <ArrowLeft className="size-4 mr-1" /> Back to Applicants
           </Button>
         </div>
 
@@ -941,7 +941,7 @@ export function AdminApplications() {
           <CardContent className="pt-6">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-4">
-                <Avatar className="h-16 w-16">
+                <Avatar className="size-16">
                   <AvatarImage src={studentProfileAvatar(student)} />
                   <AvatarFallback className="text-lg">{getInitials(app.studentName || app.studentEmail)}</AvatarFallback>
                 </Avatar>
@@ -974,9 +974,9 @@ export function AdminApplications() {
                 {Object.entries(app.eligibilityCheck.criteriaChecks).map(([key, check]: [string, any]) => (
                   <div key={key} className="flex items-start gap-2 p-2 rounded bg-gray-50">
                     {check.passed ? (
-                      <CheckCircle className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
+                      <CheckCircle className="size-5 text-green-600 mt-0.5 flex-shrink-0" />
                     ) : (
-                      <XCircle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
+                      <XCircle className="size-5 text-red-500 mt-0.5 flex-shrink-0" />
                     )}
                     <div>
                       <p className="font-medium text-sm">{check.label || key}</p>
@@ -1053,7 +1053,7 @@ export function AdminApplications() {
 
               {isLoadingProfileDocs ? (
                 <div className="flex items-center justify-center py-4">
-                  <div className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2" />
+                  <div className="size-4 border-2 border-primary border-t-transparent rounded-full animate-spin mr-2" />
                   <span className="text-sm text-gray-600">Loading profile documents...</span>
                 </div>
               ) : profileDocuments.length === 0 ? (
@@ -1067,7 +1067,7 @@ export function AdminApplications() {
                   {profileDocuments.map((doc, idx) => (
                     <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
                       <div className="flex items-center gap-3">
-                        <FileText className="h-4 w-4 text-gray-500" />
+                        <FileText className="size-4 text-gray-500" />
                         <div>
                           <p className="text-sm font-medium">{doc.label}</p>
                           {doc.fileName ? (
@@ -1081,7 +1081,7 @@ export function AdminApplications() {
                         {doc.fileName ? (
                           <>
                             <Badge className="bg-green-100 text-green-700 text-xs">
-                              <CheckCircle className="h-3 w-3 mr-1" />
+                              <CheckCircle className="size-3 mr-1" />
                               Linked from Profile
                             </Badge>
                             {doc.uploadedAt && (
@@ -1183,7 +1183,7 @@ export function AdminApplications() {
                                 size="sm"
                                 onClick={() => window.open(getDocumentUrl(doc.filePath), "_blank")}
                               >
-                                <Eye className="h-4 w-4" />
+                                <Eye className="size-4" />
                               </Button>
                               <Button
                                 variant="ghost"
@@ -1198,7 +1198,7 @@ export function AdminApplications() {
                                   }
                                 }}
                               >
-                                <Download className="h-4 w-4" />
+                                <Download className="size-4" />
                               </Button>
                               <Button
                                 size="sm"
@@ -1242,7 +1242,7 @@ export function AdminApplications() {
             {(app.specificDocuments && app.specificDocuments.length > 0) || (app.submittedDocuments && app.submittedDocuments.length > 0) ? (
               <div className="mt-6 pt-6 border-t">
                 <div className="flex items-center gap-2 mb-4">
-                  <ShieldCheck className="h-5 w-5 text-primary" />
+                  <ShieldCheck className="size-5 text-primary" />
                   <h4 className="font-semibold text-lg">Document AI Accuracy</h4>
                 </div>
 
@@ -1268,13 +1268,13 @@ export function AdminApplications() {
                       }`}>
                         <div className="flex items-start gap-3">
                           {avgScore === null ? (
-                            <AlertCircle className="h-5 w-5 text-gray-500 flex-shrink-0 mt-0.5" />
+                            <AlertCircle className="size-5 text-gray-500 flex-shrink-0 mt-0.5" />
                           ) : passedThreshold ? (
-                            <CheckCircle className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
+                            <CheckCircle className="size-5 text-green-600 flex-shrink-0 mt-0.5" />
                           ) : avgScore >= 40 ? (
-                            <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                            <AlertTriangle className="size-5 text-amber-500 flex-shrink-0 mt-0.5" />
                           ) : (
-                            <XCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+                            <XCircle className="size-5 text-red-500 flex-shrink-0 mt-0.5" />
                           )}
                           <div className="flex-1">
                             <p className="font-semibold text-sm">
@@ -1309,7 +1309,7 @@ export function AdminApplications() {
                                 const docStatusLocal = documentStatuses[String(idx)]?.status || doc.status;
                                 return (
                                   <div key={idx} className="flex items-center gap-2 text-xs">
-                                    <FileText className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                                    <FileText className="size-3.5 text-muted-foreground flex-shrink-0" />
                                     <span className="font-medium truncate flex-1">{doc.documentType}</span>
                                     <span className={`whitespace-nowrap ${
                                       docStatusLocal === "verified" ? "text-green-600 font-medium" :
@@ -1379,7 +1379,7 @@ export function AdminApplications() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {docsWithScore.map((doc, idx) => (
                             <div key={idx} className="flex items-center gap-3 p-3 rounded-lg border">
-                              <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                              <FileText className="size-4 text-muted-foreground flex-shrink-0" />
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium truncate">{doc.documentType}</p>
                                 <div className="flex items-center gap-2 mt-1">
@@ -1411,7 +1411,7 @@ export function AdminApplications() {
                       {app.submittedDocuments?.some(d => d.match_scores && Object.keys(d.match_scores).length > 0) && (
                         <div className="mt-4 pt-4 border-t">
                           <div className="flex items-center gap-2 mb-3">
-                            <Brain className="h-4 w-4 text-primary" />
+                            <Brain className="size-4 text-primary" />
                             <h5 className="font-medium text-sm">AI Explanation (Keyword Analysis)</h5>
                           </div>
                           <div className="space-y-3">
@@ -1434,11 +1434,11 @@ export function AdminApplications() {
                                       return (
                                         <div key={keyword} className="flex items-center gap-2 text-xs">
                                           {(score as number) >= threshold ? (
-                                            <TrendingUp className="h-3 w-3 text-green-600 flex-shrink-0" />
+                                            <TrendingUp className="size-3 text-green-600 flex-shrink-0" />
                                           ) : (score as number) >= 50 ? (
-                                            <TrendingUp className="h-3 w-3 text-amber-500 flex-shrink-0" />
+                                            <TrendingUp className="size-3 text-amber-500 flex-shrink-0" />
                                           ) : (
-                                            <TrendingDown className="h-3 w-3 text-red-500 flex-shrink-0" />
+                                            <TrendingDown className="size-3 text-red-500 flex-shrink-0" />
                                           )}
                                           <span className="w-24 truncate flex-shrink-0" title={keyword}>{keyword}</span>
                                           <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden min-w-[60px]">
@@ -1475,15 +1475,15 @@ export function AdminApplications() {
                       {/* Legend */}
                       <div className="flex items-center gap-4 text-xs">
                         <div className="flex items-center gap-1">
-                          <div className="w-3 h-3 rounded-full bg-green-500" />
+                          <div className="size-3 rounded-full bg-green-500" />
                           <span className="text-muted-foreground">High (≥70%)</span>
                         </div>
                         <div className="flex items-center gap-1">
-                          <div className="w-3 h-3 rounded-full bg-amber-400" />
+                          <div className="size-3 rounded-full bg-amber-400" />
                           <span className="text-muted-foreground">Medium (≥40%)</span>
                         </div>
                         <div className="flex items-center gap-1">
-                          <div className="w-3 h-3 rounded-full bg-red-400" />
+                          <div className="size-3 rounded-full bg-red-400" />
                           <span className="text-muted-foreground">Low (&lt;40%)</span>
                         </div>
                       </div>
@@ -1528,7 +1528,7 @@ export function AdminApplications() {
               {/* Qualify - GREEN */}
               {(app.status === "System Qualified" || app.status === "Under Review") && (
                 <Button className="bg-green-600 hover:bg-green-700" onClick={handleQualify} disabled={isUpdating}>
-                  <CheckCircle className="h-4 w-4 mr-1" /> Qualify for Final Screening
+                  <CheckCircle className="size-4 mr-1" /> Qualify for Final Screening
                 </Button>
               )}
 
@@ -1547,14 +1547,14 @@ export function AdminApplications() {
                     setIsUpdating(false);
                   }
                 }} disabled={isUpdating}>
-                  <CheckCircle className="h-4 w-4 mr-1" /> Approve Application
+                  <CheckCircle className="size-4 mr-1" /> Approve Application
                 </Button>
               )}
 
               {/* Reject - RED */}
               {(app.status !== "Approved" && app.status !== "Rejected") && (
                 <Button variant="destructive" onClick={handleRejectClick} disabled={isUpdating}>
-                  <XCircle className="h-4 w-4 mr-1" /> Reject Application
+                  <XCircle className="size-4 mr-1" /> Reject Application
                 </Button>
               )}
 
@@ -1565,7 +1565,7 @@ export function AdminApplications() {
                   onClick={handleResubmitClick}
                   disabled={isUpdating}
                 >
-                  <AlertTriangle className="h-4 w-4 mr-1" /> Request Resubmission
+                  <AlertTriangle className="size-4 mr-1" /> Request Resubmission
                 </Button>
               )}
             </div>
@@ -1576,7 +1576,7 @@ export function AdminApplications() {
                 <CardContent className="pt-4">
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2 text-blue-700 font-medium">
-                      <Video className="h-5 w-5" /> Video Interview Setup
+                      <Video className="size-5" /> Video Interview Setup
                     </div>
                     <Button
                       type="button"
@@ -1586,7 +1586,7 @@ export function AdminApplications() {
                       onClick={() => openScreeningScheduler(app.finalScreening)}
                       disabled={isUpdating}
                     >
-                      <Calendar className="h-4 w-4 mr-1" /> Update details
+                      <Calendar className="size-4 mr-1" /> Update details
                     </Button>
                   </div>
                   <div className="text-sm text-blue-800 space-y-1">
@@ -1653,7 +1653,7 @@ export function AdminApplications() {
                 onClick={handleScheduleScreening}
                 disabled={isUpdating}
               >
-                <CheckCircle className="h-4 w-4 mr-1" />
+                <CheckCircle className="size-4 mr-1" />
                 {isUpdating ? "Saving..." : "Confirm & notify student"}
               </Button>
             </div>

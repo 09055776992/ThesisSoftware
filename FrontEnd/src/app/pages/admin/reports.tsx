@@ -127,7 +127,7 @@ export function AdminReports() {
     return (
       <div className="p-8 flex items-center justify-center min-h-[400px]">
         <div className="flex items-center gap-2 text-gray-600">
-          <Loader2 className="h-5 w-5 animate-spin" />
+          <Loader2 className="size-5 animate-spin" />
           <span>Loading analytics...</span>
         </div>
       </div>
@@ -173,8 +173,8 @@ export function AdminReports() {
                   <p className="text-sm text-gray-500 mb-1">Total Scholars</p>
                   <p className="text-3xl font-bold text-gray-900">{quickStats.totalScholars.toLocaleString()}</p>
                 </div>
-                <div className="h-12 w-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Users className="h-6 w-6 text-blue-600" />
+                <div className="size-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <Users className="size-6 text-blue-600" />
                 </div>
               </div>
             </CardContent>
@@ -187,8 +187,8 @@ export function AdminReports() {
                   <p className="text-sm text-gray-500 mb-1">Pending Applications</p>
                   <p className="text-3xl font-bold text-gray-900">{quickStats.pendingApplications.toLocaleString()}</p>
                 </div>
-                <div className="h-12 w-12 bg-yellow-100 rounded-lg flex items-center justify-center">
-                  <Clock className="h-6 w-6 text-yellow-600" />
+                <div className="size-12 bg-yellow-100 rounded-lg flex items-center justify-center">
+                  <Clock className="size-6 text-yellow-600" />
                 </div>
               </div>
             </CardContent>
@@ -201,8 +201,8 @@ export function AdminReports() {
                   <p className="text-sm text-gray-500 mb-1">Active Scholarships</p>
                   <p className="text-3xl font-bold text-gray-900">{quickStats.activeScholarships.toLocaleString()}</p>
                 </div>
-                <div className="h-12 w-12 bg-green-100 rounded-lg flex items-center justify-center">
-                  <Award className="h-6 w-6 text-green-600" />
+                <div className="size-12 bg-green-100 rounded-lg flex items-center justify-center">
+                  <Award className="size-6 text-green-600" />
                 </div>
               </div>
             </CardContent>
@@ -216,14 +216,14 @@ export function AdminReports() {
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900">User Growth</h3>
                 <div
-                  className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                  className={`size-10 rounded-lg flex items-center justify-center ${
                     stats.userGrowth.isPositive ? "bg-green-100" : "bg-red-100"
                   }`}
                 >
                   {stats.userGrowth.isPositive ? (
-                    <TrendingUp className="w-5 h-5 text-green-600" />
+                    <TrendingUp className="size-5 text-green-600" />
                   ) : (
-                    <TrendingDown className="w-5 h-5 text-red-600" />
+                    <TrendingDown className="size-5 text-red-600" />
                   )}
                 </div>
               </div>
@@ -241,8 +241,8 @@ export function AdminReports() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900">Applications</h3>
-                <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <FileText className="w-5 h-5 text-blue-600" />
+                <div className="size-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <FileText className="size-5 text-blue-600" />
                 </div>
               </div>
               <p className="text-3xl font-bold text-gray-900">{stats.applications.value.toLocaleString()}</p>
@@ -254,8 +254,8 @@ export function AdminReports() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900">Success Rate</h3>
-                <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
-                  <CheckCircle className="w-5 h-5 text-amber-600" />
+                <div className="size-10 bg-amber-100 rounded-lg flex items-center justify-center">
+                  <CheckCircle className="size-5 text-amber-600" />
                 </div>
               </div>
               <p className="text-3xl font-bold text-gray-900">{stats.successRate.value}%</p>
@@ -406,12 +406,12 @@ export function AdminReports() {
               >
                 {generatingReport ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <Loader2 className="size-4 mr-2 animate-spin" />
                     Generating...
                   </>
                 ) : (
                   <>
-                    <Download className="h-4 w-4 mr-2" />
+                    <Download className="size-4 mr-2" />
                     Generate Report
                   </>
                 )}

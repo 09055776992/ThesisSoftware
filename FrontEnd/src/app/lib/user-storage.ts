@@ -193,6 +193,16 @@ export function clearStoredUser(): void {
   window.localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
+/** Set JWT and admin/provider session profile without clearing the token in between. */
+export function saveRoleSession(
+  token: string | null | undefined,
+  user: Pick<UserProfile, "email" | "fullName" | "userType"> & Partial<UserProfile>,
+): void {
+  if (typeof window === "undefined") return;
+  saveAuthToken(token ?? null);
+  saveStoredUser(user);
+}
+
 export function saveAuthToken(token?: string | null): void {
   if (typeof window === "undefined") return;
 

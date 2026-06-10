@@ -712,3 +712,50 @@ export async function submitSpecificDocuments(
     stage: string;
   };
 }
+
+// ===== PROVIDER PROFILE API =====
+
+export interface ProviderProfile {
+  name: string;
+  email: string;
+  organizationName: string;
+  position: string;
+  phone: string;
+  officeAddress: string;
+  description: string;
+  website: string;
+  profilePicture: string | null;
+}
+
+export function fetchProviderProfile() {
+  return request<{ success: boolean; data: ProviderProfile }>("/api/provider/profile");
+}
+
+export function updateProviderProfile(payload: Partial<ProviderProfile>) {
+  return request<{ success: boolean; data: ProviderProfile }>("/api/provider/profile", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function uploadProviderLogo(file: File): Promise<string> {
+  const formData = new FormData();
+  formData.append("avatar", file);
+
+  const token = getAuthToken();
+  const response = await fetch(`${API_URL}/api/provider/upload-avatar`, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.message || "Failed to upload logo");
+  }
+
+  const data = (await response.json()) as { success: boolean; avatarUrl: string };
+  return data.avatarUrl;
+}
