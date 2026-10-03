@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
-import { Home, User, Award, MessageSquare, Users, Bookmark, Settings, Star, Bell, CheckCheck, FileText } from "lucide-react";
+import { Home, User, Award, MessageSquare, Users, Bookmark, Settings, Star, Bell, CheckCheck, FileText, Menu } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { Sheet, SheetContent } from "../components/ui/sheet";
@@ -48,6 +48,7 @@ export function DashboardLayout() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   // FIX 7: Fetch actual scholarship matches
   useEffect(() => {
     if (!user?.email) return;
@@ -146,7 +147,7 @@ export function DashboardLayout() {
   return (
     <div className="flex min-h-screen bg-gray-50">
       {/* Scholar Sidebar */}
-      <aside className="w-[280px] shrink-0 bg-white border-r border-gray-200 sticky top-0 h-screen overflow-y-auto">
+      <aside className="hidden lg:flex flex-col w-[280px] shrink-0 bg-white border-r border-gray-200 sticky top-0 h-screen overflow-y-auto">
         <div className="p-4">
           {/* User Header */}
           <div className="mb-6 pt-2">
@@ -247,6 +248,14 @@ export function DashboardLayout() {
           <Button
             variant="ghost"
             size="sm"
+            className="lg:hidden mr-auto"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <Menu className="size-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             className="relative"
             onClick={() => setNotificationPanelOpen(true)}
           >
@@ -258,6 +267,103 @@ export function DashboardLayout() {
             )}
           </Button>
         </div>
+
+        {/* Mobile Sidebar Drawer */}
+        <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+          <SheetContent side="left" className="w-[280px] p-0 overflow-y-auto">
+            <div className="p-4">
+              {/* User Header */}
+              <div className="mb-6 pt-2">
+                <div className="flex items-center gap-3 mb-1">
+                  <Avatar className="size-14 border-2 border-blue-100">
+                    <AvatarImage
+                      key={user?.profileImage || user?.profilePicture}
+                      src={resolvePublicAssetUrl(user?.profileImage || user?.profilePicture, true)}
+                    />
+                    <AvatarFallback className="bg-blue-100 text-blue-700 text-lg font-semibold">
+                      {getInitials(user)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-900 text-base truncate">{displayName}</p>
+                    <p className="text-sm text-gray-600 truncate">{displayHeadline}</p>
+                  </div>
+                </div>
+                <div className="mt-3 px-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      clearStoredUser();
+                      navigate("/", { replace: true });
+                    }}
+                    className="w-full justify-start"
+                  >
+                    Sign out
+                  </Button>
+                </div>
+              </div>
+
+              {/* Navigation Menu */}
+              <nav className="space-y-1">
+                {navItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = location.pathname === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      to={item.href}
+                      onClick={() => setSidebarOpen(false)}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
+                        isActive
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-gray-700 hover:bg-gray-100"
+                      }`}
+                    >
+                      <Icon className="size-5 flex-shrink-0" />
+                      <span className="font-medium text-sm">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+
+              {/* Quick Stats Section */}
+              <div className="mt-8 pt-6 border-t border-gray-200">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 px-3">
+                  Quick Stats
+                </h3>
+                <div className="space-y-2.5">
+                  {isProfileEmpty ? (
+                    <div className="px-3 py-2 text-sm text-gray-600">
+                      Complete your profile to see quick stats like completeness, signals, and matches.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between px-3 py-1.5">
+                        <span className="text-sm text-gray-600">Profile Completeness</span>
+                        <Badge className="bg-blue-600 hover:bg-blue-600 text-white px-2.5 py-0.5 text-xs font-semibold">
+                          {profileCompleteness}%
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between px-3 py-1.5">
+                        <span className="text-sm text-gray-600">Profile Signals</span>
+                        <Badge className="bg-blue-800 hover:bg-blue-800 text-white px-2.5 py-0.5 text-xs font-semibold">
+                          {socialSignals}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between px-3 py-1.5">
+                        <span className="text-sm text-gray-600">Scholarship Matches</span>
+                        <Badge className="bg-green-600 hover:bg-green-600 text-white px-2.5 py-0.5 text-xs font-semibold">
+                          {matchCount}
+                        </Badge>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          </SheetContent>
+        </Sheet>
 
         {/* Notifications Side Panel using Sheet */}
         <Sheet open={notificationPanelOpen} onOpenChange={setNotificationPanelOpen}>
