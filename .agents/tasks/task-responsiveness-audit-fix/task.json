@@ -1,0 +1,7 @@
+{
+  "task_id": "task-responsiveness-audit-fix",
+  "task_description": "Comprehensive responsiveness audit and fix for the SCHOLAR frontend. Add mobile sidebar drawers to all three authenticated layouts (DashboardLayout, ProviderLayout, AdminLayout). Fix all hard-coded non-responsive patterns across every user, provider, and admin page: replace fixed padding, unwrap grid columns, add overflow-x-auto to tables, fix messages chat UI, stack forms on mobile, and ensure all heading sizes are fluid.",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}
