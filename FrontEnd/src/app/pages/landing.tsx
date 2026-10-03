@@ -57,6 +57,8 @@ export function LandingPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [loadingScholarships, setLoadingScholarships] = useState(false);
   const [expandedScholarship, setExpandedScholarship] = useState<string | null>(null);
+  // Tracks which scholarship the guest clicked "Apply Now" on before being asked to sign in
+  const [pendingScholarshipId, setPendingScholarshipId] = useState<string | null>(null);
   
   const signInRef = useRef<HTMLDivElement>(null);
   const signUpRef = useRef<HTMLDivElement>(null);
@@ -119,7 +121,8 @@ export function LandingPage() {
     }
   };
 
-  const handleApplyNow = () => {
+  const handleApplyNow = (scholarshipId: string) => {
+    setPendingScholarshipId(scholarshipId);
     setActiveModal("signin");
   };
 
@@ -204,11 +207,14 @@ export function LandingPage() {
           navigate("/admin");
         } else if (userType === "provider") {
           navigate("/provider/dashboard");
+        } else if (pendingScholarshipId) {
+          navigate(`/dashboard/scholarships?open=${pendingScholarshipId}`);
         } else {
           navigate("/dashboard");
         }
         // Close the modal after successful navigation
         setActiveModal(null);
+        setPendingScholarshipId(null);
       } else {
         setOtpError("Verification failed. Please try again.");
       }
@@ -325,10 +331,13 @@ export function LandingPage() {
           navigate("/admin");
         } else if (userType === "provider") {
           navigate("/provider/dashboard");
+        } else if (pendingScholarshipId) {
+          navigate(`/dashboard/scholarships?open=${pendingScholarshipId}`);
         } else {
           navigate("/dashboard");
         }
         setActiveModal(null);
+        setPendingScholarshipId(null);
       } else {
         setSignUpOtpError("Verification failed. Please try again.");
       }
@@ -397,7 +406,7 @@ export function LandingPage() {
             <p className="text-lg text-slate-500 mb-8 max-w-lg">
               An intelligent platform matching Quezon City students with optimal scholarship opportunities based on academic and financial profiles.
             </p>
-            <div className="flex gap-3">
+            <div className="flex flex-wrap gap-3">
               <button
                 onClick={() => setActiveModal("explore")}
                 className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-all"
@@ -470,7 +479,7 @@ export function LandingPage() {
 
       {/* CTA Section */}
       <section className="max-w-[1140px] mx-auto px-6 pb-20">
-        <div className="bg-blue-600 rounded-2xl p-10 flex flex-col lg:flex-row justify-between items-center gap-6 text-white">
+        <div className="bg-blue-600 rounded-2xl p-6 md:p-10 flex flex-col lg:flex-row justify-between items-center gap-6 text-white">
           <div className="text-center lg:text-left">
             <h2 className="text-2xl lg:text-3xl font-bold mb-1">Your future starts here.</h2>
             <p className="text-base opacity-90">
@@ -509,7 +518,7 @@ export function LandingPage() {
         >
           <div
             ref={signInRef}
-            className="bg-white rounded-2xl p-8 w-full max-w-[400px] shadow-2xl relative"
+            className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-[400px] mx-4 shadow-2xl relative"
           >
             <button
               onClick={() => {
@@ -684,7 +693,7 @@ export function LandingPage() {
         >
           <div
             ref={signUpRef}
-            className="bg-white rounded-2xl p-8 w-full max-w-[400px] shadow-2xl relative"
+            className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-[400px] mx-4 shadow-2xl relative"
           >
             <button
               onClick={() => {
@@ -933,7 +942,11 @@ export function LandingPage() {
               ) : (
                 <div className="space-y-4">
                   {filteredScholarships.map((scholarship, index) => {
-                    const id = String(scholarship._id || scholarship.id || index);
+                    // Handle MongoDB ObjectId which may be { $oid: "..." } or a plain string
+                    const rawId = scholarship._id || scholarship.id;
+                    const id = rawId && typeof rawId === "object" && (rawId as Record<string, unknown>).$oid
+                      ? String((rawId as Record<string, unknown>).$oid)
+                      : String(rawId || index);
                     const title = String(scholarship.name || scholarship.title || scholarship.scholarshipName || "Unnamed Scholarship");
                     const provider = String(scholarship.provider || scholarship.providerOffice || "Quezon City Government");
                     const description = String(scholarship.description || "");
@@ -1040,7 +1053,7 @@ export function LandingPage() {
                             {/* Apply Button */}
                             <div className="mt-4 pt-4 border-t border-slate-100">
                               <Button
-                                onClick={handleApplyNow}
+                                onClick={() => handleApplyNow(id)}
                                 className="w-full bg-blue-600 hover:bg-blue-700"
                               >
                                 Apply Now

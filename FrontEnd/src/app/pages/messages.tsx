@@ -65,6 +65,7 @@ async function persistConversationsWithFallback(email: string | undefined, conve
 export function Messages() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [showMobileChat, setShowMobileChat] = useState(false);
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [messageText, setMessageText] = useState("");
@@ -86,6 +87,7 @@ export function Messages() {
     const existing = conversations.find((c) => c.participantId === participantId);
     if (existing) {
       setActiveId(existing.id);
+      setShowMobileChat(true);
       setIsNewOpen(false);
       return;
     }
@@ -95,6 +97,7 @@ export function Messages() {
     const next = [conv, ...conversations];
     setConversations(next);
     setActiveId(id);
+    setShowMobileChat(true);
     setIsNewOpen(false);
   };
 
@@ -107,7 +110,7 @@ export function Messages() {
   };
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
         <div className="mb-6 flex items-center justify-between">
           <div>
@@ -119,8 +122,9 @@ export function Messages() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200 p-4 grid grid-cols-3 gap-4">
-          <div className="col-span-1 border-r pr-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Conversation List — hidden on mobile when chat is open */}
+          <div className={`col-span-1 border-b md:border-b-0 md:border-r pr-0 md:pr-4 pb-4 md:pb-0 ${showMobileChat ? "hidden md:block" : "block"}`}>
             <div className="mb-3">
               <input
                 className="w-full border rounded px-3 py-2"
@@ -139,7 +143,7 @@ export function Messages() {
                     <div
                       key={c.id}
                       className={`flex items-center gap-3 p-2 rounded hover:bg-gray-50 cursor-pointer ${activeId === c.id ? "bg-gray-100" : ""}`}
-                      onClick={() => setActiveId(c.id)}
+                      onClick={() => { setActiveId(c.id); setShowMobileChat(true); }}
                     >
                       <Avatar className="size-10">
                         <AvatarFallback className="bg-blue-100 text-blue-700">{getInitials({ fullName: c.name })}</AvatarFallback>
@@ -157,9 +161,24 @@ export function Messages() {
             </div>
           </div>
 
-          <div className="col-span-2">
+          {/* Chat Pane — hidden on mobile when list is shown */}
+          <div className={`col-span-1 md:col-span-2 ${showMobileChat ? "block" : "hidden md:block"}`}>
             {activeConv ? (
               <div className="flex flex-col h-[60vh]">
+                {/* Mobile back button */}
+                <div className="flex items-center gap-2 mb-3 md:hidden">
+                  <button
+                    onClick={() => setShowMobileChat(false)}
+                    className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
+                    aria-label="Back to conversations"
+                  >
+                    <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                    Back
+                  </button>
+                  <span className="font-medium text-sm truncate">{activeConv.name}</span>
+                </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
                   {activeConv.messages.map((m) => (
                     <div key={m.id} className={`flex ${m.sender === "me" || (currentUserEmail && m.sender === currentUserEmail) ? "justify-end" : "justify-start"}`}>

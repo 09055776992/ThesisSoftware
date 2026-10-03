@@ -698,7 +698,7 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
             </div>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1">
             <Label>Education Level</Label>
             <Select value={draftEducationLevel} onValueChange={(v) => { setDraftEducationLevel(v); setDraftYearLevel(""); }}>
@@ -718,7 +718,7 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
             </Select>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1">
             <Label htmlFor="edu-fos">Field of Study</Label>
             <Input id="edu-fos" value={draftFieldOfStudy} onChange={(e) => setDraftFieldOfStudy(e.target.value)} placeholder="Computer Science" />
@@ -730,7 +730,7 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
         </div>
         <div className="border-t pt-4">
           <p className="text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-1 rounded inline-block mb-3">REQUIRED FOR ELIGIBILITY</p>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label htmlFor="edu-school">School / Institution Name <span className="text-red-500">*</span></Label>
               <Input id="edu-school" value={draftSchoolName} onChange={(e) => setDraftSchoolName(e.target.value)} placeholder="e.g. Our Lady of Fatima University" />
@@ -740,7 +740,7 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
               <Input id="edu-campus" value={draftSchoolCampus} onChange={(e) => setDraftSchoolCampus(e.target.value)} placeholder="e.g. Quezon City Campus" />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4 mt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
             <div className="space-y-1">
               <Label>School Type</Label>
               <Select value={draftSchoolType} onValueChange={setDraftSchoolType}>
@@ -1013,7 +1013,7 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
         </div>
         <div className="border-t pt-4 space-y-4">
           <p className="text-sm font-semibold">Financial Information</p>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label htmlFor="ach-fn">Financial Need (1–5) <span className="text-red-500">*</span></Label>
               <Input id="ach-fn" type="number" min="1" max="5" value={draftFinancialNeed}
@@ -1029,7 +1029,7 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
               </div>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label>Currency</Label>
               <Select value={draftCurrency} onValueChange={setDraftCurrency}>
@@ -1049,7 +1049,7 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label htmlFor="ach-hi">Household Income (Monthly ₱)</Label>
               <div className="relative">
@@ -1072,7 +1072,7 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label htmlFor="ach-ed">Economic Dependency (No. of Household Dependents)</Label>
               <Input id="ach-ed" type="number" min="0" max="20" value={draftEconomicDependency}

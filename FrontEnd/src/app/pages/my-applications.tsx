@@ -145,7 +145,7 @@ export function MyApplications() {
               <Card key={app._id} className="overflow-hidden">
                 <CardContent className="p-0">
                   <div className="flex flex-col md:flex-row">
-                    <div className="md:size-48 shrink-0">
+                    <div className="h-48 md:h-auto md:w-48 shrink-0">
                       <img
                         src={app.scholarshipData?.imageUrl || defaultScholarshipImage}
                         alt={app.scholarshipName}
@@ -232,7 +232,7 @@ export function MyApplications() {
                 </div>
 
                 {/* Application Info */}
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   <div>
                     <p className="text-muted-foreground">Reference Number</p>
                     <p className="font-medium">{selectedApp.referenceNumber || selectedApp._id.slice(-8).toUpperCase()}</p>

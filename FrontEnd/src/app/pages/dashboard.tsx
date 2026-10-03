@@ -96,7 +96,7 @@ export function Dashboard() {
                 onChange={(e) => setPostContent(e.target.value)}
                 className="min-h-[100px] resize-none"
               />
-              <div className="flex items-center justify-between mt-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
                 <div className="flex gap-2">
                   <Button type="button" variant="ghost" size="sm">
                     <ImageIcon className="size-4 mr-2" />
@@ -172,7 +172,7 @@ export function Dashboard() {
 
               <Separator className="mb-3" />
 
-              <div className="flex items-center justify-around">
+              <div className="flex flex-wrap items-center justify-around gap-1">
                 <Button type="button" variant="ghost" size="sm" className="flex-1">
                   <Heart className="size-4 mr-2" />
                   Like

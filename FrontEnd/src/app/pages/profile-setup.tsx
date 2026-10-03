@@ -439,7 +439,7 @@ export function ProfileSetup() {
                   </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <RequiredLabel>Location</RequiredLabel>
                     <Input
@@ -476,7 +476,7 @@ export function ProfileSetup() {
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold">Academic Information</h3>
 
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
                     <div className="space-y-2">
                       <RequiredLabel>GPA</RequiredLabel>
                       <Input
@@ -678,7 +678,7 @@ export function ProfileSetup() {
                     These categories are required for specific scholarships (Athletic, Arts, Youth Leadership, etc.)
                   </p>
 
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6">
                     {/* Left Column */}
                     <div className="space-y-3">
                       <div className="flex items-center space-x-2">

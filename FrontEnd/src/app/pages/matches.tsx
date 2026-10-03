@@ -44,9 +44,9 @@ function ShapBar({ contribution }: { contribution: ShapContribution }) {
         : Minus;
 
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div className="flex flex-wrap items-center gap-2 text-xs">
       <ImpactIcon className="size-3 shrink-0 text-muted-foreground" />
-      <span className="w-[110px] shrink-0 truncate text-muted-foreground">
+      <span className="min-w-0 shrink-0 max-w-[100px] truncate text-muted-foreground">
         {contribution.factor}
       </span>
       <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">

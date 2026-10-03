@@ -197,7 +197,7 @@ export function Settings() {
   const passwordStrength = getPasswordStrength(passwordForm.newPassword);
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="max-w-2xl mx-auto space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
@@ -213,28 +213,28 @@ export function Settings() {
           <h2 className="text-base font-semibold text-gray-900 mb-1">Account &amp; Security</h2>
           <p className="text-sm text-gray-500 mb-4">Manage your password, notifications, and privacy.</p>
           <div className="space-y-0 divide-y divide-gray-100">
-            <div className="flex items-center justify-between py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 py-3">
               <div>
                 <p className="font-medium text-gray-900">Email Notifications</p>
                 <p className="text-sm text-gray-500">Receive scholarship and application updates</p>
               </div>
               <Button type="button" variant="outline" onClick={() => setNotificationOpen(true)}>Configure</Button>
             </div>
-            <div className="flex items-center justify-between py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 py-3">
               <div>
                 <p className="font-medium text-gray-900">Privacy Settings</p>
                 <p className="text-sm text-gray-500">Control who can see your profile details</p>
               </div>
               <Button type="button" variant="outline" onClick={() => setPrivacyOpen(true)}>Manage</Button>
             </div>
-            <div className="flex items-center justify-between py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 py-3">
               <div>
                 <p className="font-medium text-gray-900">Password</p>
                 <p className="text-sm text-gray-500">Update your login password</p>
               </div>
               <Button type="button" variant="outline" onClick={() => setPasswordOpen(true)}>Update</Button>
             </div>
-            <div className="flex items-center justify-between py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 py-3">
               <div>
                 <p className="font-medium text-gray-900">Two-Factor Authentication</p>
                 <p className="text-sm text-gray-500">Add an extra layer of security to your account</p>
@@ -273,7 +273,7 @@ export function Settings() {
 
       {/* Notification Settings Dialog */}
       <Dialog open={notificationOpen} onOpenChange={setNotificationOpen}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Email Notifications</DialogTitle>
             <DialogDescription>Choose which messages you want to receive.</DialogDescription>
@@ -303,7 +303,7 @@ export function Settings() {
 
       {/* Privacy Settings Dialog */}
       <Dialog open={privacyOpen} onOpenChange={setPrivacyOpen}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Privacy Settings</DialogTitle>
             <DialogDescription>Control how much of your profile is visible.</DialogDescription>
@@ -345,7 +345,7 @@ export function Settings() {
 
       {/* Password Dialog */}
       <Dialog open={passwordOpen} onOpenChange={setPasswordOpen}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Update Password</DialogTitle>
             <DialogDescription>Enter your current password and choose a new one.</DialogDescription>
