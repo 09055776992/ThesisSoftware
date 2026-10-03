@@ -11,6 +11,7 @@ import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Separator } from "../../components/ui/separator";
 import { CheckCircle, XCircle, Clock, ShieldCheck, Eye, Download, FileText, AlertTriangle, CheckSquare, AlertCircle, ArrowLeft, ChevronRight, Calendar, ExternalLink, Search, FileSpreadsheet, Video, Trophy, Brain, TrendingUp, TrendingDown } from "lucide-react";
+import API_BASE_URL from "../../../config/api";
 import {
   fetchScholarshipApplicationSummary,
   fetchScholarshipApplicants,
@@ -176,8 +177,8 @@ function getDocumentUrl(filePath: string) {
   if (filePath.startsWith("http")) return filePath;
   const normalized = filePath.replace(/\\/g, "/");
   const uploadIndex = normalized.indexOf("uploads");
-  if (uploadIndex >= 0) return `http://localhost:5000/${normalized.slice(uploadIndex)}`;
-  return `http://localhost:5000/${normalized}`;
+  if (uploadIndex >= 0) return `${API_BASE_URL}/${normalized.slice(uploadIndex)}`;
+  return `${API_BASE_URL}/${normalized}`;
 }
 
 // ===== RankingCard Component =====
@@ -340,7 +341,7 @@ export function AdminApplications() {
     notes: "",
   });
 
-  const API_BASE = (import.meta.env as any).VITE_API_BASE_URL || "http://localhost:5000";
+  const API_BASE = API_BASE_URL;
 
   useEffect(() => {
     if (viewMode === "scholarships") fetchScholarships();
@@ -613,7 +614,7 @@ export function AdminApplications() {
   // ===== RENDER: Scholarship List =====
   if (viewMode === "scholarships") {
     return (
-      <div className="p-8 space-y-6">
+      <div className="p-4 md:p-8 space-y-4 md:space-y-6">
         <div>
           <h1 className="text-3xl font-bold mb-2">Application Review</h1>
           <p className="text-muted-foreground">Scholarships with submitted applications</p>
@@ -635,6 +636,7 @@ export function AdminApplications() {
               <CardTitle>Scholarships with Applications ({scholarshipList.length})</CardTitle>
             </CardHeader>
             <CardContent>
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -677,6 +679,7 @@ export function AdminApplications() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -701,9 +704,9 @@ export function AdminApplications() {
     });
 
     return (
-      <div className="p-8 space-y-6">
+      <div className="p-4 md:p-8 space-y-4 md:space-y-6">
         {/* Header */}
-        <div className="flex items-center gap-4 mb-2">
+        <div className="flex flex-wrap items-center gap-4 mb-2">
           <Button variant="ghost" size="sm" onClick={() => setViewMode("scholarships")}>
             <ArrowLeft className="size-4 mr-1" /> Back
           </Button>
@@ -776,7 +779,7 @@ export function AdminApplications() {
             </div>
 
             {/* Stats Summary */}
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold font-mono">{applicantStats["all"] || applicants.length}</p><p className="text-xs text-muted-foreground">Total</p></CardContent></Card>
               <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold font-mono text-orange-600">{applicantStats["System Qualified"] || 0}</p><p className="text-xs text-muted-foreground">Pending Review</p></CardContent></Card>
               <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold font-mono text-green-600">{applicantStats["Qualified for Final Screening"] || 0}</p><p className="text-xs text-muted-foreground">Qualified</p></CardContent></Card>
@@ -788,6 +791,7 @@ export function AdminApplications() {
             ) : (
               <Card>
                 <CardContent>
+                  <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -841,6 +845,7 @@ export function AdminApplications() {
                       )}
                     </TableBody>
                   </Table>
+                  </div>
                 </CardContent>
               </Card>
             )}
@@ -929,7 +934,7 @@ export function AdminApplications() {
     const student = app.studentProfile as any;
 
     return (
-      <div className="p-8 space-y-6 max-w-5xl">
+      <div className="p-4 md:p-8 space-y-4 md:space-y-6 max-w-5xl">
         {/* Header */}
         <div className="flex items-center gap-4 mb-2">
           <Button variant="ghost" size="sm" onClick={() => setViewMode("applicants")}>
@@ -970,7 +975,7 @@ export function AdminApplications() {
           <Card>
             <CardHeader><CardTitle className="text-lg">Eligibility Summary</CardTitle></CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {Object.entries(app.eligibilityCheck.criteriaChecks).map(([key, check]: [string, any]) => (
                   <div key={key} className="flex items-start gap-2 p-2 rounded bg-gray-50">
                     {check.passed ? (
@@ -1133,6 +1138,7 @@ export function AdminApplications() {
                   {docsAnyRejected && "Some Documents Rejected ✗"}
                 </div>
 
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1215,6 +1221,7 @@ export function AdminApplications() {
                     })}
                   </TableBody>
                 </Table>
+                </div>
 
                 {/* Rejection reasons for Stage 2 documents */}
                 {(app.specificDocuments || app.submittedDocuments || []).map((doc, idx) => {

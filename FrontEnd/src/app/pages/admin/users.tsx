@@ -73,7 +73,7 @@ export function AdminUsers() {
   });
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 md:p-8 space-y-4 md:space-y-6">
       <div>
         <h1 className="text-3xl font-bold mb-2">User Management</h1>
         <p className="text-muted-foreground">Manage and monitor all platform users</p>
@@ -144,6 +144,7 @@ export function AdminUsers() {
               <p className="text-muted-foreground">No users found</p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -219,6 +220,7 @@ export function AdminUsers() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -303,7 +305,7 @@ export function AdminUsers() {
                 </TabsContent>
               </Tabs>
 
-              <div className="flex gap-3 pt-4">
+              <div className="flex flex-wrap gap-3 pt-4">
                 <Button className="flex-1">Edit User</Button>
                 <Button variant="outline" className="flex-1">Send Message</Button>
                 <Button variant="destructive">Suspend</Button>

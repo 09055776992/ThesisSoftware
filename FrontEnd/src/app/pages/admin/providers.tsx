@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../componen
 import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
 import { CheckCircle, XCircle, UserX, UserCheck, Clock, ShieldCheck, ShieldOff } from "lucide-react";
+import { toast } from "sonner";
 import { getAuthToken, getStoredUser } from "../../lib/user-storage";
 import { API_URL } from "../../lib/api-client";
 
@@ -29,6 +30,53 @@ interface Provider {
 }
 
 const API_BASE = API_URL;
+
+async function adminProviderRequest(
+  path: string,
+  options: RequestInit = {},
+): Promise<Record<string, unknown>> {
+  const token = getAuthToken();
+  if (!token) {
+    throw new Error("Admin session token missing. Log in again via Admin Login.");
+  }
+
+  const url = `${API_BASE}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers ?? {}),
+      },
+    });
+  } catch {
+    throw new Error(
+      "Could not reach the server. Make sure the backend is running on port 5000.",
+    );
+  }
+
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    throw new Error(
+      `Server error (${res.status}). The backend may be down or the route is missing.`,
+    );
+  }
+
+  const data = (await res.json()) as Record<string, unknown>;
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(
+      "Admin session expired. Use Admin Login from the home page (email + 6-digit code).",
+    );
+  }
+  if (!res.ok) {
+    throw new Error(
+      String(data.message || data.error || `Request failed (${res.status})`),
+    );
+  }
+  return data;
+}
 
 export function AdminProviders() {
   const navigate = useNavigate();
@@ -64,25 +112,21 @@ export function AdminProviders() {
         }
         return;
       }
-      const url = statusFilter === "all"
-        ? `${API_BASE}/api/admin/providers`
-        : `${API_BASE}/api/admin/providers?status=${statusFilter}`;
-
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (res.status === 401 || res.status === 403) {
-        setError(
-          "Admin session expired or invalid. Use Admin Login from the home page (with the 6-digit code), not the student sign-in.",
-        );
-        setLoading(false);
-        return;
-      }
-      if (!res.ok) throw new Error(data.message || "Failed to fetch providers");
-      setProviders(data.data || []);
+      const path =
+        statusFilter === "all"
+          ? "/api/admin/providers"
+          : `/api/admin/providers?status=${statusFilter}`;
+      const data = await adminProviderRequest(path);
+      setProviders((data.data as Provider[]) || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load providers. Make sure the backend server is running.");
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to load providers. Make sure the backend server is running.";
+      setError(message);
+      if (message.includes("session")) {
+        toast.error(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -91,16 +135,12 @@ export function AdminProviders() {
   const handleApprove = async (id: string) => {
     setActionLoading(id);
     try {
-      const token = getAuthToken();
-      const res = await fetch(`${API_BASE}/api/admin/providers/${id}/approve`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Failed to approve");
+      await adminProviderRequest(`/api/admin/providers/${id}/approve`, { method: "PATCH" });
+      toast.success("Provider account approved successfully.");
       fetchProviders();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to approve provider");
+      console.error("Approve provider error:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to approve provider.");
     } finally {
       setActionLoading(null);
     }
@@ -110,22 +150,17 @@ export function AdminProviders() {
     if (!rejectingId) return;
     setActionLoading(rejectingId);
     try {
-      const token = getAuthToken();
-      const res = await fetch(`${API_BASE}/api/admin/providers/${rejectingId}/reject`, {
+      await adminProviderRequest(`/api/admin/providers/${rejectingId}/reject`, {
         method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({ reason: rejectReason }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Failed to reject");
+      toast.success("Provider account rejected.");
       setRejectingId(null);
       setRejectReason("");
       fetchProviders();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to reject provider");
+      console.error("Reject provider error:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to reject provider.");
     } finally {
       setActionLoading(null);
     }
@@ -135,16 +170,12 @@ export function AdminProviders() {
     if (!confirm("Deactivate this provider? They will lose access immediately.")) return;
     setActionLoading(id);
     try {
-      const token = getAuthToken();
-      const res = await fetch(`${API_BASE}/api/admin/providers/${id}/deactivate`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Failed to deactivate");
+      await adminProviderRequest(`/api/admin/providers/${id}/deactivate`, { method: "PATCH" });
+      toast.success("Provider account deactivated.");
       fetchProviders();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to deactivate provider");
+      console.error("Deactivate provider error:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to deactivate provider.");
     } finally {
       setActionLoading(null);
     }
@@ -153,16 +184,12 @@ export function AdminProviders() {
   const handleReactivate = async (id: string) => {
     setActionLoading(id);
     try {
-      const token = getAuthToken();
-      const res = await fetch(`${API_BASE}/api/admin/providers/${id}/reactivate`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Failed to reactivate");
+      await adminProviderRequest(`/api/admin/providers/${id}/reactivate`, { method: "PATCH" });
+      toast.success("Provider account reactivated.");
       fetchProviders();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to reactivate provider");
+      console.error("Reactivate provider error:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to reactivate provider.");
     } finally {
       setActionLoading(null);
     }
@@ -207,14 +234,14 @@ export function AdminProviders() {
   ] as const;
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 md:p-8 space-y-4 md:space-y-6">
       <div>
         <h1 className="text-3xl font-bold mb-2">Provider Accounts</h1>
         <p className="text-muted-foreground">Manage scholarship provider account requests and access</p>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4 pb-4">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Pending Review</p>
@@ -275,6 +302,7 @@ export function AdminProviders() {
               <p>No providers found.</p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -362,6 +390,7 @@ export function AdminProviders() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

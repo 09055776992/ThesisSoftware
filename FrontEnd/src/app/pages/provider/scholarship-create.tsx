@@ -66,7 +66,7 @@ export function ProviderScholarshipCreate() {
   };
 
   return (
-    <div className="p-8 max-w-2xl">
+    <div className="p-4 md:p-8 max-w-2xl">
       <div className="flex items-center gap-3 mb-6">
         <Link to="/provider/scholarships">
           <Button variant="ghost" size="sm"><ArrowLeft className="size-4 mr-1" /> Back</Button>
@@ -91,7 +91,7 @@ export function ProviderScholarshipCreate() {
               <Textarea id="description" rows={4} placeholder="Describe the scholarship, its purpose, and who it's for..." value={formData.description} onChange={handleChange} required />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="amount">Award Amount (₱) *</Label>
                 <Input id="amount" type="number" min="1" placeholder="25000" value={formData.amount} onChange={handleChange} required />
@@ -102,7 +102,7 @@ export function ProviderScholarshipCreate() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="openingDate">Opening Date</Label>
                 <Input id="openingDate" type="date" value={formData.openingDate} onChange={handleChange} />
@@ -113,7 +113,7 @@ export function ProviderScholarshipCreate() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Scholarship Type *</Label>
                 <Select value={formData.type} onValueChange={(v) => handleSelect("type", v)}>
@@ -139,7 +139,7 @@ export function ProviderScholarshipCreate() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="fieldOfStudy">Field of Study</Label>
                 <Input id="fieldOfStudy" placeholder="e.g., Computer Science" value={formData.fieldOfStudy} onChange={handleChange} />
@@ -152,7 +152,7 @@ export function ProviderScholarshipCreate() {
 
             {error && <p className="text-sm text-destructive">{error}</p>}
 
-            <div className="flex gap-3 pt-2">
+            <div className="flex flex-wrap gap-3 pt-2">
               <Button type="submit" className="flex-1" disabled={isSubmitting}>
                 {isSubmitting ? "Creating..." : "Create Scholarship"}
               </Button>

@@ -155,14 +155,14 @@ export function ProviderApplications() {
   ];
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-4 md:p-8 space-y-4 md:space-y-6">
       <div>
         <h1 className="text-3xl font-bold mb-2">Applications</h1>
         <p className="text-muted-foreground">Review and manage applicants for your scholarships</p>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: "Pending", value: stats.pending, color: "text-amber-600" },
           { label: "Under Review", value: stats.underReview, color: "text-purple-600" },
@@ -210,6 +210,7 @@ export function ProviderApplications() {
               <p>No applications found.</p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -281,6 +282,7 @@ export function ProviderApplications() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

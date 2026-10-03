@@ -64,14 +64,14 @@ export function AdminScholarships() {
   }
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 md:p-8 space-y-4 md:space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold mb-2">Scholarships</h1>
           <p className="text-muted-foreground">View all scholarships across the platform</p>
         </div>
         {/* READ-ONLY notice */}
-        <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+        <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700 max-w-sm">
           <Info className="size-4 flex-shrink-0" />
           <span>Scholarships are managed by Scholarship Providers. Admin view is read-only.</span>
         </div>
@@ -89,7 +89,7 @@ export function AdminScholarships() {
       </div>
 
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardContent className="pt-4 pb-4">
             <p className="text-sm text-muted-foreground">Total Scholarships</p>
@@ -119,6 +119,7 @@ export function AdminScholarships() {
           <CardTitle>All Scholarships ({filtered.length})</CardTitle>
         </CardHeader>
         <CardContent>
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -174,6 +175,7 @@ export function AdminScholarships() {
               )}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
 

@@ -1,11 +1,11 @@
 export function AdminMessages() {
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Messages</h1>
         <p className="text-gray-600 mb-8">Broadcast and reply to scholar messages</p>
         
-        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+        <div className="bg-white rounded-xl border border-gray-200 p-6 md:p-12 text-center">
           <div className="max-w-md mx-auto">
             <div className="size-16 bg-[#1E3A5F] bg-opacity-10 rounded-full flex items-center justify-center mx-auto mb-4">
               <svg className="size-8 text-[#1E3A5F]" fill="none" stroke="currentColor" viewBox="0 0 24 24">

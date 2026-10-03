@@ -159,7 +159,7 @@ export function AdminDashboard() {
       ]
     : [];
   return (
-    <div className="p-8 space-y-8">
+    <div className="p-4 md:p-8 space-y-6 md:space-y-8">
       <div>
         <h1 className="text-3xl font-bold mb-2">Admin Dashboard</h1>
         <p className="text-muted-foreground">Overview of platform performance and metrics</p>

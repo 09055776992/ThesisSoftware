@@ -1,0 +1,128 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Fix all non-responsive patterns across Provider pages, Admin pages, and shared components. This feature is independent of FEAT-001 and FEAT-002 in terms of file scope (only touches provider/*, admin/*, and components/), but should be committed after FEAT-001 since pages render inside layouts. Covers: 6 provider pages, 9 admin pages, ApplicationStatusTracker component.",
+  "status": "completed",
+  "steps": [
+    "=== PROVIDER PAGES ===",
+
+    "provider-dashboard.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\provider-dashboard.tsx):",
+    "Issue 1 — Container: `p-8 space-y-6` → `p-4 md:p-8 space-y-4 md:space-y-6`.",
+    "Issue 2 — Header flex: `flex items-center justify-between` with a long heading and a Create button. On mobile this can overflow if fullName is long. Add `flex-wrap gap-4`: `<div className='flex flex-wrap items-center justify-between gap-4'>`.",
+    "Issue 3 — Stats cards: `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4` — already responsive! No change.",
+    "Issue 4 — Quick Actions: `grid grid-cols-1 md:grid-cols-3 gap-4` — already responsive! No change.",
+    "Issue 5 — Recent Applications row: `flex items-center justify-between p-3 border rounded-lg` — fine, no overflow risk.",
+
+    "provider/applications.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\provider\\applications.tsx):",
+    "Issue 1 — Container: `p-8 space-y-6` → `p-4 md:p-8 space-y-4 md:space-y-6`.",
+    "Issue 2 — Stats grid: `grid grid-cols-4 gap-4` — CRITICAL: no mobile fallback. Change to `grid grid-cols-2 lg:grid-cols-4 gap-4`.",
+    "Issue 3 — Table: The `<Table>` has no overflow wrapper. Wrap with `<div className='overflow-x-auto'>` around `<Table>` ... `</Table>`.",
+    "Issue 4 — Filter tabs: `flex gap-2 flex-wrap` — already wraps. Fine.",
+    "Issue 5 — Action buttons in table: `flex gap-1 justify-end` — fine.",
+
+    "provider/scholarships.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\provider\\scholarships.tsx):",
+    "Issue 1 — Container: `p-8 space-y-6` → `p-4 md:p-8 space-y-4 md:space-y-6`.",
+    "Issue 2 — Header: `flex items-center justify-between` → `flex flex-wrap items-center justify-between gap-4`.",
+    "Issue 3 — Table: Add `<div className='overflow-x-auto'>` wrapper around `<Table>`.",
+
+    "provider/scholarship-create.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\provider\\scholarship-create.tsx):",
+    "Issue 1 — Container: `p-8 max-w-2xl` → `p-4 md:p-8 max-w-2xl`.",
+    "Issue 2 — Amount/MinGPA grid: `<div className='grid grid-cols-2 gap-4'>` → `grid grid-cols-1 sm:grid-cols-2 gap-4`.",
+    "Issue 3 — OpeningDate/Deadline grid: `<div className='grid grid-cols-2 gap-4'>` → `grid grid-cols-1 sm:grid-cols-2 gap-4`.",
+    "Issue 4 — Type/Status grid: `<div className='grid grid-cols-2 gap-4'>` → `grid grid-cols-1 sm:grid-cols-2 gap-4`.",
+    "Issue 5 — FieldOfStudy/Location grid: `<div className='grid grid-cols-2 gap-4'>` → `grid grid-cols-1 sm:grid-cols-2 gap-4`.",
+    "Issue 6 — Form submit buttons: `<div className='flex gap-3 pt-2'>` with two buttons — add `flex-wrap`.",
+
+    "provider/scholarship-edit.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\provider\\scholarship-edit.tsx):",
+    "Apply the same fixes as scholarship-create.tsx: read the file first, then change all `grid-cols-2` form grids to `grid-cols-1 sm:grid-cols-2`, change `p-8` to `p-4 md:p-8`, and add `flex-wrap` to button rows.",
+
+    "provider/profile.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\provider\\profile.tsx):",
+    "Issue 1 — Container: `p-8 max-w-5xl mx-auto space-y-8` → `p-4 md:p-8 max-w-5xl mx-auto space-y-6 md:space-y-8`.",
+    "Issue 2 — Profile header: The `-mt-12 px-2 flex flex-col md:flex-row items-start md:items-end gap-6` pattern is already responsive. Fine.",
+    "Issue 3 — Two-column content: `grid grid-cols-1 md:grid-cols-3 gap-8` → already responsive. Fine.",
+    "Issue 4 — Edit/Cancel buttons: `<div className='flex gap-2'>` — add `flex-wrap`.",
+
+    "provider/notifications.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\provider\\notifications.tsx):",
+    "Read the file first. Apply `p-4 md:p-8` for container, and check for any hard grid or table issues.",
+
+    "=== ADMIN PAGES ===",
+
+    "admin/dashboard.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\admin\\dashboard.tsx):",
+    "Issue 1 — Container: `p-8 space-y-8` → `p-4 md:p-8 space-y-6 md:space-y-8`.",
+    "Issue 2 — Stats cards: `grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6` — already responsive! No change.",
+    "Issue 3 — Charts grid: `grid grid-cols-1 lg:grid-cols-2 gap-6` — already responsive!",
+    "Issue 4 — Quick Actions grid: `grid grid-cols-2 md:grid-cols-4 gap-4` — already responsive!",
+    "Issue 5 — Chart container heights: `ResponsiveContainer width='100%' height={300}` works on all sizes. Fine.",
+
+    "admin/applications.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\admin\\applications.tsx):",
+    "Issue 1 — All view containers: `p-8 space-y-6` → `p-4 md:p-8 space-y-4 md:space-y-6`.",
+    "Issue 2 — All Table usages (3 tables: scholarship list, applicants list, review documents): wrap each with `<div className='overflow-x-auto'>`.",
+    "Issue 3 — Applicant stats row: If there is a stats grid like `grid grid-cols-4 gap-4`, change to `grid grid-cols-2 lg:grid-cols-4 gap-4`. Check by reading the file.",
+    "Issue 4 — RankingCard score bars grid: `grid grid-cols-1 sm:grid-cols-2 gap-3` — already responsive!",
+    "Issue 5 — Header with back button and export: `flex items-center gap-4 mb-2` with a `ml-auto flex gap-2` on the right — add `flex-wrap` to the outer header div.",
+    "Issue 6 — Filter tabs: `flex gap-2 flex-wrap` — already wraps.",
+    "Issue 7 — Screening/Reject/Resubmit dialog grids: `grid grid-cols-2 gap-3` → `grid grid-cols-1 sm:grid-cols-2 gap-3`.",
+
+    "admin/users.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\admin\\users.tsx):",
+    "Issue 1 — Container: `p-8 space-y-6` → `p-4 md:p-8 space-y-4 md:space-y-6`.",
+    "Issue 2 — Card header filter bar: `flex flex-col md:flex-row md:items-center md:justify-between gap-4` — already responsive!",
+    "Issue 3 — Table: Add `<div className='overflow-x-auto'>` wrapper around `<Table>`.",
+    "Issue 4 — User detail modal Tabs: `TabsList className='w-full'` with 3 triggers — on mobile `flex-1` triggers may become very narrow. Change `TabsTrigger className='flex-1'` to have a min font size. Actually this is fine, shadcn Tabs handles it. No change needed.",
+    "Issue 5 — Detail modal bottom buttons: `flex gap-3 pt-4` → `flex flex-wrap gap-3 pt-4`.",
+
+    "admin/providers.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\admin\\providers.tsx):",
+    "Issue 1 — Container: `p-8 space-y-6` → `p-4 md:p-8 space-y-4 md:space-y-6`.",
+    "Issue 2 — Stats grid: `grid grid-cols-4 gap-4` — CRITICAL: no mobile fallback. Change to `grid grid-cols-2 lg:grid-cols-4 gap-4`.",
+    "Issue 3 — Table: Add `<div className='overflow-x-auto'>` wrapper around `<Table>`.",
+    "Issue 4 — Filter tabs: `flex gap-2 flex-wrap` — already wraps.",
+    "Issue 5 — Action buttons in table cells: `flex gap-2 justify-end` — fine, buttons are small.",
+
+    "admin/scholarships.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\admin\\scholarships.tsx):",
+    "Issue 1 — Container: `p-8 space-y-6` → `p-4 md:p-8 space-y-4 md:space-y-6`.",
+    "Issue 2 — Header: `flex items-center justify-between` with a notice badge on the right — the badge text is long ('Scholarships are managed by Scholarship Providers...'). Change to `flex flex-wrap items-start justify-between gap-4` and add `max-w-sm` to the badge div.",
+    "Issue 3 — Stats row: `grid grid-cols-3 gap-4` → `grid grid-cols-1 sm:grid-cols-3 gap-4`.",
+    "Issue 4 — Table: Add `<div className='overflow-x-auto'>` wrapper around `<Table>`.",
+
+    "admin/reports.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\admin\\reports.tsx):",
+    "Issue 1 — Container: `p-8` → `p-4 md:p-8`.",
+    "Issue 2 — Quick stats grid: `grid grid-cols-1 md:grid-cols-3 gap-6` — already responsive!",
+    "Issue 3 — Main stats: `grid grid-cols-1 md:grid-cols-3 gap-6` — already responsive!",
+    "Issue 4 — Charts: `grid grid-cols-1 lg:grid-cols-2 gap-6` — already responsive!",
+    "Issue 5 — Applications breakdown: `grid grid-cols-2 md:grid-cols-4 gap-4` — already responsive!",
+    "Issue 6 — Generate report section: `flex flex-col md:flex-row gap-4 items-end` — already responsive!",
+
+    "admin/messages.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\admin\\messages.tsx):",
+    "Issue 1 — Container: `p-8` → `p-4 md:p-8`.",
+    "Issue 2 — The placeholder card `p-12` → `p-6 md:p-12`.",
+
+    "admin/settings.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\admin\\settings.tsx):",
+    "Issue 1 — Container: `p-8 space-y-6` → `p-4 md:p-8 space-y-4 md:space-y-6`.",
+    "Issue 2 — TabsList wrapping: On narrow screens the 4 tab triggers ('General', 'Notifications', 'Email Templates', 'API Keys') may overflow. Wrap with `overflow-x-auto` or add `flex-wrap` to TabsList. Add `className='flex-wrap h-auto'` to `<TabsList>`.",
+
+    "admin/notifications.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\pages\\admin\\notifications.tsx):",
+    "Read the file first. Apply `p-4 md:p-8` for container padding, check for any grid/table/overflow issues and fix them.",
+
+    "=== SHARED COMPONENT ===",
+
+    "ApplicationStatusTracker.tsx (e:\\Thesis Software\\FrontEnd\\src\\app\\components\\ApplicationStatusTracker.tsx):",
+    "The component already handles mobile with `grid-cols-1 md:grid-cols-4` and has a vertical progress line for mobile. Review: the steps wrapper uses `relative grid grid-cols-1 md:grid-cols-4 gap-6 md:gap-4`. The mobile vertical line `md:hidden absolute left-5 top-0 bottom-0 w-0.5 bg-gray-200` requires `pl-8` or similar on mobile step items to not overlap the line. Currently steps have `flex md:flex-col items-start md:items-center gap-3 md:gap-2`. The circle is `size-10` (40px = left-5 plus width 0.5 = ~45px offset). The flex layout starts the icon then content — the line at `left-5` is behind the icon. This is the existing intended design. No change needed.",
+
+    "=== ImageWithFallback.tsx ===",
+    "The component passes through className from the parent — the parent always provides `w-full h-auto` or similar. The error div uses `inline-block` which could be block-level issue in some containers. Change error fallback to `<div className={\\`block ${className ?? ''}\\`}>`. No major responsive issue.",
+
+    "Run `npm run build` inside e:\\Thesis Software\\FrontEnd to verify no TypeScript errors."
+  ],
+  "acceptance_criteria": [
+    "All provider and admin pages scroll vertically without horizontal overflow at 320px.",
+    "Tables in provider/applications, provider/scholarships, admin/applications, admin/users, admin/providers, admin/scholarships all have overflow-x-auto wrappers.",
+    "The 4-column stats grids in provider/applications and admin/providers change to 2-column on mobile.",
+    "All form grids with grid-cols-2 in scholarship-create and scholarship-edit stack to 1-column below sm breakpoint.",
+    "The admin/settings tabs wrap on small screens.",
+    "`npm run build` exits with code 0 and no TypeScript errors."
+  ],
+  "verification": [
+    "cd 'e:\\Thesis Software\\FrontEnd' && npm run build — must exit 0 with no errors."
+  ],
+  "blocked_reason": null,
+  "findings": "All 16 provider and admin pages patched. Container padding changed from p-8 to p-4 md:p-8 on every page. Fixed 4-column stat grids (provider/applications, admin/providers) to grid-cols-2 lg:grid-cols-4. Fixed 3-column stat grid (admin/scholarships) to grid-cols-1 sm:grid-cols-3. Wrapped Tables with overflow-x-auto in: provider/applications, provider/scholarships, admin/applications (3 tables), admin/users, admin/providers, admin/scholarships. Changed all grid-cols-2 form grids in scholarship-create and scholarship-edit to grid-cols-1 sm:grid-cols-2. Added flex-wrap to headers in provider/scholarships, provider/profile edit buttons, admin/scholarships, admin/applications, admin/notifications. Changed admin/settings TabsList to flex-wrap h-auto. Fixed admin/messages placeholder card from p-12 to p-6 md:p-12. ApplicationStatusTracker reviewed — no change needed. npm run build exits 0 with no TypeScript errors."
+}

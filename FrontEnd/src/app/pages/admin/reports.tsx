@@ -125,7 +125,7 @@ export function AdminReports() {
 
   if (loading) {
     return (
-      <div className="p-8 flex items-center justify-center min-h-[400px]">
+      <div className="p-4 md:p-8 flex items-center justify-center min-h-[400px]">
         <div className="flex items-center gap-2 text-gray-600">
           <Loader2 className="size-5 animate-spin" />
           <span>Loading analytics...</span>
@@ -136,7 +136,7 @@ export function AdminReports() {
 
   if (error || !data) {
     return (
-      <div className="p-8">
+      <div className="p-4 md:p-8">
         <div className="max-w-7xl mx-auto">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Reports</h1>
           <p className="text-gray-600 mb-8">Analytics and data exports</p>
@@ -156,7 +156,7 @@ export function AdminReports() {
   const { stats, charts, quickStats, breakdown } = data;
 
   return (
-    <div className="p-8">
+    <div className="p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-8">
         {/* Header */}
         <div>

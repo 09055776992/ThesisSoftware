@@ -168,7 +168,7 @@ export function ProviderProfilePage() {
   }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto space-y-8">
+    <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-6 md:space-y-8">
       {/* Header Card */}
       <Card className="border-none shadow-sm overflow-hidden">
         <div className="h-32 bg-gradient-to-r from-blue-600 to-indigo-700" />
@@ -212,7 +212,7 @@ export function ProviderProfilePage() {
 
             <div className="mb-2">
               {isEditing ? (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <Button variant="outline" onClick={handleCancel} disabled={isSaving}>
                     <X className="size-4 mr-2" />
                     Cancel
