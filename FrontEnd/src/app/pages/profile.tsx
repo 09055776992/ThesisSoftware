@@ -983,7 +983,7 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
           <p className="text-xs font-semibold text-purple-700 bg-purple-50 px-2 py-1 rounded inline-block mb-3">SCHOLARSHIP ELIGIBILITY</p>
           <p className="text-sm font-semibold mb-2">Special Categories (Check all that apply)</p>
           <p className="text-xs text-gray-500 mb-3">These categories determine eligibility for specific scholarships.</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2">
               {([
                 { id: "ach-athlete", label: "Athlete (for Athletic Scholarships)", val: draftIsAthlete, set: setDraftIsAthlete },
