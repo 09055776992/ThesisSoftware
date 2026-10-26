@@ -6,6 +6,7 @@ import {
   sendProviderApprovedEmail,
   sendProviderRejectedEmail,
   sendAdminNewProviderRequestEmail,
+  sendOTPEmail,
 } from "../services/emailService.js";
 
 // ---------------------------------------------------------------------------
@@ -43,23 +44,33 @@ export const registerProvider = async (req, res) => {
 
     const normalizedEmail = String(email).trim().toLowerCase();
 
-    // Check for duplicate email
+    // Check globally — both confirmed users AND pending student signups
     const existing = await User.findOne({ email: normalizedEmail });
     if (existing) {
       return res.status(400).json({
         success: false,
-        message: "An account with this email already exists",
+        message: "An account with this email address already exists.",
+      });
+    }
+    // Also check pending student signups (not yet verified)
+    const { getDb } = await import("../db.js");
+    const db = await getDb();
+    const pendingStudent = await db.collection("pendingSignups").findOne({ email: normalizedEmail });
+    if (pendingStudent) {
+      return res.status(400).json({
+        success: false,
+        message: "An account with this email address already exists.",
       });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // Create provider user with isApproved: false
+    // Create provider user with isApproved: false, email not yet verified
     const user = await User.create({
       userName: String(fullName).trim(),
       email: normalizedEmail,
       phone: String(phone || "").trim(),
-      address: String(organizationName).trim(), // address field reused for org address
+      address: String(organizationName).trim(),
       passwordHash,
       role: "provider",
       providerDetails: {
@@ -67,38 +78,43 @@ export const registerProvider = async (req, res) => {
         position: String(position).trim(),
         isApproved: false,
         isActive: true,
-        requestedAt: new Date(),
+        isEmailVerified: false,
+        requestedAt: null, // Set to now only after email verified
+        credentials: Array.isArray(req.body.credentialFiles) ? req.body.credentialFiles : [],
       },
     });
 
-    // Notify the provider that their request was received
-    sendProviderRequestReceivedEmail({
-      to: normalizedEmail,
-      providerName: user.userName,
-      organizationName: user.providerDetails.organizationName,
-    }).catch((err) =>
-      console.error("[Provider Register] Failed to send request received email:", err.message)
-    );
-
-    // Notify all admins about the new request
-    const admins = await User.find({ role: "admin" }, { email: 1 }).lean();
-    for (const admin of admins) {
-      sendAdminNewProviderRequestEmail({
-        adminEmail: admin.email,
-        providerName: user.userName,
-        organizationName: user.providerDetails.organizationName,
-        position: user.providerDetails.position,
-        providerEmail: normalizedEmail,
-      }).catch((err) =>
-        console.error("[Provider Register] Failed to notify admin:", err.message)
+    // Explicitly write credentials via raw driver to guarantee they are
+    // persisted even if a future schema change would strip them.
+    const credentialFiles = Array.isArray(req.body.credentialFiles) ? req.body.credentialFiles : [];
+    if (credentialFiles.length > 0) {
+      await User.collection.updateOne(
+        { _id: user._id },
+        { $set: { "providerDetails.credentials": credentialFiles } }
       );
     }
 
+    // Generate OTP for email verification
+    const { generateOTP, getOTPExpiry } = await import("../utils/otpUtils.js");
+    const otpCode = generateOTP();
+    const otpExpiry = getOTPExpiry();
+
+    // Store OTP against the provider's user ID
+    await User.collection.updateOne(
+      { _id: user._id },
+      { $set: { providerOtp: otpCode, providerOtpExpiry: otpExpiry } }
+    );
+
+    // Send OTP email to provider
+    sendOTPEmail(normalizedEmail, otpCode, user.userName)
+      .catch((err) => console.error("[Provider Register] OTP email failed:", err.message));
+
     res.status(201).json({
       success: true,
-      pending: true,
-      message:
-        "Your account request has been submitted. You will receive an email once an administrator reviews your request.",
+      requiresOTP: true,
+      providerId: String(user._id),
+      maskedEmail: normalizedEmail.replace(/(.{2})(.*)(@.*)/, "$1***$3"),
+      message: "Please verify your email address. A 6-digit code has been sent to your email.",
     });
   } catch (err) {
     console.error("[Provider Register] Error:", err);
@@ -159,13 +175,32 @@ export const loginProvider = async (req, res) => {
     user.lockUntil = null;
     await user.save();
 
-    // Block if not yet approved
+    // Auto-heal legacy accounts: if admin already approved this provider but
+    // isEmailVerified was never set (registered before OTP feature), mark it now.
+    if (user.providerDetails?.isApproved && !user.providerDetails?.isEmailVerified) {
+      await User.findByIdAndUpdate(user._id, {
+        $set: { "providerDetails.isEmailVerified": true },
+      });
+      // Refresh the in-memory object so downstream checks see the updated value
+      user.providerDetails.isEmailVerified = true;
+    }
+
+    // Block if email not yet verified via OTP (only applies to unapproved accounts)
+    if (!user.providerDetails?.isEmailVerified && !user.providerDetails?.isApproved) {
+      return res.status(403).json({
+        success: false,
+        pending: true,
+        emailUnverified: true,
+        message: "Please verify your email address before logging in. Check your inbox for the verification code.",
+      });
+    }
+
+    // Block if not yet approved by admin
     if (!user.providerDetails?.isApproved) {
       return res.status(403).json({
         success: false,
         pending: true,
-        message:
-          "Your account is pending admin approval. You will receive an email once it has been reviewed.",
+        message: "Your account is pending admin approval. You will receive an email once it has been reviewed.",
       });
     }
 
@@ -243,23 +278,34 @@ export const approveProvider = async (req, res) => {
       return res.status(404).json({ success: false, message: "Provider not found" });
     }
 
-    if (user.providerDetails?.isApproved) {
+    if (user.providerDetails?.isApproved && !user.providerDetails?.rejectedAt) {
       return res.status(400).json({ success: false, message: "Provider is already approved" });
     }
 
-    user.providerDetails.isApproved = true;
-    user.providerDetails.isActive = true;
-    user.providerDetails.approvedBy = adminId;
-    user.providerDetails.approvedAt = new Date();
-    user.providerDetails.rejectedAt = null;
-    user.providerDetails.rejectionReason = null;
-    await user.save();
+    await User.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          "providerDetails.isApproved": true,
+          "providerDetails.isActive": true,
+          "providerDetails.isEmailVerified": true,
+          "providerDetails.approvedBy": adminId,
+          "providerDetails.approvedAt": new Date(),
+          "providerDetails.rejectedAt": null,
+          "providerDetails.rejectionReason": null,
+          "providerDetails.deactivatedAt": null,
+        },
+      },
+      { new: true },
+    );
+
+    const updated = await User.findById(id);
 
     // Notify provider
     sendProviderApprovedEmail({
       to: user.email,
       providerName: user.userName,
-      organizationName: user.providerDetails.organizationName,
+      organizationName: user.providerDetails?.organizationName || "",
     }).catch((err) =>
       console.error("[Approve Provider] Failed to send approval email:", err.message)
     );
@@ -268,12 +314,12 @@ export const approveProvider = async (req, res) => {
       success: true,
       message: `Provider account for ${user.userName} has been approved.`,
       provider: {
-        id: user._id.toString(),
-        name: user.userName,
-        email: user.email,
-        organizationName: user.providerDetails.organizationName,
+        id: updated._id.toString(),
+        name: updated.userName,
+        email: updated.email,
+        organizationName: updated.providerDetails?.organizationName || "",
         isApproved: true,
-        approvedAt: user.providerDetails.approvedAt,
+        approvedAt: updated.providerDetails?.approvedAt,
       },
     });
   } catch (err) {
@@ -419,7 +465,7 @@ export const getAllProviders = async (req, res) => {
       rejectionReason: p.providerDetails?.rejectionReason || null,
       requestedAt: p.providerDetails?.requestedAt || p.createdAt,
       deactivatedAt: p.providerDetails?.deactivatedAt || null,
-      // Derived status label for frontend display
+      credentialCount: (p.providerDetails?.credentials || []).length,
       statusLabel: (() => {
         if (p.providerDetails?.isActive === false) return "Deactivated";
         if (p.providerDetails?.isApproved) return "Active";
