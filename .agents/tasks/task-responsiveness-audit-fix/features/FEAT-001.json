@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Add mobile-responsive sidebar drawers to the three authenticated layouts: DashboardLayout, ProviderLayout, and AdminLayout. Each layout has a fixed w-[280px] aside that is always visible, causing horizontal overflow on mobile. The fix is: hide the desktop sidebar on mobile (hidden lg:flex), add a hamburger Menu button in the top bar (visible only on mobile: lg:hidden), and use a Sheet (shadcn/ui) to render the same sidebar nav as a slide-in drawer. DashboardLayout already imports Sheet/SheetContent; ProviderLayout and AdminLayout need it added. Also fix ProviderLayout and AdminLayout which use fixed positioning + ml-[280px] on main — change to the same sticky/flex approach as DashboardLayout on desktop and remove margin on mobile.",
+  "status": "completed",
+  "steps": [
+    "Read e:\\Thesis Software\\FrontEnd\\src\\app\\layouts\\dashboard-layout.tsx carefully before editing.",
+    "In dashboard-layout.tsx: (1) Add `useState` for `sidebarOpen` mobile drawer. (2) Change `<aside className='w-[280px] shrink-0 ...'>` to `<aside className='hidden lg:flex lg:w-[280px] shrink-0 ...' >`. (3) In the top bar div, add a hamburger Button (using Menu icon from lucide-react) with `className='lg:hidden mr-2'` that sets `sidebarOpen(true)`. (4) Add a `<Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>` wrapping a `<SheetContent side='left' className='w-[280px] p-0 overflow-y-auto'>` that contains an exact copy of the sidebar inner content (avatar, nav, quick stats). This gives mobile users a slide-in drawer. (5) The existing notification Sheet stays as-is.",
+    "Read e:\\Thesis Software\\FrontEnd\\src\\app\\layouts\\provider-layout.tsx before editing.",
+    "In provider-layout.tsx: (1) Add imports: `{ Sheet, SheetContent } from '../components/ui/sheet'`, `{ Menu } from 'lucide-react'`, `useState`. (2) Add `const [sidebarOpen, setSidebarOpen] = useState(false)`. (3) Change `<aside className='w-[280px] bg-white border-r border-gray-200 fixed left-0 top-0 h-screen overflow-y-auto'>` to `<aside className='hidden lg:flex flex-col w-[280px] bg-white border-r border-gray-200 sticky top-0 h-screen overflow-y-auto shrink-0'>`. (4) Change `<main className='flex-1 ml-[280px]'>` to `<main className='flex-1 min-w-0'>`. (5) Add a top bar `<div className='sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-2 lg:hidden'>` containing a Menu hamburger Button that sets `setSidebarOpen(true)`, plus a breadcrumb/title. (6) Add Sheet drawer with same sidebar content.",
+    "Read e:\\Thesis Software\\FrontEnd\\src\\app\\layouts\\admin-layout.tsx before editing.",
+    "In admin-layout.tsx: Apply the same pattern as provider-layout.tsx: add Sheet import, sidebarOpen state, change aside to `hidden lg:flex flex-col w-[280px] ... sticky top-0 h-screen`, change `<main className='flex-1 ml-[280px]'>` to `<main className='flex-1 min-w-0'>`, add mobile top bar with Menu button, add Sheet drawer with sidebar content.",
+    "In auth-layout.tsx: No sidebar issues. The content uses `max-w-[480px] mx-4` which is safe. No changes needed.",
+    "In root-layout.tsx: No layout issues. No changes needed.",
+    "Run `npm run build` inside e:\\Thesis Software\\FrontEnd to verify no TypeScript errors."
+  ],
+  "acceptance_criteria": [
+    "At viewport width 320px–768px (mobile/tablet), the sidebar is NOT visible by default; only the main content and a top bar with a hamburger icon are shown.",
+    "Tapping/clicking the hamburger opens a Sheet drawer containing all navigation items.",
+    "At viewport width 1024px+ (lg breakpoint), the sidebar is visible in the normal desktop layout with no hamburger button.",
+    "The ProviderLayout and AdminLayout main content area no longer has a hard-coded ml-[280px] — it uses flex-1 min-w-0.",
+    "`npm run build` exits with code 0 and no TypeScript errors."
+  ],
+  "verification": [
+    "cd 'e:\\Thesis Software\\FrontEnd' && npm run build — must exit 0 with no errors."
+  ],
+  "blocked_reason": null,
+  "findings": "All three layouts updated successfully. DashboardLayout: added sidebarOpen state, hidden lg:flex on aside, hamburger button in top bar, Sheet drawer with full sidebar content. ProviderLayout: added Sheet/Button/Menu imports, sidebarOpen state, changed aside to hidden lg:flex sticky, removed ml-[280px] from main (now flex-1 min-w-0), added mobile top bar with hamburger, added Sheet drawer with full sidebar content. AdminLayout: same pattern as ProviderLayout, added useNavigate for logout button in mobile drawer. Build: npm run build exits 0 with no TypeScript errors (only pre-existing chunk size warning)."
+}
