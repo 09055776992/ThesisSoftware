@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Button } from "../components/ui/button";
@@ -17,9 +17,9 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Checkbox } from "../components/ui/checkbox";
-import { MapPin, Mail, Calendar, Award, BookOpen, DollarSign, Pencil, Loader2, Lock, FileText, CheckCircle, Trash2, Upload } from "lucide-react";
+import { MapPin, Mail, Calendar, Award, BookOpen, DollarSign, Pencil, Loader2, Lock, FileText, CheckCircle, Trash2, Upload, Camera } from "lucide-react";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
-import { getDisplayName, getInitials, getStoredUser, saveStoredUser } from "../lib/user-storage";
+import { getDisplayName, getInitials, getStoredUser, saveStoredUser, getActiveUserEmail } from "../lib/user-storage";
 import type { UserProfile } from "../lib/user-storage";
 import {
   resolvePublicAssetUrl,
@@ -31,10 +31,39 @@ import {
   fetchProfileDocuments,
   uploadProfileDocument,
   deleteProfileDocument,
+  fetchUserProfile,
   type ProfileDocumentResponse,
 } from "../lib/api-client";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
+
+const DEFAULT_COVER_PHOTO =
+  "https://images.unsplash.com/photo-1707640590939-3953ab4c0a8b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBvZmZpY2UlMjBiYWNrZ3JvdW5kJTIwYmFubmVyfGVufDF8fHx8MTc3NjM2MTEyMHww&ixlib=rb-4.1.0&q=80&w=1080";
+
+function coverPhotoStorageKey(email?: string | null) {
+  const normalized = String(email ?? "").trim().toLowerCase();
+  return normalized
+    ? `scholarship-portal-cover-photo:${normalized}`
+    : "scholarship-portal-cover-photo";
+}
+
+function loadCoverPhoto(email?: string | null): string {
+  if (typeof window === "undefined") return DEFAULT_COVER_PHOTO;
+  try {
+    return window.localStorage.getItem(coverPhotoStorageKey(email)) || DEFAULT_COVER_PHOTO;
+  } catch {
+    return DEFAULT_COVER_PHOTO;
+  }
+}
+
+function persistCoverPhoto(email: string | null | undefined, dataUrl: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(coverPhotoStorageKey(email), dataUrl);
+  } catch {
+    toast.error("Could not save cover photo locally. Preview still updated for this session.");
+  }
+}
 
 function titleCase(value: string) {
   return value
@@ -166,7 +195,7 @@ function AboutView({ user, onEditToggle }: AboutViewProps) {
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">About</CardTitle>
             <Button variant="outline" size="sm" onClick={onEditToggle}>
-              <Pencil className="size-4 mr-1" /> Edit
+              <Pencil className="size-4 mr-1" /> Edit Profile
             </Button>
           </div>
         </CardHeader>
@@ -174,7 +203,7 @@ function AboutView({ user, onEditToggle }: AboutViewProps) {
           {user?.about ? (
             <p className="text-sm text-gray-700 leading-relaxed">{user.about}</p>
           ) : (
-            <p className="text-sm text-gray-400 italic">No bio added yet.</p>
+            <p className="text-sm text-gray-400 italic">No profile info</p>
           )}
         </CardContent>
       </Card>
@@ -206,7 +235,9 @@ interface AboutEditFormProps {
 
 function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps) {
   const navigate = useNavigate();
-  const [draftFullName, setDraftFullName] = useState(user?.fullName ?? "");
+  const [draftFullName, setDraftFullName] = useState(
+    user?.fullName || (user as any)?.name || (user as any)?.userName || ""
+  );
   const [draftPhone, setDraftPhone] = useState(user?.phone ?? "");
   const [draftLocation, setDraftLocation] = useState(user?.location ?? "Quezon City");
   const [draftDob, setDraftDob] = useState(user?.dateOfBirth ?? "");
@@ -916,6 +947,8 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
 
   const handleSave = async () => {
     setFinancialNeedError("");
+
+    // Validate financialNeed before hitting the network
     if (draftFinancialNeed) {
       const fn = Number(draftFinancialNeed);
       if (!Number.isInteger(fn) || fn < 1 || fn > 5) {
@@ -923,10 +956,17 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
         return;
       }
     }
+
+    // Guard: email must be available
+    if (!user?.email) {
+      toast.error("Session expired. Please sign in again.");
+      return;
+    }
+
     setSaving(true);
     try {
       await patchAchievementsProfile({
-        email: user?.email ?? "",
+        email: user.email,
         isAthlete: draftIsAthlete,
         isArtist: draftIsArtist,
         isSKOfficial: draftIsSKOfficial,
@@ -936,7 +976,7 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
         isSoloParent: draftIsSoloParent,
         financialNeed: draftFinancialNeed ? Number(draftFinancialNeed) : undefined,
         netWorth: draftNetWorth.trim() || undefined,
-        currency: draftCurrency,
+        currency: draftCurrency || undefined,
         incomeCategory: draftIncomeCategory || undefined,
         householdIncome: draftHouseholdIncome ? Number(draftHouseholdIncome) : undefined,
         financialSupportSource: draftFinancialSupportSource || undefined,
@@ -963,10 +1003,12 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
       toast.success("Achievements & financial info saved.");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      console.error("[AchievementsEdit] Save failed:", msg);
       if (msg.toLowerCase().includes("financialneed")) {
         setFinancialNeedError(msg);
       } else {
-        toast.error("Failed to save. Please try again.");
+        // Show the actual server error so the user knows what went wrong
+        toast.error(msg && msg !== "Request failed" ? msg : "Failed to save. Please try again.");
       }
     } finally {
       setSaving(false);
@@ -1273,17 +1315,17 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
                   key={config.key}
                   className={`border rounded-lg p-4 ${hasFile ? 'bg-gray-50' : 'bg-white'}`}
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-medium text-sm">{config.label}</h4>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-start gap-2">
+                        <h4 className="font-medium text-sm leading-snug">{config.label}</h4>
                         {hasFile ? (
-                          <Badge className="bg-green-100 text-green-700 text-xs">
+                          <Badge className="bg-green-100 text-green-700 text-xs shrink-0">
                             <CheckCircle className="size-3 mr-1" />
                             Uploaded
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="text-xs text-amber-600 border-amber-300">
+                          <Badge variant="outline" className="text-xs text-amber-600 border-amber-300 shrink-0">
                             Required
                           </Badge>
                         )}
@@ -1372,15 +1414,86 @@ export function Profile() {
   const [aboutEditMode, setAboutEditMode] = useState(false);
   const [educationEditMode, setEducationEditMode] = useState(false);
   const [achievementsEditMode, setAchievementsEditMode] = useState(false);
+  const [coverPhoto, setCoverPhoto] = useState(() =>
+    loadCoverPhoto(getStoredUser()?.email || getActiveUserEmail())
+  );
+  const coverInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch full user profile from MongoDB on mount to guarantee fresh name and fields
+  useEffect(() => {
+    const activeEmail = localUser?.email || getActiveUserEmail() || getStoredUser()?.email;
+    if (!activeEmail) return;
+
+    fetchUserProfile(activeEmail)
+      .then((res) => {
+        if (res?.user) {
+          // saveStoredUser merges with existing data and preserves a known
+          // display name when the server payload has empty name fields.
+          saveStoredUser(res.user as UserProfile);
+          setLocalUser(getStoredUser());
+          setCoverPhoto(loadCoverPhoto(res.user.email || activeEmail));
+        }
+      })
+      .catch((err) => {
+        console.warn("[Profile] Failed to fetch user profile from server:", err);
+      });
+  }, []);
+
+  // Listen for local user storage updates dispatched across tabs/components
+  useEffect(() => {
+    const handleStorageUpdate = () => {
+      const nextUser = getStoredUser();
+      setLocalUser(nextUser);
+      setCoverPhoto(loadCoverPhoto(nextUser?.email || getActiveUserEmail()));
+    };
+    window.addEventListener("scholarship-portal-user-updated", handleStorageUpdate);
+    window.addEventListener("storage", handleStorageUpdate);
+    return () => {
+      window.removeEventListener("scholarship-portal-user-updated", handleStorageUpdate);
+      window.removeEventListener("storage", handleStorageUpdate);
+    };
+  }, []);
 
   const handleEditProfile = () => {
     setActiveTab("about");
     setAboutEditMode(true);
   };
 
+  const handleCoverPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+    if (!allowedTypes.includes(file.type)) {
+      toast.error("Only PNG, JPEG, JPG, or WebP images are allowed.");
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Cover photo must be 5 MB or smaller.");
+      e.target.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      if (!dataUrl) return;
+      setCoverPhoto(dataUrl);
+      persistCoverPhoto(localUser?.email || getActiveUserEmail(), dataUrl);
+      toast.success("Cover photo updated.");
+    };
+    reader.onerror = () => {
+      toast.error("Failed to read the selected image.");
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
   const handleSaveSuccess = (updatedFields: Partial<UserProfile>) => {
-    setLocalUser((prev) => ({ ...prev, ...updatedFields } as UserProfile));
-    saveStoredUser(updatedFields);
+    const merged = { ...localUser, ...updatedFields } as UserProfile;
+    setLocalUser(merged);
+    saveStoredUser(merged);
   };
 
   const financialNeedVal = Array.isArray(localUser?.financialNeed)
@@ -1404,58 +1517,99 @@ export function Profile() {
 
   return (
     <div className="pb-8">
-      {/* Cover Photo */}
-      <div className="h-64 bg-gradient-to-r from-primary to-secondary relative">
-        <ImageWithFallback
-          src="https://images.unsplash.com/photo-1707640590939-3953ab4c0a8b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBvZmZpY2UlMjBiYWNrZ3JvdW5kJTIwYmFubmVyfGVufDF8fHx8MTc3NjM2MTEyMHww&ixlib=rb-4.1.0&q=80&w=1080"
-          alt="Cover"
-          className="w-full h-64 object-cover"
-        />
-      </div>
+      {/* ── Profile Header Card (Facebook-style) ── */}
+      <div className="max-w-6xl mx-auto px-4">
+        <Card className="mb-6 overflow-hidden">
 
-      <div className="max-w-6xl mx-auto px-4 -mt-20">
-        {/* Profile Header */}
-        <Card className="mb-6">
-          <CardContent className="pt-6">
-            <div className="flex flex-col md:flex-row gap-6">
-              <div className="flex-shrink-0">
-                <Avatar className="size-40 border-4 border-card">
-                  <AvatarImage
-                    key={pickProfileImageUrl(localUser as Record<string, unknown>) || localUser?.profileImage}
-                    src={resolvePublicAssetUrl(pickProfileImageUrl(localUser as Record<string, unknown>) || localUser?.profileImage, true)}
-                  />
-                  <AvatarFallback>{getInitials(localUser)}</AvatarFallback>
-                </Avatar>
-              </div>
-              <div className="flex-1">
-                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                  <div>
-                    <h1 className="text-3xl font-bold mb-2">{getDisplayName(localUser)}</h1>
-                    <p className="text-muted-foreground mb-3">{localUser?.headline || "Add a headline in profile setup"}</p>
-                    <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-1"><MapPin className="size-4" />{localUser?.location || "Location not provided"}</div>
-                      <div className="flex items-center gap-1"><Mail className="size-4" />{localUser?.email || "Email not provided"}</div>
-                      <div className="flex items-center gap-1"><Calendar className="size-4" />Joined {localUser?.joinDate || "Join date not provided"}</div>
+          {/* Cover Photo */}
+          <div className="h-56 md:h-64 bg-gradient-to-r from-primary to-secondary relative group">
+            <ImageWithFallback
+              key={coverPhoto}
+              src={coverPhoto}
+              alt="Cover"
+              className="w-full h-full object-cover"
+            />
+            <input
+              ref={coverInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleCoverPhotoChange}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="absolute top-3 right-3 bg-white/90 hover:bg-white shadow-sm backdrop-blur-sm"
+              onClick={() => coverInputRef.current?.click()}
+            >
+              <Camera className="size-4 mr-1" /> Change Cover Photo
+            </Button>
+          </div>
+
+          {/* Avatar + Name row — avatar overlaps the cover photo */}
+          <CardContent className="px-6 pb-6">
+            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+
+              {/* Left: overlapping avatar + name block */}
+              <div className="flex flex-col md:flex-row md:items-end gap-4">
+                {/* Avatar — pulled up by half its height to overlap the cover */}
+                <div className="flex-shrink-0 -mt-16 md:-mt-20">
+                  <Avatar className="size-32 md:size-40 border-4 border-card shadow-md">
+                    <AvatarImage
+                      key={pickProfileImageUrl(localUser as Record<string, unknown>) || localUser?.profileImage}
+                      src={resolvePublicAssetUrl(pickProfileImageUrl(localUser as Record<string, unknown>) || localUser?.profileImage, true)}
+                    />
+                    <AvatarFallback className="text-3xl font-bold">{getInitials(localUser)}</AvatarFallback>
+                  </Avatar>
+                </div>
+
+                {/* Name + meta */}
+                <div className="pb-1">
+                  <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900 dark:text-white leading-tight">
+                    {localUser?.fullName?.trim() ||
+                     (localUser as any)?.name?.trim() ||
+                     getDisplayName(localUser)}
+                  </h1>
+                  {localUser?.headline && (
+                    <p className="text-muted-foreground text-sm mt-0.5">{localUser.headline}</p>
+                  )}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground mt-2">
+                    {localUser?.location && (
+                      <div className="flex items-center gap-1"><MapPin className="size-3.5" />{localUser.location}</div>
+                    )}
+                    {localUser?.email && (
+                      <div className="flex items-center gap-1"><Mail className="size-3.5" />{localUser.email}</div>
+                    )}
+                    <div className="flex items-center gap-1">
+                      <Calendar className="size-3.5" />{localUser?.joinDate ? `Joined ${localUser.joinDate}` : "Join date not available"}
                     </div>
                   </div>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={handleEditProfile}>
-                      <Pencil className="size-4 mr-1" /> Edit Profile
-                    </Button>
-                    <Button variant="outline">Message</Button>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2 mt-4">
-                  {eligibilityBadges.length > 0 ? (
-                    eligibilityBadges.map((badge) => (
-                      <Badge key={badge} className="bg-accent">{badge}</Badge>
-                    ))
-                  ) : (
-                    <Badge variant="outline">Complete your profile to see scholarship matches</Badge>
-                  )}
                 </div>
               </div>
+
+              {/* Right: action buttons */}
+              <div className="flex gap-2 md:mb-1 flex-shrink-0">
+                <Button variant="outline" onClick={handleEditProfile}>
+                  <Pencil className="size-4 mr-1" /> Edit Profile
+                </Button>
+                <Button variant="outline">Message</Button>
+              </div>
             </div>
+
+            {/* Badges row */}
+            {eligibilityBadges.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-border">
+                {eligibilityBadges.map((badge) => (
+                  <Badge key={badge} className="bg-accent">{badge}</Badge>
+                ))}
+              </div>
+            )}
+            {eligibilityBadges.length === 0 && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <Badge variant="outline">Complete your profile to see scholarship matches</Badge>
+              </div>
+            )}
           </CardContent>
         </Card>
 
