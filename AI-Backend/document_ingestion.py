@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 print("[OCR] Initializing EasyOCR reader (English) — first run downloads model...")
 ocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
 print("[OCR] EasyOCR ready.")
+# cache-bust: v2
 
 # ---------------------------------------------------------------------------
 # Supported extensions
