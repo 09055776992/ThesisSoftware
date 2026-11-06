@@ -19,6 +19,8 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import { API_URL } from "../../lib/api-client";
+import { getAuthToken } from "../../lib/user-storage";
 
 interface AnalyticsData {
   stats: {
@@ -75,7 +77,9 @@ export function AdminReports() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch("/api/admin/analytics");
+      const response = await fetch(`${API_URL}/api/admin/analytics`, {
+        headers: { Authorization: `Bearer ${getAuthToken()}` },
+      });
       if (!response.ok) {
         throw new Error("Failed to fetch analytics");
       }
@@ -92,9 +96,9 @@ export function AdminReports() {
   const generateReport = async () => {
     try {
       setGeneratingReport(true);
-      const response = await fetch("/api/admin/reports/export", {
+      const response = await fetch(`${API_URL}/api/admin/reports/export`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getAuthToken()}` },
         body: JSON.stringify({
           from: dateRange.from,
           to: dateRange.to,

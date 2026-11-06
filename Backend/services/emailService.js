@@ -26,7 +26,7 @@ const transporter = nodemailer.createTransport({
     user: EMAIL_USER,
     pass: EMAIL_PASS,
   },
-});
+  });
 
 // ---------------------------------------------------------------------------
 // Helper: mask email for display  e.g. juan@gmail.com → j**n@gmail.com
@@ -48,7 +48,7 @@ export async function sendOTPEmail(email, otp, name) {
   const mailOptions = {
     from: process.env.EMAIL_FROM || `SCHOLAR System <${process.env.EMAIL_USER}>`,
     to: email,
-    subject: "SCHOLAR — Your Login Verification Code",
+    subject: "SCHOLAR — Email Verification Code",
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;
                   padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
@@ -89,8 +89,19 @@ export async function sendOTPEmail(email, otp, name) {
     `,
   };
 
-  await transporter.sendMail(mailOptions);
-  console.log(`[Email] OTP sent to ${maskEmail(email)}`);
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await transporter.sendMail(mailOptions);
+      console.log(`[Email] OTP sent to ${maskEmail(email)}`);
+      return;
+    } catch (err) {
+      lastError = err;
+      console.warn(`[Email] Attempt ${attempt} failed to send OTP to ${maskEmail(email)}: ${err.message}`);
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 800));
+    }
+  }
+  throw lastError;
 }
 
 // ---------------------------------------------------------------------------
@@ -298,23 +309,127 @@ export async function sendScreeningEmail({
 }
 
 // ---------------------------------------------------------------------------
-// New scholarship alert email - sent to pre-filtered eligible students
+// New scholarship alert email — sent to every registered student
 // ---------------------------------------------------------------------------
-export async function sendNewScholarshipEmail({
+
+/** Escape provider/student supplied text before interpolating it into HTML. */
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** First finite number among the candidates (skips undefined/null/empty). */
+function pickNumber(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function formatGwaCriteria(minimumGPA, eligibilityCriteria) {
+  const value = pickNumber(
+    minimumGPA,
+    eligibilityCriteria?.minGWA,
+    eligibilityCriteria?.minGPA,
+    eligibilityCriteria?.minGwa,
+  );
+  if (value === null) return "No minimum GWA required";
+  if (value > 50) return `At least ${value}% general average`;
+  return `GWA of ${value.toFixed(2)} or better (1.00 is highest)`;
+}
+
+function formatFinancialNeedCriteria(eligibilityCriteria, type) {
+  const score = pickNumber(
+    eligibilityCriteria?.financialNeedScore,
+    eligibilityCriteria?.minFinancialNeedScore,
+    eligibilityCriteria?.financialNeed,
+  );
+  if (score !== null) return `Financial need rating of at least ${score}/5`;
+
+  const sectorFlags = [
+    ["isIndigent", "indigent households"],
+    ["isSoloParent", "solo-parent households"],
+    ["isPWD", "students with disabilities"],
+    ["isFromIndigenousFamily", "indigenous families"],
+  ]
+    .filter(([key]) => eligibilityCriteria?.[key] === true)
+    .map(([, label]) => label);
+
+  if (sectorFlags.length > 0) {
+    return `Prioritised for ${sectorFlags.slice(0, 3).join(", ")}`;
+  }
+  if (/need|financial|economic/i.test(String(type || ""))) {
+    return "Need-based program — financial need is considered";
+  }
+  return "No financial need requirement";
+}
+
+function formatEducationCriteria(requiredEducationLevel, eligibilityCriteria) {
+  const levels = (
+    Array.isArray(requiredEducationLevel) && requiredEducationLevel.length > 0
+      ? requiredEducationLevel
+      : Array.isArray(eligibilityCriteria?.educationLevel)
+        ? eligibilityCriteria.educationLevel
+        : []
+  )
+    .map((level) => String(level || "").trim())
+    .filter(Boolean);
+  return levels.length > 0 ? levels.join(", ") : "Open to all education levels";
+}
+
+/**
+ * Build the "new scholarship" email. Pure (no I/O) so its content can be
+ * asserted without touching SMTP.
+ */
+export function buildNewScholarshipEmail({
   to,
   studentName,
   scholarshipName,
+  scholarshipId,
   amount,
   deadline,
   provider,
   description,
+  minimumGPA,
+  requiredEducationLevel,
+  specificCriteria,
+  eligibilityCriteria,
+  type,
   frontendUrl,
 }) {
   const displayName = String(studentName || "Scholar").trim();
   const scholarship = String(scholarshipName || "a new scholarship").trim();
   const providerName = String(provider || "SCHOLAR").trim();
   const desc = String(description || "").trim();
-  const baseUrl = String(frontendUrl || process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
+  const baseUrl = String(
+    frontendUrl ||
+      process.env.FRONTEND_BASE_URL ||
+      process.env.FRONTEND_URL ||
+      "http://localhost:5173",
+  ).replace(/\/$/, "");
+
+  const scholarshipIdText = String(scholarshipId || "").trim();
+  const detailsUrl = scholarshipIdText
+    ? `${baseUrl}/dashboard/scholarships?open=${encodeURIComponent(scholarshipIdText)}`
+    : `${baseUrl}/dashboard/scholarships`;
+  const matchesUrl = `${baseUrl}/dashboard/matches`;
+
+  const criteriaRows = [
+    ["Target GWA", formatGwaCriteria(minimumGPA, eligibilityCriteria)],
+    ["Financial Need", formatFinancialNeedCriteria(eligibilityCriteria, type)],
+    ["Education Level", formatEducationCriteria(requiredEducationLevel, eligibilityCriteria)],
+  ];
+
+  const extraCriteria = (Array.isArray(specificCriteria) ? specificCriteria : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .slice(0, 3);
 
   const formattedAmount = amount
     ? `₱${Number(amount).toLocaleString("en-PH")}`
@@ -331,7 +446,7 @@ export async function sendNewScholarshipEmail({
   const mailOptions = {
     from: process.env.EMAIL_FROM || `SCHOLAR System <${process.env.EMAIL_USER}>`,
     to,
-    subject: `🎓 New Opportunity: You might be a match for ${scholarship}!`,
+    subject: `New Scholarship Opportunity: ${scholarship.replace(/[\r\n]+/g, " ")}`,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f8fafc;">
         <div style="background: white; border-radius: 12px; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
@@ -349,7 +464,7 @@ export async function sendNewScholarshipEmail({
               Hello, ${displayName}!
             </p>
             <p style="color: #334155; font-size: 15px; margin: 0; line-height: 1.6;">
-              A new scholarship matching your profile has been posted.
+              A new scholarship has just been posted. Here is what you need to know.
             </p>
           </div>
 
@@ -363,8 +478,8 @@ export async function sendNewScholarshipEmail({
               </div>
               <div>
                 <h4 style="color: #64748b; margin: 0 0 4px 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Scholarship Program</h4>
-                <p style="color: #1e293b; margin: 0; font-size: 16px; font-weight: 700;">${scholarship}</p>
-                <p style="color: #64748b; margin: 4px 0 0; font-size: 13px;">by ${providerName}</p>
+                <p style="color: #1e293b; margin: 0; font-size: 16px; font-weight: 700;">${escapeHtml(scholarship)}</p>
+                <p style="color: #64748b; margin: 4px 0 0; font-size: 13px;">by ${escapeHtml(providerName)}</p>
               </div>
             </div>
 
@@ -390,6 +505,27 @@ export async function sendNewScholarshipEmail({
               </div>
             </div>
 
+            <!-- Key Criteria -->
+            <div style="background: #f8fafc; border-radius: 8px; padding: 16px; margin-bottom: 18px;">
+              <h4 style="color: #64748b; margin: 0 0 10px 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Key Criteria</h4>
+              <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                ${criteriaRows
+                  .map(
+                    ([label, value]) => `
+                <tr>
+                  <td style="padding: 6px 12px 6px 0; color: #64748b; font-size: 13px; vertical-align: top; white-space: nowrap;">${escapeHtml(label)}</td>
+                  <td style="padding: 6px 0; color: #1e293b; font-size: 13px; font-weight: 600;">${escapeHtml(value)}</td>
+                </tr>`,
+                  )
+                  .join("")}
+              </table>
+              ${extraCriteria.length > 0
+                ? `<ul style="color: #475569; margin: 12px 0 0; padding-left: 20px; font-size: 13px; line-height: 1.6;">${extraCriteria
+                    .map((criterion) => `<li>${escapeHtml(criterion)}</li>`)
+                    .join("")}</ul>`
+                : ""}
+            </div>
+
             ${desc ? `
             <!-- Description -->
             <div style="display: flex; align-items: flex-start; gap: 12px;">
@@ -398,19 +534,24 @@ export async function sendNewScholarshipEmail({
               </div>
               <div>
                 <h4 style="color: #64748b; margin: 0 0 4px 0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">About This Scholarship</h4>
-                <p style="color: #475569; margin: 0; font-size: 14px; line-height: 1.6;">${desc.length > 200 ? desc.substring(0, 200) + "…" : desc}</p>
+                <p style="color: #475569; margin: 0; font-size: 14px; line-height: 1.6;">${escapeHtml(desc.length > 220 ? desc.substring(0, 220) + "…" : desc)}</p>
               </div>
             </div>
             ` : ""}
           </div>
 
           <!-- CTA Button -->
-          <div style="text-align: center; margin-bottom: 28px;">
-            <a href="${baseUrl}/scholarships"
+          <div style="text-align: center; margin-bottom: 12px;">
+            <a href="${detailsUrl}"
                style="display: inline-block; background: #2563eb; color: white; text-decoration: none;
                       padding: 14px 32px; border-radius: 8px; font-size: 16px; font-weight: 600;
                       letter-spacing: 0.02em;">
-              View Details &amp; Apply
+              View Scholarship &amp; Apply
+            </a>
+          </div>
+          <div style="text-align: center; margin-bottom: 28px;">
+            <a href="${matchesUrl}" style="color: #2563eb; font-size: 13px; text-decoration: underline;">
+              See scholarships matched to you
             </a>
           </div>
 
@@ -424,7 +565,7 @@ export async function sendNewScholarshipEmail({
           <!-- Footer -->
           <div style="text-align: center; padding-top: 24px; border-top: 1px solid #e2e8f0;">
             <p style="color: #64748b; margin: 0 0 8px 0; font-size: 14px;">
-              You received this email because your profile matches the preliminary criteria for this scholarship.
+              You received this email because you are registered as a student on SCHOLAR.
             </p>
             <p style="color: #94a3b8; margin: 0; font-size: 12px;">
               © 2026 SCHOLAR — Quezon City Youth Development Office
@@ -436,8 +577,18 @@ export async function sendNewScholarshipEmail({
     `,
   };
 
-  await transporter.sendMail(mailOptions);
-  console.log(`[Email] New scholarship alert sent to ${maskEmail(to)}`);
+  return mailOptions;
+}
+
+/**
+ * Send the new-scholarship alert. Resolves with the nodemailer info object
+ * (including the SMTP messageId) so callers can log per-recipient delivery.
+ */
+export async function sendNewScholarshipEmail(params) {
+  const mailOptions = buildNewScholarshipEmail(params);
+  const info = await transporter.sendMail(mailOptions);
+  console.log(`[Email] New scholarship alert sent to ${maskEmail(params.to)}`);
+  return info;
 }
 
 // ---------------------------------------------------------------------------
@@ -640,4 +791,50 @@ export async function sendAdminNewProviderRequestEmail({ adminEmail, providerNam
 
   await transporter.sendMail(mailOptions);
   console.log(`[Email] Admin notified of new provider request from ${maskEmail(email)}`);
+}
+
+// ---------------------------------------------------------------------------
+// Scholarship renewal reminder — sent to provider when deadline approaches
+// ---------------------------------------------------------------------------
+export async function sendScholarshipRenewalEmail({ to, providerName, scholarshipName, deadline, daysLeft, frontendUrl }) {
+  const displayName = String(providerName || "Provider").trim();
+  const scholarship = String(scholarshipName || "your scholarship").trim();
+  const baseUrl = String(frontendUrl || "http://localhost:5173").replace(/\/$/, "");
+  const urgencyColor = daysLeft <= 7 ? "#ef4444" : "#f59e0b";
+  const urgencyLabel = daysLeft <= 7 ? "⚠️ Urgent" : "📅 Reminder";
+
+  const mailOptions = {
+    from: process.env.EMAIL_FROM || `SCHOLAR System <${process.env.EMAIL_USER}>`,
+    to,
+    subject: `${urgencyLabel}: "${scholarship}" expires in ${daysLeft} day(s)`,
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h2 style="color: #1d4ed8; margin: 0;">🎓 SCHOLAR</h2>
+          <p style="color: #6b7280; margin: 4px 0 0;">Scholarship Management System</p>
+        </div>
+        <h3 style="color: #111827;">Hello, ${displayName}!</h3>
+        <div style="background: #fef3c7; border-left: 4px solid ${urgencyColor}; padding: 16px; border-radius: 4px; margin: 20px 0;">
+          <p style="margin: 0; color: #92400e; font-weight: 600;">
+            Your scholarship <strong>"${scholarship}"</strong> is expiring in <strong>${daysLeft} day(s)</strong> on ${deadline}.
+          </p>
+        </div>
+        <p style="color: #374151;">Please log in to your provider dashboard to review and renew this scholarship if needed, so eligible students can continue applying.</p>
+        <div style="text-align: center; margin: 32px 0;">
+          <a href="${baseUrl}/provider/scholarships"
+             style="display: inline-block; background: #1d4ed8; color: white; text-decoration: none;
+                    padding: 12px 28px; border-radius: 8px; font-size: 16px; font-weight: 600;">
+            Manage My Scholarships
+          </a>
+        </div>
+        <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+        <p style="color: #9ca3af; font-size: 12px; text-align: center;">
+          © 2026 SCHOLAR — Quezon City Youth Development Office
+        </p>
+      </div>
+    `,
+  };
+
+  await transporter.sendMail(mailOptions);
+  console.log(`[Email] Renewal reminder sent to ${maskEmail(to)} for "${scholarshipName}"`);
 }

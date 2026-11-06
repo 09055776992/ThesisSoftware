@@ -28,8 +28,15 @@ AI-Backend/venv
 .cache
 huggingface_cache
 
-# Uploads folder (user files, not code)
-Backend/uploads
+# Uploads folder (user-submitted files — not code)
+Backend/uploads/
+Backend/uploads/**
+
+# Build output
+FrontEnd/dist/
+
+# Scan/report artifacts
+reports/
 
 # OS files
 .DS_Store

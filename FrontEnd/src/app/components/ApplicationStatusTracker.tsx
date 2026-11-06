@@ -136,7 +136,7 @@ export function ApplicationStatusTracker({
     <div className="w-full">
       <div className="relative">
         {/* Progress Line - Desktop (horizontal) */}
-        <div className="hidden md:block absolute top-5 left-0 right-0 h-0.5 bg-gray-200">
+        <div className="hidden md:block absolute top-5 left-0 right-0 h-0.5 bg-gray-200 dark:bg-slate-700">
           <div
             className="h-full bg-green-500 transition-all duration-500"
             style={{
@@ -146,7 +146,7 @@ export function ApplicationStatusTracker({
         </div>
 
         {/* Progress Line - Mobile (vertical) */}
-        <div className="md:hidden absolute left-5 top-0 bottom-0 w-0.5 bg-gray-200">
+        <div className="md:hidden absolute left-5 top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-slate-700">
           <div
             className="w-full bg-green-500 transition-all duration-500"
             style={{
@@ -175,8 +175,8 @@ export function ApplicationStatusTracker({
                     isCompleted
                       ? "bg-green-500 text-white"
                       : isCurrent
-                      ? "bg-blue-500 text-white ring-4 ring-blue-200 animate-pulse"
-                      : "bg-gray-200 text-gray-400"
+                      ? "bg-blue-500 text-white ring-4 ring-blue-200 dark:ring-blue-900 animate-pulse"
+                      : "bg-gray-200 dark:bg-slate-700 text-gray-400 dark:text-slate-500"
                   }`}
                 >
                   {isCompleted ? (
@@ -191,10 +191,10 @@ export function ApplicationStatusTracker({
                   <h4
                     className={`font-semibold text-sm ${
                       isCompleted
-                        ? "text-green-700"
+                        ? "text-green-700 dark:text-green-400"
                         : isCurrent
-                        ? "text-blue-700"
-                        : "text-gray-500"
+                        ? "text-blue-700 dark:text-blue-300"
+                        : "text-gray-500 dark:text-slate-400"
                     }`}
                   >
                     {step.title}
@@ -209,10 +209,10 @@ export function ApplicationStatusTracker({
                       variant="outline"
                       className={`mt-2 text-xs ${
                         isCompleted
-                          ? "bg-green-50 text-green-700 border-green-200"
+                          ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/50 dark:text-green-300 dark:border-green-800"
                           : isCurrent
-                          ? "bg-blue-50 text-blue-700 border-blue-200"
-                          : "bg-gray-50 text-gray-500"
+                          ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800"
+                          : "bg-gray-50 text-gray-500 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700"
                       }`}
                     >
                       {isCompleted ? "✓ " : ""}
@@ -224,7 +224,7 @@ export function ApplicationStatusTracker({
                   {step.subLabel && (
                     <p
                       className={`text-xs mt-1.5 font-medium ${
-                        isCurrent ? "text-blue-600 animate-pulse" : "text-muted-foreground"
+                        isCurrent ? "text-blue-600 dark:text-blue-400 animate-pulse" : "text-muted-foreground"
                       }`}
                     >
                       {isCurrent && <span className="inline-block size-1.5 bg-blue-500 rounded-full mr-1.5 animate-pulse" />}

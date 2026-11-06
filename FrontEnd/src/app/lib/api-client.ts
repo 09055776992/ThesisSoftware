@@ -1,8 +1,147 @@
 import type { UserProfile } from "./user-storage";
 import { getAuthToken } from "./user-storage";
 import API_BASE_URL from "../../config/api";
+import { countUnreadMessages } from "./unread-messages";
 
 export const API_URL = API_BASE_URL.replace(/\/$/, "");
+
+export type FeedScholarship = {
+  _id: string;
+  name: string;
+  provider?: string;
+  providerName?: string;
+  organization?: string;
+  amount: number;
+  deadline: string;
+  status: string;
+  type: string;
+  description?: string;
+  fieldOfStudy?: string;
+  location?: string;
+  createdAt?: string;
+  feedType: "scholarship";
+};
+
+export type ProviderFeedPost = {
+  _id: string;
+  providerName: string;
+  type: "announcement" | "update";
+  title: string;
+  content: string;
+  createdAt: string;
+  isEdited?: boolean;
+  editedAt?: string;
+  feedType: "post";
+};
+
+export type StudentFeedItem = FeedScholarship | ProviderFeedPost;
+
+export type StudentPostAttachment = {
+  id: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  kind: "photo" | "document";
+  url: string;
+};
+
+export type StudentPost = {
+  _id: string;
+  authorName: string;
+  authorHeadline: string;
+  content: string;
+  category: "academic" | "achievements" | "updates" | "appreciation";
+  attachments: StudentPostAttachment[];
+  moderationStatus: "pending" | "approved" | "removed";
+  warningReason?: string;
+  createdAt: string;
+  feedType: "student-post";
+};
+
+export function fetchStudentHomePosts() {
+  return request<{ success: boolean; data: StudentPost[] }>("/api/student/posts");
+}
+
+export async function createStudentPost(payload: {
+  content: string;
+  category: StudentPost["category"];
+  attachments: File[];
+}) {
+  const formData = new FormData();
+  formData.append("content", payload.content);
+  formData.append("category", payload.category);
+  payload.attachments.forEach((file) => formData.append("attachments", file));
+
+  const token = getAuthToken();
+  const response = await fetch(`${API_URL}/api/student/posts`, {
+    method: "POST",
+    headers: token ? { Authorization: "Bearer " + token } : {},
+    body: formData,
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.message || result.error || "Failed to submit your post.");
+  }
+  return result as { success: boolean; message: string; data: StudentPost };
+}
+
+export function fetchProviderStudentPosts() {
+  return request<{ success: boolean; data: StudentPost[] }>("/api/provider/student-posts");
+}
+
+export function fetchAdminStudentPosts(status: "pending" | "approved" = "pending") {
+  return request<{ success: boolean; data: StudentPost[] }>(`/api/admin/student-posts?status=${status}`);
+}
+
+export function moderateStudentPost(id: string, action: "approve" | "remove" | "warn", reason = "") {
+  return request<{ success: boolean; message: string }>(`/api/admin/student-posts/${encodeURIComponent(id)}/moderation`, {
+    method: "PATCH",
+    body: JSON.stringify({ action, reason }),
+  });
+}
+
+export async function fetchStudentPostAttachment(postId: string, attachmentId: string) {
+  const token = getAuthToken();
+  const response = await fetch(
+    `${API_URL}/api/posts/${encodeURIComponent(postId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    { headers: token ? { Authorization: "Bearer " + token } : {} },
+  );
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.message || "Failed to load post attachment.");
+  }
+  return response.blob();
+}
+
+export function fetchStudentFeed() {
+  return request<{ success: boolean; data: StudentFeedItem[] }>(`/api/student/feed?t=${Date.now()}`, {
+    cache: "no-store",
+  });
+}
+
+export function fetchProviderTimeline() {
+  return request<{ success: boolean; data: Array<FeedScholarship | ProviderFeedPost> }>("/api/provider/timeline");
+}
+
+export function createProviderFeedPost(payload: { title: string; content: string; type: "announcement" | "update" }) {
+  return request<{ success: boolean; data: ProviderFeedPost }>("/api/provider/posts", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateProviderFeedPost(id: string, payload: { title: string; content: string; type: "announcement" | "update" }) {
+  return request<{ success: boolean; data: ProviderFeedPost }>(`/api/provider/posts/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteProviderFeedPost(id: string) {
+  return request<{ success: boolean; message: string }>(`/api/provider/posts/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
 
 /** Absolute URL for uploaded assets served by the API (avatar, documents). */
 export function resolvePublicAssetUrl(src: string | undefined | null, bustCache = false): string {
@@ -27,7 +166,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || "Request failed");
+    const message = payload.error || payload.message || "Request failed";
+    throw new Error(payload.stage ? `${message} (${payload.stage})` : message);
   }
 
   return (await response.json()) as T;
@@ -44,7 +184,14 @@ export type AuthPayload = {
 export type ScholarshipRecommendationProfile = UserProfile | null;
 
 export function signUp(payload: AuthPayload) {
-  return request<{ user: Record<string, unknown>; token: string }>("/api/auth/signup", {
+  return request<{
+    user: Record<string, unknown>;
+    token?: string;
+    requiresOTP: boolean;
+    userId: string;
+    maskedEmail: string;
+    message: string;
+  }>("/api/auth/signup", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -57,6 +204,8 @@ export function signIn(payload: Pick<AuthPayload, "email" | "password">) {
     requiresOTP: boolean;
     userId: string;
     maskedEmail: string;
+    token?: string;
+    user?: Record<string, unknown>;
     message: string;
   }>("/api/auth/signin", {
     method: "POST",
@@ -81,6 +230,37 @@ export function resendOTP(userId: string) {
   return request<{ success: boolean; message: string; maskedEmail: string }>(
     "/api/auth/resend-otp",
     { method: "POST", body: JSON.stringify({ userId }) }
+  );
+}
+
+export function providerSignIn(payload: Pick<AuthPayload, "email" | "password">) {
+  return request<{
+    success: boolean;
+    requiresOTP: boolean;
+    userId: string;
+    maskedEmail: string;
+    message: string;
+  }>("/api/provider/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function verifyProviderLoginOTP(userId: string, otp: string) {
+  return request<{
+    success: boolean;
+    token: string;
+    user: Record<string, unknown> & { id: string; email: string; name: string };
+  }>("/api/provider/login/verify-otp", {
+    method: "POST",
+    body: JSON.stringify({ userId, otp }),
+  });
+}
+
+export function resendProviderLoginOTP(userId: string) {
+  return request<{ success: boolean; message: string; maskedEmail: string }>(
+    "/api/provider/login/resend-otp",
+    { method: "POST", body: JSON.stringify({ userId }) },
   );
 }
 
@@ -166,6 +346,36 @@ export async function uploadUserAvatar(file: File, email: string): Promise<strin
   return url;
 }
 
+/** Upload cover/banner photo to disk + MongoDB (returns path like /uploads/covers/...). */
+export async function uploadUserCoverPhoto(file: File, email: string): Promise<string> {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) {
+    throw new Error("Email is required to upload a cover photo.");
+  }
+
+  // Append email before the file so multer can read it while naming the upload.
+  const formData = new FormData();
+  formData.append("email", normalizedEmail);
+  formData.append("cover", file);
+
+  const response = await fetch(`${API_BASE_URL}/api/user/upload-cover-photo`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || "Failed to upload cover photo.");
+  }
+
+  const data = (await response.json()) as { coverPhotoUrl?: string };
+  const url = String(data.coverPhotoUrl || "").trim();
+  if (!url) {
+    throw new Error("Server did not return a cover photo URL.");
+  }
+  return url;
+}
+
 export function fetchUserProfile(email: string) {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   return request<{ user: Record<string, unknown> }>(
@@ -211,6 +421,58 @@ export function updateUserProfile(payload: {
   return request<{ user: Record<string, unknown>; message: string }>("/api/users/profile", {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export type UserNotificationSettings = {
+  scholarshipRecommendations: boolean;
+  deadlineReminders: boolean;
+  approvalUpdates: boolean;
+  newAnnouncements: boolean;
+  promotionalEmails: boolean;
+};
+
+export type UserPrivacySettings = {
+  profileVisibility: "public" | "providers-only" | "private";
+  showAcademicAchievements: boolean;
+  showFinancialInformation: boolean;
+  showContactInformation: boolean;
+};
+
+export type UserPreferences = {
+  language: string;
+  theme: string;
+};
+
+export type UserSettings = {
+  notificationSettings: UserNotificationSettings;
+  privacySettings: UserPrivacySettings;
+  preferences: UserPreferences;
+  twoFactorEnabled: boolean;
+};
+
+export function fetchUserSettings() {
+  return request<{ data: UserSettings }>("/api/users/settings");
+}
+
+export function updateUserSettings(settings: Partial<UserSettings>) {
+  return request<{ message: string; data: UserSettings }>("/api/users/settings", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
+}
+
+export function changeUserPassword(currentPassword: string, newPassword: string) {
+  return request<{ message: string }>("/api/users/password", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+}
+
+export function updateTwoFactorAuthentication(currentPassword: string, enabled: boolean) {
+  return request<{ message: string; enabled: boolean }>("/api/users/2fa", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, enabled }),
   });
 }
 
@@ -274,12 +536,12 @@ export function fetchRecommendedScholarships(profile: ScholarshipRecommendationP
 
 export function fetchSavedScholarships(email: string) {
   const normalizedEmail = String(email || "").trim().toLowerCase();
-  return request<{ data: number[] }>(`/api/users/${encodeURIComponent(normalizedEmail)}/saved-scholarships`);
+  return request<{ data: string[] }>(`/api/users/${encodeURIComponent(normalizedEmail)}/saved-scholarships`);
 }
 
-export function saveSavedScholarships(email: string, ids: number[]) {
+export function saveSavedScholarships(email: string, ids: string[]) {
   const normalizedEmail = String(email || "").trim().toLowerCase();
-  return request<{ data: number[] }>(`/api/users/${encodeURIComponent(normalizedEmail)}/saved-scholarships`, {
+  return request<{ data: string[] }>(`/api/users/${encodeURIComponent(normalizedEmail)}/saved-scholarships`, {
     method: "PUT",
     body: JSON.stringify({ ids }),
   });
@@ -289,12 +551,18 @@ export type ConversationPayload = {
   id: string;
   name: string;
   participantId: string;
-  messages: Array<{ id: string; sender: string; text: string; ts: number }>;
+  messages: Array<{ id: string; sender: string; text: string; ts: number; readBy?: string[] }>;
 };
 
 export function fetchConversations(email: string) {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   return request<{ data: ConversationPayload[] }>(`/api/users/${encodeURIComponent(normalizedEmail)}/conversations`);
+}
+
+export async function fetchUnreadMessageCount(email: string) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const result = await fetchConversations(normalizedEmail);
+  return { count: countUnreadMessages(result.data || [], normalizedEmail) };
 }
 
 export function saveConversations(email: string, conversations: ConversationPayload[]) {
@@ -421,7 +689,7 @@ export function qualifyApplication(
 }
 
 export function rejectApplicationWithReason(applicationId: string, reason: string) {
-  return request<{ message: string }>(`/api/admin/applications/${applicationId}/reject`, {
+  return request<{ message: string; studentNotified?: boolean }>(`/api/admin/applications/${applicationId}/reject`, {
     method: "PATCH",
     body: JSON.stringify({ reason }),
   });
@@ -439,7 +707,18 @@ export function requestResubmission(
 }
 
 export function exportApplicants(scholarshipId: string) {
-  window.open(`${API_BASE_URL}/api/admin/applications/scholarship/${scholarshipId}/export`, "_blank");
+  return fetch(`${API_URL}/api/admin/applications/scholarship/${scholarshipId}/export`, {
+    headers: { Authorization: "Bearer " + getAuthToken() },
+  }).then(async (response) => {
+    if (!response.ok) throw new Error("Failed to export applicants");
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `applicants-${scholarshipId}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  });
 }
 
 // ===== NOTIFICATIONS API =====
@@ -467,10 +746,223 @@ export function markNotificationRead(notificationId: string, email?: string) {
   });
 }
 
+export type ProviderNotification = {
+  _id: string;
+  title?: string;
+  message?: string;
+  type?: string;
+  scholarshipName?: string;
+  applicationId?: string;
+  read?: boolean;
+  is_read?: boolean;
+  createdAt?: string;
+};
+
+export function fetchProviderNotifications() {
+  return request<{ success: boolean; data: ProviderNotification[]; unreadCount: number }>(
+    "/api/provider/notifications",
+  );
+}
+
+export function fetchProviderUnreadNotificationCount() {
+  return request<{ success: boolean; count: number }>("/api/provider/notifications/unread-count");
+}
+
+export function markProviderNotificationRead(notificationId: string) {
+  return request<{ success: boolean; message: string }>(
+    `/api/provider/notifications/${encodeURIComponent(notificationId)}/read`,
+    { method: "PATCH" },
+  );
+}
+
+export type AdminNotificationInput = {
+  recipientGroup: "all" | "students" | "providers" | "specific";
+  specificUserId?: string;
+  title: string;
+  message: string;
+  type: "info" | "system_alert" | "announcement";
+  priority: "normal" | "high";
+};
+
+export type AdminProfile = {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  position: string;
+  address: string;
+  profilePicture: string;
+  coverPhoto: string;
+  createdAt: string | null;
+};
+
+export function fetchAdminProfile() {
+  return request<{ success: boolean; data: AdminProfile }>("/api/admin/profile");
+}
+
+export function fetchAdminNotifications() {
+  return request<{ data: Array<Record<string, unknown>> }>("/api/admin/notifications");
+}
+
+export function createAdminNotification(payload: AdminNotificationInput) {
+  return request<{ message: string; count: number; notification: Record<string, unknown> }>(
+    "/api/admin/notifications",
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export type AdminSettings = {
+  platformName: string;
+  tagline: string;
+  supportEmail: string;
+  description: string;
+  welcomeEmail: string;
+  approvalEmail: string;
+  apiKey: string;
+  webhookUrl: string;
+  registrationEnabled: boolean;
+  applicationsEnabled: boolean;
+  socialEnabled: boolean;
+  emailNotificationsEnabled: boolean;
+  newScholarshipAlertsEnabled: boolean;
+  applicationStatusUpdatesEnabled: boolean;
+  deadlineRemindersEnabled: boolean;
+};
+
+export function fetchAdminSettings() {
+  return request<{ data: AdminSettings }>("/api/admin/settings");
+}
+
+export function updateAdminSettings(section: "general" | "templates" | "api", settings: Partial<AdminSettings>) {
+  return request<{ message: string; data: AdminSettings }>("/api/admin/settings", {
+    method: "PUT",
+    body: JSON.stringify({ section, settings }),
+  });
+}
+
+export function regenerateAdminApiKey() {
+  return request<{ message: string; apiKey: string }>("/api/admin/settings/api-key/regenerate", {
+    method: "POST",
+  });
+}
+
+export function fetchAdminActivity() {
+  return request<{ data: Array<{ actor: string; action: string; subject: string; createdAt?: string }> }>("/api/admin/activity");
+}
+
+export type AdminMessage = {
+  _id?: string;
+  recipientEmail: string;
+  recipientUserId?: string | null;
+  message: string;
+  createdAt?: string;
+};
+
+export function fetchAdminMessages() {
+  return request<{ data: AdminMessage[] }>("/api/admin/messages");
+}
+
+export function fetchAdminConversations() {
+  return request<{ data: ConversationPayload[] }>(`/api/admin/conversations?t=${Date.now()}`, {
+    cache: "no-store",
+  });
+}
+
+export function sendAdminConversationMessage(payload: {
+  recipientEmail: string;
+  conversationId?: string;
+  message: string;
+}) {
+  return request<{ data: ConversationPayload }>("/api/admin/conversations/messages", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function sendAdminMessage(payload: Pick<AdminMessage, "recipientEmail" | "recipientUserId" | "message">) {
+  return request<{ data: AdminMessage }>("/api/admin/messages", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchAdminUserActivity(userId: string) {
+  return request<{ data: Array<{ action: string; detail: string; createdAt?: string }> }>(`/api/admin/users/${encodeURIComponent(userId)}/activity`);
+}
+
+export function fetchAdminUserApplications(userId: string) {
+  return request<{ data: Array<Record<string, unknown>> }>(`/api/admin/users/${encodeURIComponent(userId)}/applications`);
+}
+
 export function fetchMyApplications(email: string) {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   return request<{ data: Array<Record<string, unknown>> }>(
     `/api/applications/my-applications?email=${encodeURIComponent(normalizedEmail)}`
+  );
+}
+
+export type ScholarshipRenewal = {
+  _id: string;
+  originalApplicationId: string;
+  scholarshipId: string;
+  scholarshipName: string;
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  renewalPeriodNumber: number;
+  status: "Pending" | "Approved" | "Rejected";
+  reviewNote?: string;
+  submittedAt: string;
+  reviewedAt?: string | null;
+  registrationCard: { fileName: string };
+  previousSemesterGrades: { fileName: string };
+  registrationCardUrl: string;
+  previousSemesterGradesUrl: string;
+};
+
+export function fetchStudentScholarshipRenewals() {
+  return request<{ success: boolean; data: ScholarshipRenewal[] }>("/api/student/renewals");
+}
+
+export function fetchProviderScholarshipRenewals() {
+  return request<{ success: boolean; data: ScholarshipRenewal[] }>("/api/provider/renewals");
+}
+
+export async function submitScholarshipRenewal(
+  applicationId: string,
+  registrationCard: File,
+  previousSemesterGrades: File,
+) {
+  const formData = new FormData();
+  formData.append("registrationCard", registrationCard);
+  formData.append("previousSemesterGrades", previousSemesterGrades);
+  const token = getAuthToken();
+  const response = await fetch(
+    `${API_URL}/api/applications/${encodeURIComponent(applicationId)}/renewals`,
+    {
+      method: "POST",
+      headers: token ? { Authorization: "Bearer " + token } : {},
+      body: formData,
+    },
+  );
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.message || "Failed to submit scholarship renewal.");
+  }
+  return payload as { success: boolean; data: ScholarshipRenewal; message: string };
+}
+
+export function setScholarshipRenewalPeriod(scholarshipId: string, open: boolean) {
+  return request<{ success: boolean; renewalPeriodOpen: boolean; renewalPeriodNumber: number; message: string }>(
+    `/api/provider/scholarships/${encodeURIComponent(scholarshipId)}/renewal-period`,
+    { method: "PATCH", body: JSON.stringify({ open }) },
+  );
+}
+
+export function reviewScholarshipRenewal(renewalId: string, status: "Approved" | "Rejected", reviewNote = "") {
+  return request<{ success: boolean; data: ScholarshipRenewal; message: string }>(
+    `/api/provider/renewals/${encodeURIComponent(renewalId)}/review`,
+    { method: "PATCH", body: JSON.stringify({ status, reviewNote }) },
   );
 }
 
@@ -652,8 +1144,13 @@ export async function uploadProfileDocument(
   formData.append("docType", docType);
   formData.append("document", file);
 
+  const token = getAuthToken();
   const response = await fetch(`${API_URL}/api/users/profile/documents`, {
     method: "POST",
+    headers: {
+      // Do NOT set Content-Type — browser must set it with the multipart boundary
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: formData,
   });
 

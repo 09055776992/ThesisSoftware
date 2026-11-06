@@ -13,12 +13,29 @@ import { getDb } from "./db.js";
 import { rankScholarships } from "./matching-algorithms.js";
 import { seedQCSPPScholarships } from "./seed-qcsp-scholarships.js";
 import * as eligibilityMatching from "./eligibility-matching.js";
-import { sendOTPEmail, sendWelcomeEmail, sendScreeningEmail, sendNewScholarshipEmail, maskEmail } from "./services/emailService.js";
+import { sendOTPEmail, sendWelcomeEmail, sendScreeningEmail, maskEmail } from "./services/emailService.js";
+import { notifyUsersOfNewScholarshipAsync } from "./services/newScholarshipNotificationService.js";
 import { generateOTP, getOTPExpiry } from "./utils/otpUtils.js";
+import {
+  ADMIN_SIGNIN_REQUIRED_MESSAGE,
+  getStudentSigninRestriction,
+  resolveAccountRole,
+} from "./utils/account-role.js";
 import { analyzeDocumentFile } from "./services/aiService.js";
+import { startRenewalScheduler } from "./services/renewalNotificationService.js";
+import {
+  getProviderScholarshipRenewals,
+  getScholarshipRenewalDocument,
+  getStudentScholarshipRenewals,
+  reviewScholarshipRenewal,
+  setRenewalPeriod,
+  submitScholarshipRenewal,
+} from "./controller/scholarship-renewal.controller.js";
 import {
   registerProvider,
   loginProvider,
+  verifyProviderLoginOtp,
+  resendProviderLoginOtp,
   getProviderProfile,
   approveProvider,
   rejectProvider,
@@ -38,12 +55,28 @@ import {
   rejectApplicationByProvider,
   qualifyApplicationByProvider,
   getProviderDashboardStats,
+  getProviderNotifications,
+  getProviderUnreadNotificationCount,
+  markProviderNotificationRead,
   getProviderMe,
   getProviderProfileHandler,
   updateProviderProfile,
   uploadProviderAvatar,
 } from "./controller/provider.controller.js";
-import { requireAdmin, requireProvider } from "./middleware/auth.middleware.js";
+import {
+  createProviderFeedPost,
+  updateProviderFeedPost,
+  deleteProviderFeedPost,
+  getProviderTimeline,
+  getStudentFeed,
+  createStudentPost,
+  getStudentHomePosts,
+  getProviderStudentPosts,
+  getAdminStudentPosts,
+  moderateStudentPost,
+  getStudentPostAttachment,
+} from "./controller/feed.controller.js";
+import { requireAdmin, requireProvider, requireAuth, requireAuthOrLegacyAdmin } from "./middleware/auth.middleware.js";
 
 // Get __dirname equivalent in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -69,6 +102,30 @@ const storage = multer.diskStorage({
   }
 });
 
+const renewalStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const userId = String(req.currentUser?._id || "unknown").replace(/[^a-fA-F0-9]/g, "");
+    const applicationId = String(req.params.applicationId || "unknown").replace(/[^a-fA-F0-9]/g, "");
+    const uploadDir = path.join(__dirname, "private-uploads", "renewals", userId || "unknown", applicationId || "unknown");
+    fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    cb(null, `${Date.now()}_${sanitizedFilename}`);
+  },
+});
+
+const uploadRenewalDocuments = multer({
+  storage: renewalStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ["application/pdf", "image/jpeg", "image/jpg", "image/png"];
+    if (allowedTypes.includes(file.mimetype)) cb(null, true);
+    else cb(new Error("Only PDF, JPG, JPEG, and PNG renewal documents are allowed."));
+  },
+});
+
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
@@ -82,10 +139,67 @@ const upload = multer({
   }
 });
 
+const studentPostStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, "private-uploads", "student-posts");
+    fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `${crypto.randomUUID()}${ext}`);
+  },
+});
+
+const studentPostUpload = multer({
+  storage: studentPostStorage,
+  limits: { fileSize: 5 * 1024 * 1024, files: 5 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = new Set(["application/pdf", "image/jpeg", "image/png"]);
+    if (allowedTypes.has(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only PDF, JPEG, and PNG attachments are allowed."));
+    }
+  },
+});
+
 const app = express();
-app.use(cors());
+
+const allowedOrigins = [
+  "https://thesis-software-hczt.vercel.app",
+  "https://communist-appreciation-pursuant-maintenance.trycloudflare.com", // Cloudflare tunnel (frontend)
+  "http://localhost:5173", // Vite dev server
+  "http://localhost:5174", // Vite dev server (alternate port)
+  "http://localhost:3000", // fallback dev port
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g. Postman, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    // Allow any localhost port during development
+    if (/^http:\/\/localhost:\d+$/.test(origin)) return callback(null, true);
+    // Allow any Vercel deployment domain
+    if (/\.vercel\.app$/.test(origin)) return callback(null, true);
+    // Allow configured FRONTEND_BASE_URL
+    if (process.env.FRONTEND_BASE_URL && origin === process.env.FRONTEND_BASE_URL) return callback(null, true);
+    // Allow any Cloudflare tunnel domain during live testing
+    if (/trycloudflare\.com$/.test(origin)) return callback(null, true);
+    callback(new Error(`CORS policy: origin ${origin} is not allowed`));
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+}));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// Every /api/admin endpoint requires an authenticated administrator.
+// Admin sign-in remains under /api/auth/admin and is intentionally outside this namespace.
+app.use("/api/admin", requireAdmin);
 
 // Always return JSON for /api routes
 app.use('/api', (req, res, next) => {
@@ -191,6 +305,91 @@ app.post("/api/user/upload-avatar", uploadAvatar.single("avatar"), async (req, r
   }
 });
 
+// Cover photo upload configuration
+const coverPhotoStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, "uploads", "covers");
+    fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const email = (req.body.email || "unknown").replace(/[^a-zA-Z0-9]/g, "_");
+    const ext = path.extname(file.originalname) || ".jpg";
+    cb(null, `${email}-cover-${Date.now()}${ext}`);
+  }
+});
+
+const uploadCoverPhoto = multer({
+  storage: coverPhotoStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp"];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files (JPEG, PNG, GIF, WebP) are allowed"), false);
+    }
+  }
+});
+
+// POST /api/user/upload-cover-photo - Upload profile cover/banner image
+app.post("/api/user/upload-cover-photo", uploadCoverPhoto.single("cover"), async (req, res) => {
+  try {
+    console.log("[Cover Upload] Request received:", { email: req.body.email, file: req.file?.originalname });
+
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded." });
+    }
+
+    const db = await getDb();
+    const email = String(req.body.email || "").trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ error: "Email is required." });
+    }
+
+    const coverPhotoUrl = `/uploads/covers/${req.file.filename}`;
+    const filePath = path.join(__dirname, "uploads", "covers", req.file.filename);
+
+    if (!fs.existsSync(filePath)) {
+      console.error("[Cover Upload] File was not saved properly!");
+      return res.status(500).json({ error: "File upload failed." });
+    }
+
+    const existing = await db.collection("users").findOne(
+      { email },
+      { projection: { coverPhoto: 1 } }
+    );
+    if (!existing) {
+      try { fs.unlinkSync(filePath); } catch (_) { /* ignore cleanup errors */ }
+      return res.status(404).json({ error: "User not found." });
+    }
+
+    const result = await db.collection("users").updateOne(
+      { email },
+      { $set: { coverPhoto: coverPhotoUrl } }
+    );
+
+    console.log(`[Cover Upload] DB update result:`, result);
+    console.log(`[Cover Upload] Updated cover photo for ${email}: ${coverPhotoUrl}`);
+
+    // Best-effort cleanup of previous cover file (only if it lived under /uploads/covers)
+    const previous = String(existing.coverPhoto || "").trim();
+    if (previous.startsWith("/uploads/covers/") && previous !== coverPhotoUrl) {
+      const previousPath = path.join(__dirname, previous.replace(/^\//, ""));
+      try {
+        if (fs.existsSync(previousPath)) fs.unlinkSync(previousPath);
+      } catch (cleanupErr) {
+        console.warn("[Cover Upload] Failed to remove previous cover:", cleanupErr.message);
+      }
+    }
+
+    res.json({ coverPhotoUrl, message: "Cover photo updated successfully." });
+  } catch (error) {
+    console.error("[Cover Upload] Error:", error);
+    res.status(500).json({ error: "Failed to upload cover photo." });
+  }
+});
+
 /** Student-scoped notification (userEmail + optional userId). Module scope so all routes can call it. */
 async function insertStudentNotification(db, { userEmail, userId, type, title, message, scholarshipName }) {
   const email = String(userEmail || "").trim().toLowerCase();
@@ -202,6 +401,7 @@ async function insertStudentNotification(db, { userEmail, userId, type, title, m
   await db.collection("notifications").insertOne({
     userEmail: email,
     userId: uid,
+    userRole: "student",
     type,
     title,
     message,
@@ -211,104 +411,32 @@ async function insertStudentNotification(db, { userEmail, userId, type, title, m
   });
 }
 
-/**
- * Background hook: notify pre-filtered eligible students about a new scholarship.
- * Runs asynchronously so it never delays the admin's HTTP response.
- */
-async function notifyUsersOfNewScholarship(db, scholarship) {
-  try {
-    const criteria = scholarship.eligibilityCriteria || {};
+async function insertProviderApplicationNotification(db, scholarship, application) {
+  const { ObjectId } = await import("mongodb");
+  const ownerId = scholarship.createdBy || scholarship.providerId;
+  if (!ownerId) return;
 
-    // Build a MongoDB filter that matches only student accounts.
-    // Students are stored with userType:"student" (SCHOLAR registration) OR role:"customer"/"student" (legacy).
-    const baseStudentFilter = {
-      $or: [
-        { userType: { $in: ["student", "customer"] } },
-        { role: { $in: ["student", "customer", "Student"] } },
-      ],
-    };
-
-    // Education-level pre-filter
-    const edLevels = criteria.educationLevel && criteria.educationLevel.length > 0
-      ? criteria.educationLevel
-      : null;
-
-    let userFilter = baseStudentFilter;
-
-    if (edLevels) {
-      const edMap = {
-        "Junior High School": "junior-high",
-        "Senior High School": "senior-high",
-        "College / Undergraduate": "college",
-        "Vocational / TESDA": "vocational",
-        "Postgraduate (Masters / Doctorate)": "postgraduate",
-      };
-      const mappedLevels = edLevels.map((l) => edMap[l] || l);
-      userFilter = { $and: [baseStudentFilter, { educationLevel: { $in: mappedLevels } }] };
-    }
-
-    const students = await db.collection("users").find(userFilter, {
-      projection: { email: 1, userName: 1, gpa: 1, gwa: 1, educationLevel: 1, _id: 1 },
-    }).toArray();
-
-    console.log(`[NewScholarship] Found ${students.length} candidate student(s) for "${scholarship.name}"`);
-
-    let notified = 0;
-    let skipped = 0;
-
-    for (const student of students) {
-      try {
-        // GWA pre-filter — only skip if both sides are set and student clearly fails.
-        // Philippine GWA: 1.0 (best) → 5.0 (worst). Student PASSES when gwa <= required max.
-        const minGWA = criteria.minGWA || criteria.minGPA || scholarship.minimumGPA || null;
-        const rawGrade = student.gwa || student.GWA || student.gpa || student.GPA || null;
-        if (minGWA && rawGrade) {
-          const studentGWA = parseFloat(rawGrade);
-          const isPercentageScale = minGWA > 50;
-          if (Number.isFinite(studentGWA)) {
-            const fails = isPercentageScale
-              ? studentGWA < minGWA   // percentage: fail if student grade is below minimum
-              : studentGWA > minGWA;  // GWA scale: fail if student GWA exceeds allowed maximum
-            if (fails) { skipped++; continue; }
-          }
-        }
-
-        const studentEmail = String(student.email || "").trim().toLowerCase();
-        if (!studentEmail) { skipped++; continue; }
-
-        // Fire-and-forget individual email (errors per student are caught)
-        sendNewScholarshipEmail({
-          to: studentEmail,
-          studentName: student.userName || "Scholar",
-          scholarshipName: scholarship.name,
-          amount: scholarship.amount,
-          deadline: scholarship.deadline,
-          provider: scholarship.provider || scholarship.organization,
-          description: scholarship.description,
-        }).catch((err) =>
-          console.error(`[NewScholarship] Email failed for ${maskEmail(studentEmail)}:`, err.message)
-        );
-
-        // In-app notification
-        await insertStudentNotification(db, {
-          userEmail: studentEmail,
-          userId: student._id,
-          type: "new_scholarship",
-          title: "New Scholarship Available",
-          message: `🎓 A new scholarship matching your profile has been posted: "${scholarship.name}". Award: ₱${Number(scholarship.amount || 0).toLocaleString("en-PH")}. Deadline: ${scholarship.deadline ? new Date(scholarship.deadline).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" }) : "See details"}. Log in to view and apply!`,
-          scholarshipName: scholarship.name,
-        });
-
-        notified++;
-      } catch (studentErr) {
-        console.error(`[NewScholarship] Error processing student ${student._id}:`, studentErr.message);
-      }
-    }
-
-    console.log(`[NewScholarship] Notifications dispatched — notified: ${notified}, skipped (pre-filter): ${skipped}`);
-  } catch (err) {
-    console.error("[NewScholarship] Background notification hook failed:", err.message);
+  const ownerIdString = String(ownerId);
+  const ownerClauses = [{ _id: ownerId }];
+  if (ObjectId.isValid(ownerIdString)) {
+    ownerClauses.push({ _id: new ObjectId(ownerIdString) });
   }
+  const provider = await db.collection("users").findOne({ $or: ownerClauses });
+  if (!provider?.email) return;
+
+  await db.collection("notifications").insertOne({
+    userEmail: String(provider.email).trim().toLowerCase(),
+    userId: String(provider._id),
+    userRole: "provider",
+    type: "new_application",
+    title: "New Scholarship Application",
+    message: `${application.studentName || application.studentEmail || "A student"} applied for ${scholarship.name || application.scholarshipName || "your scholarship"}.`,
+    scholarshipName: scholarship.name || application.scholarshipName || "",
+    applicationId: application._id ? String(application._id) : undefined,
+    read: false,
+    is_read: false,
+    createdAt: new Date(),
+  });
 }
 
 // Serve uploads folder as static files
@@ -416,6 +544,41 @@ function mergeById(existingItems, incomingItems) {
   return Array.from(merged.values());
 }
 
+function mergeConversationsById(existingConversations, incomingConversations) {
+  const merged = new Map();
+  for (const conversation of [...(Array.isArray(existingConversations) ? existingConversations : []), ...(Array.isArray(incomingConversations) ? incomingConversations : [])]) {
+    if (!conversation || typeof conversation !== "object" || conversation.id == null) continue;
+
+    const key = String(conversation.id);
+    const previous = merged.get(key);
+    if (!previous) {
+      merged.set(key, conversation);
+      continue;
+    }
+
+    const messages = new Map();
+    for (const message of [...(Array.isArray(previous.messages) ? previous.messages : []), ...(Array.isArray(conversation.messages) ? conversation.messages : [])]) {
+      if (!message || typeof message !== "object" || message.id == null) continue;
+      const messageId = String(message.id);
+      const priorMessage = messages.get(messageId);
+      messages.set(messageId, {
+        ...priorMessage,
+        ...message,
+        readBy: Array.from(new Set([
+          ...(Array.isArray(priorMessage?.readBy) ? priorMessage.readBy : []),
+          ...(Array.isArray(message.readBy) ? message.readBy : []),
+        ].map((email) => normalizeEmail(email)).filter(Boolean))),
+      });
+    }
+    merged.set(key, {
+      ...previous,
+      ...conversation,
+      messages: Array.from(messages.values()).sort((left, right) => Number(left.ts) - Number(right.ts)),
+    });
+  }
+  return Array.from(merged.values());
+}
+
 async function getDisplayNameByEmail(db, email) {
   const normalizedEmail = normalizeEmail(email);
   if (!normalizedEmail) return "";
@@ -429,7 +592,7 @@ async function saveConversationsForEmail(db, email, incomingConversations) {
   if (!normalizedEmail) return;
 
   const previous = (await getUserStateByEmail(db, normalizedEmail)) ?? {};
-  const nextConversations = mergeById(previous.conversations, incomingConversations);
+  const nextConversations = mergeConversationsById(previous.conversations, incomingConversations);
 
   await db.collection("user_state").replaceOne(
     { email: normalizedEmail },
@@ -451,10 +614,13 @@ app.get("/api/users/:email/saved-scholarships", async (req, res) => {
       return res.status(400).json({ error: "Email is required." });
     }
 
+    console.log(`[API] GET saved-scholarships for: ${email}`);
     const state = await getUserStateByEmail(db, email);
     const ids = Array.isArray(state?.savedScholarshipIds)
-      ? state.savedScholarshipIds.map((v) => Number(v)).filter(Number.isFinite)
+      ? state.savedScholarshipIds.map((v) => String(v))
       : [];
+
+    console.log(`[API] returning saved ids for ${email}:`, ids);
 
     return res.json({ data: ids });
   } catch (error) {
@@ -470,10 +636,11 @@ app.put("/api/users/:email/saved-scholarships", async (req, res) => {
       return res.status(400).json({ error: "Email is required." });
     }
 
+    console.log(`[API] PUT saved-scholarships for: ${email}`, { body: req.body });
     const payload = req.body ?? {};
-    const ids = Array.isArray(payload.ids)
-      ? payload.ids.map((v) => Number(v)).filter(Number.isFinite)
-      : [];
+    const ids = Array.isArray(payload.ids) ? payload.ids.map((v) => String(v)) : [];
+
+    console.log(`[API] normalized ids for ${email}:`, ids);
 
     const previous = (await getUserStateByEmail(db, email)) ?? {};
     await db.collection("user_state").replaceOne(
@@ -486,6 +653,8 @@ app.put("/api/users/:email/saved-scholarships", async (req, res) => {
       },
       { upsert: true },
     );
+
+    console.log(`[API] saved scholarships updated for ${email}`);
 
     return res.json({ data: ids });
   } catch (error) {
@@ -607,8 +776,15 @@ app.get("/api/scholarships/recommendations", async (req, res) => {
     const scholarships = dedupeScholarshipsByName(
       await db.collection("scholarships").find({ status: "Active" }).toArray(),
     );
-    const studentId = String(req.query.studentId || "current-student");
-    const ranked = rankScholarships(scholarships, {}, studentId);
+    const studentId = String(req.query.studentId || "").trim();
+    let profile = {};
+    if (studentId) {
+      profile = await db.collection("users").findOne(
+        { email: studentId.toLowerCase() },
+        { projection: { password: 0, passwordHash: 0 } },
+      ) || {};
+    }
+    const ranked = rankScholarships(scholarships, profile, studentId || "current-student");
     res.json({ data: ranked });
   } catch (error) {
     res.status(500).json({ error: "Failed to rank scholarships." });
@@ -747,6 +923,10 @@ app.post("/api/scholarships", async (req, res) => {
     }
 
     const result = await db.collection("scholarships").insertOne(payload);
+
+    // Notify every registered student in the background (never blocks / never throws).
+    notifyUsersOfNewScholarshipAsync({ ...payload, _id: result.insertedId });
+
     res.status(201).json({ insertedId: result.insertedId });
   } catch (error) {
     if (error.code === 11000) {
@@ -823,12 +1003,9 @@ app.post("/api/admin/scholarships", async (req, res) => {
     const result = await db.collection("scholarships").insertOne(scholarship);
     const savedScholarship = { ...scholarship, _id: result.insertedId };
 
-    // Fire background notification only for Active scholarships
-    if (scholarship.status === "Active") {
-      notifyUsersOfNewScholarship(db, savedScholarship).catch((err) =>
-        console.error("[NewScholarship] Unhandled hook error:", err.message)
-      );
-    }
+    // Fire background notifications (email + in-app) to every registered student.
+    // The service schedules its own work, so the HTTP response is not delayed.
+    notifyUsersOfNewScholarshipAsync(savedScholarship);
 
     res.status(201).json({ data: savedScholarship });
   } catch (error) {
@@ -1068,6 +1245,11 @@ app.get("/api/admin/applications/:id/screening", async (req, res) => {
 app.post("/api/auth/signup", async (req, res) => {
   try {
     const db = await getDb();
+    const adminSettings = await db.collection("admin_settings").findOne({ _id: "platform" });
+    if (adminSettings?.registrationEnabled === false) {
+      return res.status(403).json({ error: "User registration is currently disabled." });
+    }
+    const { ObjectId } = await import("mongodb");
     const payload = req.body ?? {};
     const email = String(payload.email || "").trim().toLowerCase();
     const password = String(payload.password || "");
@@ -1078,44 +1260,85 @@ app.post("/api/auth/signup", async (req, res) => {
 
     const existing = await db.collection("users").findOne({ email });
     if (existing) {
-      return res.status(409).json({ error: "Email is already registered." });
+      return res.status(409).json({ error: "An account with this email already exists. Please sign in instead." });
+    }
+    const existingAdmin = await db.collection("admins").findOne({ email });
+    if (existingAdmin) {
+      return res.status(409).json({
+        error: "An admin account already uses this email. Please use the Admin Login page.",
+      });
     }
 
-    const userType = String(payload.userType || "student");
-    const user = {
+    // Do not create the account until the email ownership check succeeds.
+    // A pending signup is referenced by the OTP userId and expires with the
+    // verification window.
+    await db.collection("pendingSignups").deleteMany({
+      email,
+      createdAt: { $lte: new Date(Date.now() - 10 * 60 * 1000) },
+    });
+
+    const pendingSignup = await db.collection("pendingSignups").findOne({ email });
+    if (pendingSignup) {
+      return res.status(409).json({
+        error: "A verification code was already sent to this email. Please verify it or wait for it to expire.",
+      });
+    }
+
+    const userType = "student";
+    const passwordHash = await bcryptjs.hash(password, 10);
+    const pendingUser = {
       fullName: String(payload.fullName || ""),
       email,
-      password,
+      passwordHash,          // store hash, never plaintext
       phone: String(payload.phone || ""),
       location: String(payload.location || ""),
       userType,
-      role: userType, // mirror so all DB queries find the user regardless of which field they check
+      role: userType,
       avatar: "",
       createdAt: new Date(),
     };
 
-    const result = await db.collection("users").insertOne(user);
+    const pendingId = new ObjectId();
+    await db.collection("pendingSignups").insertOne({
+      _id: pendingId,
+      ...pendingUser,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
 
-    const token = createAuthToken({ userId: result.insertedId, email, userType });
-    await db.collection("sessions").insertOne({ token, email, createdAt: new Date() });
+    // Generate OTP for email verification
+    const otpCode = generateOTP();
+    const otpExpiry = getOTPExpiry();
 
-    // Send welcome email (non-blocking — don't fail signup if email fails)
-    sendWelcomeEmail(email, user.fullName).catch((err) =>
-      console.error("[Email] Welcome email failed:", err.message)
-    );
+    await db.collection("otps").insertOne({
+      userId: pendingId,
+      email,
+      otp: otpCode,
+      otpExpiry,
+      isUsed: false,
+      attempts: 0,
+      createdAt: new Date(),
+    });
+
+    // Send OTP verification email (fire-and-forget — don't block the response)
+    sendOTPEmail(email, otpCode, pendingUser.fullName || email)
+      .catch(emailErr => console.error("[Signup] OTP email failed:", emailErr.message));
 
     return res.status(201).json({
       user: {
-        fullName: user.fullName,
-        email: user.email,
-        phone: user.phone,
-        location: user.location,
-        userType: user.userType,
-        avatar: user.avatar,
+        _id: String(pendingId),
+        fullName: pendingUser.fullName,
+        email: pendingUser.email,
+        userType: pendingUser.userType,
+        phone: pendingUser.phone,
+        location: pendingUser.location,
       },
-      token,
+      requiresOTP: true,
+      userId: String(pendingId),
+      maskedEmail: maskEmail(email),
+      message: "Verification code sent to your email. Enter it to complete registration.",
     });
   } catch (error) {
+    console.error("[Signup] Error:", error);
     return res.status(500).json({ error: "Failed to create user." });
   }
 });
@@ -1134,9 +1357,57 @@ app.post("/api/auth/signin", async (req, res) => {
       return res.status(400).json({ error: "Email and password are required." });
     }
 
+    const adminAccount = await db.collection("admins").findOne({ email });
+    if (adminAccount) {
+      return res.status(403).json({
+        error: ADMIN_SIGNIN_REQUIRED_MESSAGE,
+        accountRole: "admin",
+      });
+    }
+
     const user = await db.collection("users").findOne({ email });
-    if (!user || user.password !== password) {
+    if (!user) {
+      return res.status(404).json({ error: "This email is not registered. Please check the email or create an account." });
+    }
+
+    const accountRole = resolveAccountRole(user);
+    const signinRestriction = getStudentSigninRestriction(user);
+    if (signinRestriction) {
+      return res.status(signinRestriction.status).json(signinRestriction.body);
+    }
+
+    // Support both bcrypt-hashed (passwordHash) and legacy plaintext (password) fields
+    let passwordValid = false;
+    if (user.passwordHash) {
+      passwordValid = await bcryptjs.compare(password, user.passwordHash);
+    } else if (user.password) {
+      // Legacy plaintext — compare directly, then migrate to hash
+      passwordValid = user.password === password;
+      if (passwordValid) {
+        // Silently upgrade to bcrypt on successful login
+        const newHash = await bcryptjs.hash(password, 10);
+        await db.collection("users").updateOne(
+          { _id: user._id },
+          { $set: { passwordHash: newHash }, $unset: { password: "" } }
+        );
+      }
+    }
+
+    if (!passwordValid) {
       return res.status(401).json({ error: "Invalid email or password." });
+    }
+
+    if (user.twoFactorEnabled === false) {
+      const token = createAuthToken({ userId: user._id, email: user.email, userType: accountRole });
+      await db.collection("sessions").insertOne({ token, email: user.email, createdAt: new Date() });
+      const { password: _password, passwordHash: _passwordHash, ...safeUser } = user;
+      return res.json({
+        success: true,
+        requiresOTP: false,
+        token,
+        user: { ...safeUser, _id: String(user._id), userType: accountRole, role: accountRole, twoFactorEnabled: false },
+        message: "Signed in successfully.",
+      });
     }
 
     // Password correct — generate OTP and send email
@@ -1157,8 +1428,9 @@ app.post("/api/auth/signin", async (req, res) => {
       createdAt: new Date(),
     });
 
-    // Send OTP email
-    await sendOTPEmail(user.email, otpCode, user.fullName || user.email);
+    // Send OTP email (fire-and-forget — don't block the response)
+    sendOTPEmail(user.email, otpCode, user.fullName || user.email)
+      .catch(err => console.error("[Signin] OTP email failed:", err.message));
 
     return res.json({
       success: true,
@@ -1201,6 +1473,13 @@ app.post("/api/auth/verify-otp", async (req, res) => {
     if (!otpRecord) {
       return res.status(400).json({ error: "OTP expired or not found. Please login again." });
     }
+    const adminAccount = await db.collection("admins").findOne({ _id: userObjectId });
+    if (otpRecord.userType === "admin" || adminAccount) {
+      return res.status(403).json({
+        error: ADMIN_SIGNIN_REQUIRED_MESSAGE,
+        accountRole: "admin",
+      });
+    }
 
     // Max 5 attempts
     if (otpRecord.attempts >= 5) {
@@ -1211,6 +1490,7 @@ app.post("/api/auth/verify-otp", async (req, res) => {
     // Check expiry
     if (new Date() > new Date(otpRecord.otpExpiry)) {
       await db.collection("otps").deleteOne({ _id: otpRecord._id });
+      await db.collection("pendingSignups").deleteOne({ _id: userObjectId });
       return res.status(400).json({ error: "OTP has expired. Please login again." });
     }
 
@@ -1231,13 +1511,71 @@ app.post("/api/auth/verify-otp", async (req, res) => {
     // OTP correct — mark as used
     await db.collection("otps").updateOne({ _id: otpRecord._id }, { $set: { isUsed: true } });
 
-    // Fetch user
-    const user = await db.collection("users").findOne({ _id: userObjectId });
-    if (!user) {
-      return res.status(404).json({ error: "User not found." });
+    // Signup OTPs reference a pending document. Create the real account only
+    // after the code has been validated.
+    const pendingSignup = await db.collection("pendingSignups").findOne({
+      _id: userObjectId,
+      expiresAt: { $gt: new Date() },
+    });
+
+    let user;
+    if (pendingSignup) {
+      const { _id: pendingId, expiresAt, ...signupData } = pendingSignup;
+      const signupRestriction = getStudentSigninRestriction(signupData);
+      if (signupRestriction) {
+        return res.status(signupRestriction.status).json(signupRestriction.body);
+      }
+      user = {
+        ...signupData,
+        role: "student",
+        userType: "student",
+        emailVerified: true,
+        createdAt: signupData.createdAt || new Date(),
+      };
+      const result = await db.collection("users").insertOne(user);
+      user._id = result.insertedId;
+      await db.collection("pendingSignups").deleteOne({ _id: pendingId });
+      sendWelcomeEmail(user.email, user.fullName).catch((err) =>
+        console.error("[Email] Welcome email failed:", err.message)
+      );
+    } else {
+      user = await db.collection("users").findOne({ _id: userObjectId });
+      if (!user) {
+        return res.status(404).json({ error: "This email is not registered. Please create a student account." });
+      }
+
+      const signinRestriction = getStudentSigninRestriction(user);
+      if (signinRestriction) {
+        return res.status(signinRestriction.status).json(signinRestriction.body);
+      }
+
+      // Legacy unverified users created before pendingSignups was introduced
+      // are still completed when their OTP is verified.
+      if (!user.emailVerified) {
+        await db.collection("users").updateOne(
+          { _id: userObjectId },
+          { $set: { emailVerified: true } }
+        );
+        user.emailVerified = true;
+        sendWelcomeEmail(user.email, user.fullName).catch((err) =>
+          console.error("[Email] Welcome email failed:", err.message)
+        );
+      }
     }
 
-    const token = createAuthToken({ userId: user._id, email: user.email, userType: user.userType || "student" });
+    const verifiedRole = resolveAccountRole(user);
+    const signinRestriction = getStudentSigninRestriction(user);
+    if (signinRestriction) {
+      return res.status(signinRestriction.status).json(signinRestriction.body);
+    }
+    if (verifiedRole === "provider") {
+      return res.status(403).json({
+        error: "This is a provider account. Please use the Provider Login page.",
+        accountRole: verifiedRole,
+      });
+    }
+
+    const token = createAuthToken({ userId: user._id, email: user.email, userType: verifiedRole });
     await db.collection("sessions").insertOne({ token, email: user.email, createdAt: new Date() });
 
     const profileImage = user.profileImage || user.profilePicture || user.avatar || "";
@@ -1246,15 +1584,18 @@ app.post("/api/auth/verify-otp", async (req, res) => {
       success: true,
       token,
       user: {
-        fullName: user.fullName || "",
+        fullName: (user.fullName && String(user.fullName).trim()) || (user.userName && String(user.userName).trim()) || (user.name && String(user.name).trim()) || "",
+        userName: user.userName || user.fullName || "",
+        name: user.name || user.fullName || "",
         email: user.email,
         phone: user.phone || "",
         location: user.location || "",
-        userType: user.userType || "student",
-        role: user.role || user.userType || "student",
+        userType: verifiedRole,
+        role: verifiedRole,
         avatar: profileImage,
         profileImage,
         profilePicture: profileImage,
+        coverPhoto: user.coverPhoto || "",
         // Academic profile fields — populated after profile setup
         gwa: user.gwa || user.gpa || "",
         gpa: user.gpa || user.gwa || "",
@@ -1267,6 +1608,10 @@ app.post("/api/auth/verify-otp", async (req, res) => {
         enrolledInQCSchool: user.enrolledInQCSchool || false,
         hasAcademicHonors: user.hasAcademicHonors || false,
         academic_rank: user.academic_rank || null,
+        joinDate: user.joinDate ||
+          (user.createdAt
+            ? new Date(user.createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+            : null),
         // Financial / eligibility fields
         incomeCategory: user.incomeCategory || "",
         financialNeed: user.financialNeed || [],
@@ -1307,7 +1652,8 @@ app.post("/api/auth/resend-otp", async (req, res) => {
     }
 
     const user = await db.collection("users").findOne({ _id: userObjectId });
-    if (!user) {
+    const pendingSignup = await db.collection("pendingSignups").findOne({ _id: userObjectId });
+    if (!user && !pendingSignup) {
       return res.status(404).json({ error: "User not found." });
     }
 
@@ -1325,7 +1671,7 @@ app.post("/api/auth/resend-otp", async (req, res) => {
     await db.collection("otps").deleteMany({ userId: userObjectId });
     await db.collection("otps").insertOne({
       userId: userObjectId,
-      email: user.email,
+      email: user?.email || pendingSignup.email,
       otp: otpCode,
       otpExpiry: getOTPExpiry(),
       isUsed: false,
@@ -1333,16 +1679,103 @@ app.post("/api/auth/resend-otp", async (req, res) => {
       createdAt: new Date(),
     });
 
-    await sendOTPEmail(user.email, otpCode, user.fullName || user.email);
+    sendOTPEmail(
+      user?.email || pendingSignup.email,
+      otpCode,
+      user?.fullName || pendingSignup.fullName || user?.email || pendingSignup.email
+    )
+      .catch(err => console.error("[Resend OTP] Email failed:", err.message));
 
     return res.json({
       success: true,
       message: "New verification code sent.",
-      maskedEmail: maskEmail(user.email),
+      maskedEmail: maskEmail(user?.email || pendingSignup.email),
     });
   } catch (error) {
     console.error("[Resend OTP] Error:", error);
     return res.status(500).json({ error: "Failed to resend code." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/forgot-password — send a reset link/code to email
+// ---------------------------------------------------------------------------
+app.post("/api/auth/forgot-password", async (req, res) => {
+  try {
+    const db = await getDb();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: "Email is required." });
+
+    const user = await db.collection("users").findOne({ email });
+    // Always return success to avoid user enumeration
+    if (!user) {
+      return res.json({ success: true, message: "If that email is registered you will receive a reset code." });
+    }
+
+    // Generate a 6-digit numeric OTP as the reset token
+    const resetToken = String(Math.floor(100000 + Math.random() * 900000));
+    const resetExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+    await db.collection("users").updateOne(
+      { email },
+      { $set: { resetPasswordToken: resetToken, resetPasswordExpires: resetExpires } }
+    );
+
+    // Send the code via email (fire-and-forget)
+    const { sendOTPEmail } = await import("./services/emailService.js");
+    sendOTPEmail(email, resetToken, user.fullName || user.userName || email, "password reset")
+      .catch((err) => console.error("[ForgotPassword] Email failed:", err.message));
+
+    return res.json({ success: true, message: "If that email is registered you will receive a reset code." });
+  } catch (err) {
+    console.error("[ForgotPassword] Error:", err);
+    return res.status(500).json({ error: "Failed to process request." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/auth/reset-password — verify code and set new password
+// ---------------------------------------------------------------------------
+app.post("/api/auth/reset-password", async (req, res) => {
+  try {
+    const db = await getDb();
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const token = String(req.body?.token || "").trim();
+    const newPassword = String(req.body?.newPassword || "");
+
+    if (!email || !token || !newPassword) {
+      return res.status(400).json({ error: "Email, token, and newPassword are required." });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters." });
+    }
+
+    const user = await db.collection("users").findOne({ email });
+    if (!user) return res.status(400).json({ error: "Invalid or expired reset code." });
+
+    if (
+      user.resetPasswordToken !== token ||
+      !user.resetPasswordExpires ||
+      new Date(user.resetPasswordExpires) < new Date()
+    ) {
+      return res.status(400).json({ error: "Invalid or expired reset code." });
+    }
+
+    const bcrypt = (await import("bcryptjs")).default;
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await db.collection("users").updateOne(
+      { email },
+      {
+        $set: { passwordHash },
+        $unset: { resetPasswordToken: "", resetPasswordExpires: "" },
+      }
+    );
+
+    return res.json({ success: true, message: "Password reset successfully. You can now sign in." });
+  } catch (err) {
+    console.error("[ResetPassword] Error:", err);
+    return res.status(500).json({ error: "Failed to reset password." });
   }
 });
 
@@ -1385,7 +1818,8 @@ app.post("/api/auth/admin/signin", async (req, res) => {
       createdAt: new Date(),
     });
 
-    await sendOTPEmail(admin.email, otpCode, admin.fullName || admin.email);
+    sendOTPEmail(admin.email, otpCode, admin.fullName || admin.email)
+      .catch(err => console.error("[Admin Signin] OTP email failed:", err.message));
 
     return res.json({
       success: true,
@@ -1520,7 +1954,8 @@ app.post("/api/auth/admin/resend-otp", async (req, res) => {
       createdAt: new Date(),
     });
 
-    await sendOTPEmail(admin.email, otpCode, admin.fullName || admin.email);
+    sendOTPEmail(admin.email, otpCode, admin.fullName || admin.email)
+      .catch(err => console.error("[Admin Resend OTP] Email failed:", err.message));
 
     return res.json({
       success: true,
@@ -1548,6 +1983,18 @@ app.post("/api/auth/admin/signup", async (req, res) => {
     const existing = await db.collection("admins").findOne({ email });
     if (existing) {
       return res.status(409).json({ error: "Admin account already exists." });
+    }
+    const existingUser = await db.collection("users").findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({
+        error: "An account already uses this email. Please use its existing sign-in page.",
+      });
+    }
+    const pendingSignup = await db.collection("pendingSignups").findOne({ email });
+    if (pendingSignup) {
+      return res.status(409).json({
+        error: "A user registration is already pending for this email.",
+      });
     }
 
     // Hash password using bcrypt
@@ -1834,7 +2281,9 @@ const handleUserProfileUpdate = async (req, res) => {
     return res.json({
       message: "Profile updated successfully.",
       user: {
-        fullName: updatedUser.fullName || "",
+        fullName: (updatedUser.fullName && String(updatedUser.fullName).trim()) || (updatedUser.userName && String(updatedUser.userName).trim()) || (updatedUser.name && String(updatedUser.name).trim()) || "",
+        userName: updatedUser.userName || updatedUser.fullName || "",
+        name: updatedUser.name || updatedUser.fullName || "",
         email: updatedUser.email,
         phone: updatedUser.phone || "",
         location: updatedUser.location || "",
@@ -1867,6 +2316,7 @@ const handleUserProfileUpdate = async (req, res) => {
         specialCategories: updatedUser.specialCategories,
         profileImage: updatedUser.profileImage || updatedUser.profilePicture || "",
         profilePicture: updatedUser.profilePicture || updatedUser.profileImage || "",
+        coverPhoto: updatedUser.coverPhoto || "",
         hasAcademicHonors: updatedUser.hasAcademicHonors === true || updatedUser.academic_honors === true,
         academic_rank: updatedUser.academic_rank ?? null,
       },
@@ -1878,7 +2328,7 @@ const handleUserProfileUpdate = async (req, res) => {
 };
 
 // GET /api/users/profile?email= — load full profile for client sync after sign-in
-app.get("/api/users/profile", async (req, res) => {
+app.get("/api/users/profile", requireAuth, async (req, res) => {
   try {
     const db = await getDb();
     const email = String(req.query.email || "").trim().toLowerCase();
@@ -1891,10 +2341,54 @@ app.get("/api/users/profile", async (req, res) => {
       return res.status(404).json({ error: "User not found." });
     }
 
-    const { password, ...safeUser } = user;
+    const { password, passwordHash, ...safeUser } = user;
+    const privacySettings = normalizeUserSettings(user).privacySettings;
+    const isOwner = String(user._id) === String(req.userId);
+    const requesterRole = String(req.currentUser?.role || req.currentUser?.userType || "").toLowerCase();
+    const isAdmin = requesterRole === "admin";
+    const isProvider = requesterRole === "provider";
+
+    if (!isOwner && !isAdmin) {
+      if (privacySettings.profileVisibility === "private") {
+        return res.status(403).json({ error: "This profile is private." });
+      }
+      if (privacySettings.profileVisibility === "providers-only" && !isProvider) {
+        return res.status(403).json({ error: "This profile is only visible to providers." });
+      }
+    }
+
+    if (!isOwner && !isAdmin) {
+      if (!privacySettings.showAcademicAchievements) {
+        delete safeUser.hasAcademicHonors;
+        delete safeUser.academic_honors;
+        delete safeUser.academic_rank;
+      }
+      if (!privacySettings.showFinancialInformation) {
+        delete safeUser.incomeCategory;
+        delete safeUser.financialNeed;
+        delete safeUser.householdIncome;
+        delete safeUser.financialSupportSource;
+        delete safeUser.economicDependency;
+        delete safeUser.netWorth;
+        delete safeUser.currency;
+      }
+      if (!privacySettings.showContactInformation) {
+        delete safeUser.phone;
+        delete safeUser.email;
+        delete safeUser.location;
+      }
+    }
+    const resolvedFullName =
+      (safeUser.fullName && String(safeUser.fullName).trim()) ||
+      (safeUser.userName && String(safeUser.userName).trim()) ||
+      (safeUser.name && String(safeUser.name).trim()) ||
+      "";
+
     return res.json({
       user: {
-        fullName: safeUser.fullName || "",
+        fullName: resolvedFullName,
+        userName: safeUser.userName || resolvedFullName || "",
+        name: safeUser.name || resolvedFullName || "",
         email: safeUser.email,
         phone: safeUser.phone || "",
         location: safeUser.location || "",
@@ -1923,18 +2417,167 @@ app.get("/api/users/profile", async (req, res) => {
         isSoloParent: safeUser.isSoloParent || false,
         specialCategories: safeUser.specialCategories || {},
         userType: safeUser.userType || "student",
+        twoFactorEnabled: safeUser.twoFactorEnabled !== false,
         profileImage: safeUser.profileImage || safeUser.avatar || "",
         profilePicture: safeUser.profilePicture || safeUser.profileImage || safeUser.avatar || "",
+        coverPhoto: safeUser.coverPhoto || "",
         about: safeUser.about || "",
         headline: safeUser.headline || "",
         skills: safeUser.skills || [],
         hasAcademicHonors:
           safeUser.hasAcademicHonors === true || safeUser.academic_honors === true,
         academic_rank: safeUser.academic_rank ?? null,
+        // joinDate derived from createdAt — used in the profile header
+        joinDate: safeUser.joinDate ||
+          (safeUser.createdAt
+            ? new Date(safeUser.createdAt).toLocaleDateString("en-US", { month: "long", year: "numeric" })
+            : null),
       },
     });
   } catch (error) {
     return res.status(500).json({ error: "Failed to fetch profile: " + error.message });
+  }
+});
+
+const defaultUserSettings = {
+  notificationSettings: {
+    scholarshipRecommendations: true,
+    deadlineReminders: true,
+    approvalUpdates: true,
+    newAnnouncements: true,
+    promotionalEmails: false,
+  },
+  privacySettings: {
+    profileVisibility: "public",
+    showAcademicAchievements: true,
+    showFinancialInformation: false,
+    showContactInformation: true,
+  },
+  preferences: {
+    language: "English",
+    theme: "Light",
+  },
+};
+
+function normalizeUserSettings(settings = {}) {
+  return {
+    notificationSettings: {
+      ...defaultUserSettings.notificationSettings,
+      ...(settings.notificationSettings || {}),
+    },
+    privacySettings: {
+      ...defaultUserSettings.privacySettings,
+      ...(settings.privacySettings || {}),
+    },
+    preferences: {
+      ...defaultUserSettings.preferences,
+      ...(settings.preferences || {}),
+    },
+    twoFactorEnabled: settings.twoFactorEnabled !== false,
+  };
+}
+
+app.get("/api/users/settings", requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const query = ObjectId.isValid(req.userId) ? { _id: new ObjectId(req.userId) } : { _id: req.userId };
+    const user = await db.collection("users").findOne(query);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    res.json({ data: normalizeUserSettings(user) });
+  } catch (error) {
+    console.error("Error fetching user settings:", error);
+    res.status(500).json({ error: "Failed to fetch user settings." });
+  }
+});
+
+app.put("/api/users/settings", requireAuth, async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const query = ObjectId.isValid(req.userId) ? { _id: new ObjectId(req.userId) } : { _id: req.userId };
+    const current = await db.collection("users").findOne(query);
+    if (!current) return res.status(404).json({ error: "User not found." });
+    const currentSettings = normalizeUserSettings(current);
+    const next = normalizeUserSettings({
+      notificationSettings: {
+        ...currentSettings.notificationSettings,
+        ...(req.body?.notificationSettings || {}),
+      },
+      privacySettings: {
+        ...currentSettings.privacySettings,
+        ...(req.body?.privacySettings || {}),
+      },
+      preferences: {
+        ...currentSettings.preferences,
+        ...(req.body?.preferences || {}),
+      },
+    });
+    if (!["public", "providers-only", "private"].includes(next.privacySettings.profileVisibility)) {
+      return res.status(400).json({ error: "Invalid profile visibility setting." });
+    }
+    await db.collection("users").updateOne(query, {
+      $set: {
+        notificationSettings: next.notificationSettings,
+        privacySettings: next.privacySettings,
+        preferences: next.preferences,
+        updatedAt: new Date(),
+      },
+    });
+    res.json({ message: "Account settings updated successfully.", data: next });
+  } catch (error) {
+    console.error("Error updating user settings:", error);
+    res.status(500).json({ error: "Failed to update user settings." });
+  }
+});
+
+app.post("/api/users/password", requireAuth, async (req, res) => {
+  try {
+    const currentPassword = String(req.body?.currentPassword || "");
+    const newPassword = String(req.body?.newPassword || "");
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Current and new passwords are required." });
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: "New password must be at least 8 characters long." });
+    }
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const query = ObjectId.isValid(req.userId) ? { _id: new ObjectId(req.userId) } : { _id: req.userId };
+    const user = await db.collection("users").findOne(query);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    const passwordMatches = user.passwordHash
+      ? await bcryptjs.compare(currentPassword, user.passwordHash)
+      : user.password === currentPassword;
+    if (!passwordMatches) return res.status(401).json({ error: "Current password is incorrect." });
+    const passwordHash = await bcryptjs.hash(newPassword, 10);
+    await db.collection("users").updateOne(query, { $set: { passwordHash, updatedAt: new Date() }, $unset: { password: "" } });
+    res.json({ message: "Password updated successfully." });
+  } catch (error) {
+    console.error("Error updating user password:", error);
+    res.status(500).json({ error: "Failed to update password." });
+  }
+});
+
+app.post("/api/users/2fa", requireAuth, async (req, res) => {
+  try {
+    const currentPassword = String(req.body?.currentPassword || "");
+    const enabled = req.body?.enabled === true;
+    if (!currentPassword) return res.status(400).json({ error: "Current password is required." });
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const query = ObjectId.isValid(req.userId) ? { _id: new ObjectId(req.userId) } : { _id: req.userId };
+    const user = await db.collection("users").findOne(query);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    const passwordMatches = user.passwordHash
+      ? await bcryptjs.compare(currentPassword, user.passwordHash)
+      : user.password === currentPassword;
+    if (!passwordMatches) return res.status(401).json({ error: "Current password is incorrect." });
+    await db.collection("users").updateOne(query, { $set: { twoFactorEnabled: enabled, updatedAt: new Date() } });
+    res.json({ message: enabled ? "Two-factor authentication enabled." : "Two-factor authentication disabled.", enabled });
+  } catch (error) {
+    console.error("Error updating two-factor authentication:", error);
+    res.status(500).json({ error: "Failed to update two-factor authentication." });
   }
 });
 
@@ -2166,13 +2809,15 @@ app.patch("/api/users/profile/achievements", async (req, res) => {
       achievementsFields.incomeCategory = String(incomeCategory);
     }
     if (householdIncome !== undefined) {
-      achievementsFields.householdIncome = Number(householdIncome);
+      const hi = Number(householdIncome);
+      if (!isNaN(hi)) achievementsFields.householdIncome = hi;
     }
     if (financialSupportSource !== undefined) {
       achievementsFields.financialSupportSource = String(financialSupportSource);
     }
     if (economicDependency !== undefined) {
-      achievementsFields.economicDependency = Number(economicDependency);
+      const ed = Number(economicDependency);
+      if (!isNaN(ed)) achievementsFields.economicDependency = ed;
     }
 
     // Persist using updateOne + $set (never replaceOne)
@@ -2230,10 +2875,6 @@ app.post("/api/users/profile/documents", uploadProfileDoc.single("document"), as
     const { email, docType } = req.body;
     const file = req.file;
 
-    if (!email) {
-      return res.status(400).json({ error: "Email is required." });
-    }
-
     if (!docType || !['gradesTranscript', 'enrollmentProof', 'qCitizenId'].includes(docType)) {
       return res.status(400).json({ error: "Invalid document type. Must be gradesTranscript, enrollmentProof, or qCitizenId." });
     }
@@ -2243,10 +2884,34 @@ app.post("/api/users/profile/documents", uploadProfileDoc.single("document"), as
     }
 
     const db = await getDb();
-    const normalizedEmail = String(email).trim().toLowerCase();
 
-    // Check user exists
-    const user = await db.collection("users").findOne({ email: normalizedEmail });
+    // Resolve the user: try email from body first, then fall back to JWT
+    let user = null;
+
+    if (email) {
+      const normalizedEmail = String(email).trim().toLowerCase();
+      user = await db.collection("users").findOne({ email: normalizedEmail });
+    }
+
+    // If email lookup missed, try resolving from the Bearer token
+    if (!user) {
+      try {
+        const authHeader = req.headers.authorization || "";
+        if (authHeader.startsWith("Bearer ")) {
+          const token = authHeader.slice(7);
+          const jwt = await import("jsonwebtoken");
+          const decoded = jwt.default.verify(token, process.env.JWT_SECRET || "your-secret-key");
+          const userId = decoded.userId || decoded.id;
+          if (userId) {
+            const { ObjectId } = await import("mongodb");
+            user = await db.collection("users").findOne({ _id: new ObjectId(String(userId)) });
+          }
+        }
+      } catch {
+        // token invalid or missing — user stays null
+      }
+    }
+
     if (!user) {
       return res.status(404).json({ error: "User not found." });
     }
@@ -2262,10 +2927,10 @@ app.post("/api/users/profile/documents", uploadProfileDoc.single("document"), as
       rejectionReason: null,
     };
 
-    // Update user document
+    // Update user document — use _id for a precise match regardless of email casing
     const updatePath = `profileDocuments.${docType}`;
     await db.collection("users").updateOne(
-      { email: normalizedEmail },
+      { _id: user._id },
       { 
         $set: { 
           [updatePath]: docObject,
@@ -2489,6 +3154,167 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
     }
   });
 
+  const defaultAdminSettings = {
+    platformName: "SCHOLAR",
+    tagline: "Your Gateway to Educational Opportunities",
+    supportEmail: "support@scholar.qcydo.gov.ph",
+    description: "SCHOLAR is a scholarship management system by the Quezon City Youth Development Office (QCYDO) that helps Quezon City students find, apply for, and track scholarship opportunities.",
+    welcomeEmail: "Welcome to SCHOLAR! We're excited to help you find and apply for scholarship opportunities.",
+    approvalEmail: "Congratulations! Your application has been approved...",
+    apiKey: "",
+    webhookUrl: "",
+    registrationEnabled: true,
+    applicationsEnabled: true,
+    socialEnabled: true,
+    emailNotificationsEnabled: true,
+    newScholarshipAlertsEnabled: true,
+    applicationStatusUpdatesEnabled: true,
+    deadlineRemindersEnabled: true,
+  };
+
+  function normalizeAdminSettings(settings = {}) {
+    return {
+      ...defaultAdminSettings,
+      ...Object.fromEntries(Object.keys(defaultAdminSettings).map((key) => [
+        key,
+        typeof settings[key] === "string" || typeof settings[key] === "boolean"
+          ? settings[key]
+          : defaultAdminSettings[key],
+      ])),
+    };
+  }
+
+  function maskApiKey(value = "") {
+    const key = String(value || "");
+    return key ? `••••••••••••${key.slice(-4)}` : "";
+  }
+
+  // GET /api/admin/settings - Fetch persisted platform settings.
+  app.get("/api/admin/settings", async (req, res) => {
+    try {
+      const db = await getDb();
+      const stored = await db.collection("admin_settings").findOne({ _id: "platform" });
+      const settings = normalizeAdminSettings(stored);
+      let keyLast4 = stored?.apiKeyLast4 || "";
+      if (stored?.apiKey && !stored.apiKeyHash) {
+        keyLast4 = String(stored.apiKey).slice(-4);
+        await db.collection("admin_settings").updateOne(
+          { _id: "platform" },
+          {
+            $set: {
+              apiKeyHash: crypto.createHash("sha256").update(String(stored.apiKey)).digest("hex"),
+              apiKeyLast4: keyLast4,
+              updatedAt: new Date(),
+              updatedBy: req.adminId,
+            },
+            $unset: { apiKey: "" },
+          },
+        );
+      } else if (!settings.apiKey) {
+        const initialKey = `sk_live_${crypto.randomBytes(32).toString("hex")}`;
+        keyLast4 = initialKey.slice(-4);
+        await db.collection("admin_settings").updateOne(
+          { _id: "platform" },
+          {
+            $set: {
+              ...settings,
+              apiKeyHash: crypto.createHash("sha256").update(initialKey).digest("hex"),
+              apiKeyLast4: initialKey.slice(-4),
+              updatedAt: new Date(),
+              updatedBy: req.adminId,
+            },
+            $unset: { apiKey: "" },
+          },
+          { upsert: true },
+        );
+      }
+      settings.apiKey = maskApiKey(stored?.apiKey || (keyLast4 ? `sk_live_${keyLast4}` : ""));
+      settings.apiKeyLast4 = keyLast4;
+      res.json({ data: settings });
+    } catch (error) {
+      console.error("Error fetching admin settings:", error);
+      res.status(500).json({ error: "Failed to fetch admin settings." });
+    }
+  });
+
+  // PUT /api/admin/settings - Persist one settings section without replacing other sections.
+  app.put("/api/admin/settings", async (req, res) => {
+    try {
+      const { section, settings = {} } = req.body || {};
+      const allowedBySection = {
+        general: [
+          "platformName",
+          "tagline",
+          "supportEmail",
+          "description",
+          "registrationEnabled",
+          "applicationsEnabled",
+          "socialEnabled",
+          "emailNotificationsEnabled",
+          "newScholarshipAlertsEnabled",
+          "applicationStatusUpdatesEnabled",
+          "deadlineRemindersEnabled",
+        ],
+        templates: ["welcomeEmail", "approvalEmail"],
+        api: ["webhookUrl"],
+      };
+      const allowedKeys = allowedBySection[section];
+      if (!allowedKeys) return res.status(400).json({ error: "Invalid settings section." });
+
+      const updates = {};
+      for (const key of allowedKeys) {
+        if (typeof settings[key] === "string") {
+          updates[key] = settings[key].trim();
+        } else if (typeof settings[key] === "boolean") {
+          updates[key] = settings[key];
+        }
+      }
+      if (section === "general" && updates.supportEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(updates.supportEmail)) {
+        return res.status(400).json({ error: "Support email is invalid." });
+      }
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No settings were provided." });
+      }
+
+      const db = await getDb();
+      await db.collection("admin_settings").updateOne(
+        { _id: "platform" },
+        { $set: { ...updates, updatedAt: new Date(), updatedBy: req.adminId } },
+        { upsert: true },
+      );
+      const stored = await db.collection("admin_settings").findOne({ _id: "platform" });
+      res.json({ message: "Settings saved successfully.", data: normalizeAdminSettings(stored) });
+    } catch (error) {
+      console.error("Error saving admin settings:", error);
+      res.status(500).json({ error: "Failed to save admin settings." });
+    }
+  });
+
+  // POST /api/admin/settings/api-key/regenerate - Replace the integration secret.
+  app.post("/api/admin/settings/api-key/regenerate", async (req, res) => {
+    try {
+      const apiKey = `sk_live_${crypto.randomBytes(32).toString("hex")}`;
+      const db = await getDb();
+      await db.collection("admin_settings").updateOne(
+        { _id: "platform" },
+        {
+          $set: {
+            apiKeyHash: crypto.createHash("sha256").update(apiKey).digest("hex"),
+            apiKeyLast4: apiKey.slice(-4),
+            updatedAt: new Date(),
+            updatedBy: req.adminId,
+          },
+          $unset: { apiKey: "" },
+        },
+        { upsert: true },
+      );
+      res.json({ message: "API key regenerated successfully.", apiKey });
+    } catch (error) {
+      console.error("Error regenerating admin API key:", error);
+      res.status(500).json({ error: "Failed to regenerate API key." });
+    }
+  });
+
   // GET /api/admin/stats - Fetch user statistics
   app.get("/api/admin/stats", async (req, res) => {
     try {
@@ -2500,9 +3326,14 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
         totalUsers,
         totalStudents,
         totalMentors,
+        totalProviders,
+        totalAdmins,
+        activeUsers,
         activeScholarships,
         newUsersThisMonth,
         userGrowthByMonth,
+        scholarshipDistribution,
+        applicationsByStatus,
       ] = await Promise.all([
         usersCollection.countDocuments({}),
         usersCollection.countDocuments({
@@ -2514,6 +3345,9 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
         usersCollection.countDocuments({
           $or: [{ userType: "mentor" }, { role: "Mentor" }, { role: "mentor" }],
         }),
+        usersCollection.countDocuments({ $or: [{ userType: "provider" }, { role: "provider" }] }),
+        usersCollection.countDocuments({ $or: [{ userType: "admin" }, { role: "admin" }] }),
+        usersCollection.countDocuments({ status: { $not: { $regex: /^suspended$/i } } }),
         scholarshipsCollection.countDocuments({
           $or: [{ status: { $regex: /^active$/i } }, { status: { $exists: false } }],
         }),
@@ -2544,6 +3378,30 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
             { $sort: { "_id.year": 1, "_id.month": 1 } },
           ])
           .toArray(),
+        scholarshipsCollection.aggregate([
+          { $match: { $or: [{ status: { $regex: /^active$/i } }, { status: { $exists: false } }] } },
+          { $group: { _id: { $ifNull: ["$category", { $ifNull: ["$type", "Uncategorized"] }] }, count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+        ]).toArray(),
+        db.collection("applications").aggregate([
+          {
+            $group: {
+              _id: {
+                $switch: {
+                  branches: [
+                    { case: { $in: [{ $toLower: { $ifNull: ["$status", ""] } }, ["approved", "accept", "accepted"]] }, then: "Approved" },
+                    { case: { $in: [{ $toLower: { $ifNull: ["$status", ""] } }, ["rejected", "reject", "declined"]] }, then: "Rejected" },
+                    { case: { $in: [{ $toLower: { $ifNull: ["$status", ""] } }, ["under review", "under_review", "review"]] }, then: "Under Review" },
+                    { case: { $in: [{ $toLower: { $ifNull: ["$status", ""] } }, ["pending", "system qualified"]] }, then: "Pending" },
+                  ],
+                  default: "Other",
+                },
+              },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { count: -1 } },
+        ]).toArray(),
       ]);
 
       const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -2555,14 +3413,260 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
       res.json({
         totalUsers,
         totalStudents,
+        totalProviders,
         totalMentors,
+        totalAdmins,
+        activeUsers,
         activeScholarships,
         newThisMonth: newUsersThisMonth,
         userGrowthByMonth: userGrowth,
+        scholarshipDistribution: scholarshipDistribution.map((entry) => ({ category: entry._id, count: entry.count })),
+        applicationsByStatus: applicationsByStatus.map((entry) => ({ status: entry._id, count: entry.count })),
       });
     } catch (error) {
       console.error("Error fetching stats:", error);
       res.status(500).json({ error: "Failed to fetch statistics" });
+    }
+  });
+
+  app.get("/api/admin/activity", async (req, res) => {
+    try {
+      const db = await getDb();
+      const [users, applications, notifications] = await Promise.all([
+        db.collection("users").find({}, { projection: { fullName: 1, userName: 1, email: 1, createdAt: 1 } }).sort({ createdAt: -1 }).limit(10).toArray(),
+        db.collection("applications").find({}, { projection: { studentName: 1, studentEmail: 1, status: 1, updatedAt: 1, createdAt: 1 } }).sort({ updatedAt: -1, createdAt: -1 }).limit(10).toArray(),
+        db.collection("notifications").find({ source: "admin" }, { projection: { title: 1, createdAt: 1 } }).sort({ createdAt: -1 }).limit(10).toArray(),
+      ]);
+      const activity = [
+        ...users.map((item) => ({ actor: item.fullName || item.userName || item.email, action: "registered", subject: "an account", createdAt: item.createdAt })),
+        ...applications.map((item) => ({ actor: item.studentName || item.studentEmail || "A user", action: String(item.status || "updated").toLowerCase(), subject: "an application", createdAt: item.updatedAt || item.createdAt })),
+        ...notifications.map((item) => ({ actor: "Admin", action: "sent", subject: item.title || "a notification", createdAt: item.createdAt })),
+      ].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()).slice(0, 10);
+      res.json({ data: activity });
+    } catch (error) {
+      console.error("Error fetching admin activity:", error);
+      res.status(500).json({ error: "Failed to fetch activity." });
+    }
+  });
+
+  app.get("/api/admin/messages", async (req, res) => {
+    try {
+      const db = await getDb();
+      const messages = await db.collection("messages").find({}).sort({ createdAt: -1 }).limit(100).toArray();
+      res.json({ data: messages });
+    } catch (error) {
+      console.error("Error fetching admin messages:", error);
+      res.status(500).json({ error: "Failed to fetch messages." });
+    }
+  });
+
+  app.get("/api/admin/conversations", async (req, res) => {
+    try {
+      const db = await getDb();
+      const adminEmail = normalizeEmail(req.admin?.email);
+      if (!adminEmail) {
+        return res.status(400).json({ error: "Admin email is required." });
+      }
+
+      const state = await getUserStateByEmail(db, adminEmail);
+      const conversations = Array.isArray(state?.conversations)
+        ? state.conversations.map((conversation) => ({
+            ...conversation,
+            messages: Array.isArray(conversation.messages) ? conversation.messages : [],
+          }))
+        : [];
+      const byId = new Map(conversations.map((conversation) => [String(conversation.id), conversation]));
+      const sentMessages = await db.collection("messages")
+        .find({ senderId: String(req.adminId) })
+        .sort({ createdAt: 1 })
+        .limit(500)
+        .toArray();
+
+      for (const record of sentMessages) {
+        const recipientEmail = normalizeEmail(record.recipientEmail);
+        const conversationId = String(record.conversationId || `admin-${record._id}`);
+        const conversation = byId.get(conversationId) || conversations.find(
+          (item) => normalizeEmail(item.participantId) === recipientEmail,
+        );
+        const target = conversation || {
+          id: conversationId,
+          name: recipientEmail,
+          participantId: recipientEmail,
+          messages: [],
+        };
+        const messageId = String(record._id);
+        if (!target.messages.some((message) => String(message.id) === messageId)) {
+          target.messages.push({
+            id: messageId,
+            sender: adminEmail,
+            text: String(record.message || ""),
+            ts: new Date(record.createdAt || 0).getTime(),
+          });
+        }
+        if (!conversation) conversations.push(target);
+        byId.set(String(target.id), target);
+      }
+
+      conversations.sort((left, right) => {
+        const leftLast = Math.max(0, ...(left.messages || []).map((message) => Number(message.ts) || 0));
+        const rightLast = Math.max(0, ...(right.messages || []).map((message) => Number(message.ts) || 0));
+        return rightLast - leftLast;
+      });
+
+      return res.json({ data: conversations });
+    } catch (error) {
+      console.error("Error fetching admin conversations:", error);
+      return res.status(500).json({ error: "Failed to fetch conversations." });
+    }
+  });
+
+  app.post("/api/admin/conversations/messages", async (req, res) => {
+    try {
+      const { recipientEmail, conversationId: requestedConversationId, message } = req.body || {};
+      const cleanEmail = normalizeEmail(recipientEmail);
+      const cleanMessage = String(message || "").trim();
+      const adminEmail = normalizeEmail(req.admin?.email);
+      if (!cleanEmail || !cleanMessage) {
+        return res.status(400).json({ error: "Recipient and message are required." });
+      }
+      if (!adminEmail) {
+        return res.status(400).json({ error: "Admin email is required." });
+      }
+
+      const db = await getDb();
+      const { ObjectId } = await import("mongodb");
+      const recipient = await db.collection("users").findOne({ email: cleanEmail });
+      const adminName = String(req.admin?.fullName || req.admin?.userName || "Administrator");
+      const recipientName = await getDisplayNameByEmail(db, cleanEmail) || cleanEmail;
+      const adminState = await getUserStateByEmail(db, adminEmail);
+      const adminConversations = Array.isArray(adminState?.conversations) ? adminState.conversations : [];
+      const existingConversation = requestedConversationId
+        ? adminConversations.find((item) => String(item.id) === String(requestedConversationId))
+        : adminConversations.find((item) => normalizeEmail(item.participantId) === cleanEmail);
+      const conversationId = String(
+        existingConversation?.id || requestedConversationId || `admin-${new ObjectId()}`,
+      );
+      const createdAt = new Date();
+      const messageRecord = {
+        conversationId,
+        senderId: String(req.adminId),
+        senderEmail: adminEmail,
+        senderRole: "admin",
+        recipientEmail: cleanEmail,
+        recipientUserId: recipient?._id ? String(recipient._id) : null,
+        message: cleanMessage,
+        read: false,
+        createdAt,
+      };
+      const inserted = await db.collection("messages").insertOne(messageRecord);
+      const conversationMessage = {
+        id: String(inserted.insertedId),
+        sender: adminEmail,
+        text: cleanMessage,
+        ts: createdAt.getTime(),
+      };
+      const existingMessages = Array.isArray(existingConversation?.messages) ? existingConversation.messages : [];
+      const adminConversation = {
+        id: conversationId,
+        name: recipientName,
+        participantId: cleanEmail,
+        messages: [...existingMessages, conversationMessage],
+      };
+      const recipientConversation = {
+        ...adminConversation,
+        name: adminName,
+        participantId: adminEmail,
+      };
+
+      await saveConversationsForEmail(db, adminEmail, [adminConversation]);
+      await saveConversationsForEmail(db, cleanEmail, [recipientConversation]);
+
+      return res.status(201).json({ data: adminConversation });
+    } catch (error) {
+      console.error("Error sending admin conversation message:", error);
+      return res.status(500).json({ error: "Failed to send message." });
+    }
+  });
+
+  app.post("/api/admin/messages", async (req, res) => {
+    try {
+      const { recipientEmail, recipientUserId, message } = req.body || {};
+      const cleanEmail = String(recipientEmail || "").trim().toLowerCase();
+      const cleanMessage = String(message || "").trim();
+      if (!cleanEmail || !cleanMessage) return res.status(400).json({ error: "Recipient and message are required." });
+      const db = await getDb();
+      const record = {
+        senderId: req.adminId,
+        senderRole: "admin",
+        recipientEmail: cleanEmail,
+        recipientUserId: recipientUserId ? String(recipientUserId) : null,
+        message: cleanMessage,
+        read: false,
+        createdAt: new Date(),
+      };
+      const result = await db.collection("messages").insertOne(record);
+      const adminEmail = normalizeEmail(req.admin?.email || "");
+      const recipientName = await getDisplayNameByEmail(db, cleanEmail);
+      const adminName = req.admin?.fullName || req.admin?.userName || "Administrator";
+      const conversationMessage = {
+        id: String(result.insertedId),
+        sender: adminEmail || "admin",
+        text: cleanMessage,
+        ts: Date.now(),
+      };
+      await saveConversationsForEmail(db, cleanEmail, [{
+        id: `admin-${result.insertedId}`,
+        name: adminName,
+        participantId: adminEmail || "admin",
+        messages: [conversationMessage],
+      }]);
+      res.status(201).json({ data: { ...record, _id: result.insertedId } });
+    } catch (error) {
+      console.error("Error sending admin message:", error);
+      res.status(500).json({ error: "Failed to send message." });
+    }
+  });
+
+  app.get("/api/admin/users/:id/activity", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { ObjectId } = await import("mongodb");
+      const id = ObjectId.isValid(req.params.id) ? new ObjectId(req.params.id) : null;
+      if (!id) return res.status(400).json({ error: "Invalid user ID." });
+      const user = await db.collection("users").findOne({ _id: id }, { projection: { email: 1, fullName: 1, userName: 1 } });
+      if (!user) return res.status(404).json({ error: "User not found." });
+      const [notifications, messages, applications] = await Promise.all([
+        db.collection("notifications").find({ $or: [{ userId: String(id) }, { userEmail: user.email }] }).sort({ createdAt: -1 }).limit(25).toArray(),
+        db.collection("messages").find({ $or: [{ recipientUserId: String(id) }, { recipientEmail: user.email }] }).sort({ createdAt: -1 }).limit(25).toArray(),
+        db.collection("applications").find({ $or: [{ studentId: String(id) }, { studentEmail: user.email }] }).sort({ updatedAt: -1, createdAt: -1 }).limit(25).toArray(),
+      ]);
+      const activity = [
+        ...notifications.map((item) => ({ action: "received notification", detail: item.title || item.message, createdAt: item.createdAt })),
+        ...messages.map((item) => ({ action: "received message", detail: item.message, createdAt: item.createdAt })),
+        ...applications.map((item) => ({ action: "application updated", detail: item.status || "Application", createdAt: item.updatedAt || item.createdAt })),
+      ].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      res.json({ data: activity });
+    } catch (error) {
+      console.error("Error fetching user activity:", error);
+      res.status(500).json({ error: "Failed to fetch user activity." });
+    }
+  });
+
+  app.get("/api/admin/users/:id/applications", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { ObjectId } = await import("mongodb");
+      const id = ObjectId.isValid(req.params.id) ? new ObjectId(req.params.id) : null;
+      if (!id) return res.status(400).json({ error: "Invalid user ID." });
+      const user = await db.collection("users").findOne({ _id: id }, { projection: { email: 1 } });
+      if (!user) return res.status(404).json({ error: "User not found." });
+      const applications = await db.collection("applications").find({
+        $or: [{ studentId: String(id) }, { studentEmail: user.email }],
+      }).sort({ updatedAt: -1, createdAt: -1 }).limit(50).toArray();
+      res.json({ data: applications });
+    } catch (error) {
+      console.error("Error fetching user applications:", error);
+      res.status(500).json({ error: "Failed to fetch user applications." });
     }
   });
 
@@ -2692,6 +3796,72 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ success: false, error: "Failed to fetch user" });
+    }
+  });
+
+  // PATCH /api/admin/users/:id — edit a user's name, email, or role
+  app.patch("/api/admin/users/:id", requireAdmin, async (req, res) => {
+    try {
+      const db = await getDb();
+      const { id } = req.params;
+      const { ObjectId } = await import("mongodb");
+      const { name, email, role } = req.body;
+
+      const updates = {};
+      if (name !== undefined) updates.fullName = String(name).trim();
+      if (email !== undefined) updates.email = String(email).trim().toLowerCase();
+      if (role !== undefined) {
+        const allowed = ["student", "provider", "admin", "mentor"];
+        if (!allowed.includes(role)) {
+          return res.status(400).json({ success: false, error: "Invalid role." });
+        }
+        updates.userType = role;
+        updates.role = role;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ success: false, error: "No valid fields to update." });
+      }
+
+      let userId;
+      try { userId = new ObjectId(id); } catch { return res.status(400).json({ success: false, error: "Invalid user ID." }); }
+
+      const result = await db.collection("users").updateOne({ _id: userId }, { $set: updates });
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ success: false, error: "User not found." });
+      }
+
+      return res.json({ success: true, message: "User updated successfully." });
+    } catch (err) {
+      console.error("[Admin Edit User] Error:", err);
+      return res.status(500).json({ success: false, error: "Failed to update user." });
+    }
+  });
+
+  // PATCH /api/admin/users/:id/suspend — suspend or reactivate a user
+  app.patch("/api/admin/users/:id/suspend", requireAdmin, async (req, res) => {
+    try {
+      const db = await getDb();
+      const { id } = req.params;
+      const { ObjectId } = await import("mongodb");
+      const { suspended } = req.body; // true = suspend, false = reactivate
+
+      let userId;
+      try { userId = new ObjectId(id); } catch { return res.status(400).json({ success: false, error: "Invalid user ID." }); }
+
+      const newStatus = suspended ? "Suspended" : "Active";
+      const result = await db.collection("users").updateOne(
+        { _id: userId },
+        { $set: { status: newStatus, updatedAt: new Date() } }
+      );
+      if (result.matchedCount === 0) {
+        return res.status(404).json({ success: false, error: "User not found." });
+      }
+
+      return res.json({ success: true, message: `User ${newStatus.toLowerCase()} successfully.`, status: newStatus });
+    } catch (err) {
+      console.error("[Admin Suspend User] Error:", err);
+      return res.status(500).json({ success: false, error: "Failed to update user status." });
     }
   });
 
@@ -2957,6 +4127,10 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
     try {
       console.log("[DEBUG] /api/applications body:", req.body);
       const db = await getDb();
+      const adminSettings = await db.collection("admin_settings").findOne({ _id: "platform" });
+      if (adminSettings?.applicationsEnabled === false) {
+        return res.status(403).json({ error: "Scholarship applications are currently disabled." });
+      }
       const { ObjectId } = await import("mongodb");
       const {
         studentId,
@@ -3059,6 +4233,10 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
         { _id: new ObjectId(scholarshipId) },
         { $inc: { applicationsCount: 1 } }
       );
+      await insertProviderApplicationNotification(db, scholarship, {
+        ...application,
+        _id: result.insertedId,
+      });
 
       res.status(201).json({
         data: { ...application, _id: result.insertedId.toString() },
@@ -3482,6 +4660,10 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
   app.post("/api/applications/submit", async (req, res) => {
     try {
       const db = await getDb();
+      const adminSettings = await db.collection("admin_settings").findOne({ _id: "platform" });
+      if (adminSettings?.applicationsEnabled === false) {
+        return res.status(403).json({ error: "Scholarship applications are currently disabled." });
+      }
       const { studentEmail, scholarshipId, declaration } = req.body;
       
       console.log("[Application Submit] Request received:", {
@@ -3537,7 +4719,33 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
         return res.status(404).json({ error: "Scholarship not found." });
       }
 
-      // Check if already applied
+      // ── One active application rule ───────────────────────────────────────
+      // Block if the student already has any application that is still active
+      // (not rejected, not withdrawn).
+      const activeStatuses = [
+        "Pending",
+        "System Qualified",
+        "Under Review",
+        "Qualified for Final Screening",
+        "Action Required: Submit Specific Requirements",
+        "Approved",
+      ];
+      const activeApplication = await db.collection("applications").findOne({
+        $or: [
+          { studentId: student._id.toString() },
+          { studentEmail: student.email },
+        ],
+        status: { $in: activeStatuses },
+      });
+      if (activeApplication) {
+        return res.status(400).json({
+          error: "You can only have one active scholarship application at a time.",
+          activeScholarshipName: activeApplication.scholarshipName || "another scholarship",
+          code: "ACTIVE_APPLICATION_EXISTS",
+        });
+      }
+
+      // Check if already applied to THIS scholarship specifically
       const existingApplication = await db.collection("applications").findOne({
         studentId: student._id.toString(),
         scholarshipId: scholarshipId,
@@ -3643,6 +4851,7 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
         message: `Your application for ${scholarship.name} has been submitted successfully. Reference: ${result.insertedId.toString().slice(-8).toUpperCase()}`,
         scholarshipName: scholarship.name,
       });
+      await insertProviderApplicationNotification(db, scholarship, application);
 
       console.log("[Application Submit] Success:", result.insertedId);
 
@@ -3659,6 +4868,33 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
       res.status(500).json({ error: "Failed to submit application: " + error.message });
     }
   });
+
+  // GET /api/student/renewals - Get the authenticated student's renewal submissions
+  app.get("/api/student/renewals", requireAuth, getStudentScholarshipRenewals);
+
+  // POST /api/applications/:applicationId/renewals - Submit renewal documents for an approved award
+  app.post(
+    "/api/applications/:applicationId/renewals",
+    requireAuth,
+    (req, res, next) => uploadRenewalDocuments.fields([
+      { name: "registrationCard", maxCount: 1 },
+      { name: "previousSemesterGrades", maxCount: 1 },
+    ])(req, res, async (error) => {
+      if (error) {
+        const uploaded = Object.values(req.files || {}).flat();
+        await Promise.all(uploaded.map((file) =>
+          fs.promises.unlink(file.path).catch((cleanupError) => {
+            if (cleanupError.code !== "ENOENT") {
+              console.error("[Scholarship Renewal] Failed to remove invalid upload:", cleanupError);
+            }
+          })
+        ));
+        return res.status(400).json({ success: false, message: error.message || "Invalid renewal documents." });
+      }
+      return next();
+    }),
+    submitScholarshipRenewal,
+  );
 
   // POST /api/applications/:id/specific-documents - Submit Stage 2 specific documents (post-acceptance)
   app.post("/api/applications/:id/specific-documents", upload.fields([
@@ -3992,6 +5228,57 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
     }
   });
 
+  // GET /api/admin/applications/:applicationId/profile-documents/:docType
+  // Serve a student's private profile document only to an authenticated admin.
+  app.get(
+    "/api/admin/applications/:applicationId/profile-documents/:docType",
+    requireAdmin,
+    async (req, res) => {
+      try {
+        const { ObjectId } = await import("mongodb");
+        const { applicationId, docType } = req.params;
+        const allowedTypes = new Set(["gradesTranscript", "enrollmentProof", "qCitizenId"]);
+        if (!ObjectId.isValid(applicationId) || !allowedTypes.has(docType)) {
+          return res.status(400).json({ error: "Invalid application or document type." });
+        }
+
+        const db = await getDb();
+        const application = await db.collection("applications").findOne({
+          _id: new ObjectId(applicationId),
+        });
+        if (!application) {
+          return res.status(404).json({ error: "Application not found." });
+        }
+
+        const email = String(application.studentEmail || "").trim().toLowerCase();
+        const student = await db.collection("users").findOne(
+          { email },
+          { projection: { [`profileDocuments.${docType}`]: 1 } },
+        );
+        const document = student?.profileDocuments?.[docType];
+        if (!document?.filePath) {
+          return res.status(404).json({ error: "Student document not found." });
+        }
+
+        const uploadsRoot = path.resolve(__dirname, "uploads");
+        const filePath = path.resolve(String(document.filePath));
+        const relativePath = path.relative(uploadsRoot, filePath);
+        if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+          return res.status(403).json({ error: "Document path is invalid." });
+        }
+        if (!fs.existsSync(filePath)) {
+          return res.status(404).json({ error: "Document file is missing from storage." });
+        }
+
+        res.type(document.mimeType || "application/octet-stream");
+        return res.sendFile(filePath);
+      } catch (error) {
+        console.error("[Admin Profile Document] Error:", error);
+        return res.status(500).json({ error: "Failed to open student document." });
+      }
+    },
+  );
+
   // GET /api/applications/my-applications - Get student's own applications
   app.get("/api/applications/my-applications", async (req, res) => {
     try {
@@ -4018,7 +5305,17 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
           try {
             scholarshipData = await db.collection("scholarships").findOne(
               { _id: new ObjectId(app.scholarshipId) },
-              { projection: { name: 1, provider: 1, imageUrl: 1, type: 1, amount: 1 } }
+              {
+                projection: {
+                  name: 1,
+                  provider: 1,
+                  imageUrl: 1,
+                  type: 1,
+                  amount: 1,
+                  renewalPeriodOpen: 1,
+                  renewalPeriodNumber: 1,
+                },
+              }
             );
           } catch (e) {
             // Invalid scholarshipId - skip
@@ -4152,44 +5449,62 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
   });
 
   // PATCH /api/admin/applications/:applicationId/reject - Reject with reason
-  app.patch("/api/admin/applications/:applicationId/reject", async (req, res) => {
+  app.patch("/api/admin/applications/:applicationId/reject", requireAdmin, async (req, res) => {
     try {
       const db = await getDb();
       const { ObjectId } = await import("mongodb");
-      const { reason } = req.body;
+      const { applicationId } = req.params;
+      if (!ObjectId.isValid(applicationId)) {
+        return res.status(400).json({ error: "Invalid application ID." });
+      }
+      const reason = String(req.body?.reason || "").trim();
 
       const application = await db.collection("applications").findOne({
-        _id: new ObjectId(req.params.applicationId),
+        _id: new ObjectId(applicationId),
       });
       if (!application) return res.status(404).json({ error: "Application not found." });
 
-      await db.collection("applications").updateOne(
-        { _id: new ObjectId(req.params.applicationId) },
+      const updateResult = await db.collection("applications").updateOne(
+        { _id: new ObjectId(applicationId) },
         {
           $set: {
             status: "Rejected",
-            rejectionReason: reason || "",
+            rejectionReason: reason,
+            rejectedAt: new Date(),
             updatedAt: new Date(),
           },
         }
       );
+      if (updateResult.matchedCount === 0) {
+        return res.status(404).json({ error: "Application not found." });
+      }
 
       const notifMsg = `We regret to inform you that your application for ${application.scholarshipName} has not been approved.\n\nReason: ${reason || "No specific reason provided."}\n\nYou may apply for other scholarships that match your profile.`;
+      let studentNotified = false;
+      try {
+        const applicant = await db.collection("users").findOne({ email: String(application.studentEmail || "").trim().toLowerCase() });
+        await insertStudentNotification(db, {
+          userEmail: application.studentEmail,
+          userId: applicant?._id,
+          type: "application_rejected",
+          title: "Application Rejected",
+          message: notifMsg,
+          scholarshipName: application.scholarshipName,
+        });
+        studentNotified = true;
+      } catch (notificationError) {
+        console.error("[Reject Application] Status saved, but student notification failed:", notificationError);
+      }
 
-      const applicant = await db.collection("users").findOne({ email: String(application.studentEmail || "").toLowerCase() });
-
-      await insertStudentNotification(db, {
-        userEmail: application.studentEmail,
-        userId: applicant?._id,
-        type: "application_rejected",
-        title: "Application Rejected",
-        message: notifMsg,
-        scholarshipName: application.scholarshipName,
+      return res.json({
+        message: studentNotified
+          ? "Application rejected and student notified."
+          : "Application rejected. Student notification could not be created.",
+        studentNotified,
       });
-
-      res.json({ message: "Application rejected and student notified." });
     } catch (error) {
-      res.status(500).json({ error: "Failed to reject application." });
+      console.error("[Reject Application] Error:", error);
+      return res.status(500).json({ error: "Failed to reject application." });
     }
   });
 
@@ -4356,6 +5671,132 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
 
   // ===== STUDENT NOTIFICATIONS API =====
 
+  // GET /api/admin/notifications - Get recent notifications for the admin history.
+  app.get("/api/admin/notifications", async (req, res) => {
+    try {
+      const db = await getDb();
+      const notifications = await db.collection("notifications").aggregate([
+        { $match: { source: "admin" } },
+        { $sort: { createdAt: -1 } },
+        {
+          $group: {
+            _id: {
+              title: "$title",
+              message: "$message",
+              type: "$type",
+              priority: "$priority",
+              recipientGroup: "$recipientGroup",
+              createdAt: "$createdAt",
+            },
+            recipientCount: { $sum: 1 },
+          },
+        },
+        { $sort: { "_id.createdAt": -1 } },
+        { $limit: 100 },
+        {
+          $project: {
+            _id: 0,
+            title: "$_id.title",
+            message: "$_id.message",
+            type: "$_id.type",
+            priority: "$_id.priority",
+            recipientGroup: "$_id.recipientGroup",
+            createdAt: "$_id.createdAt",
+            recipientCount: 1,
+          },
+        },
+      ]).toArray();
+      res.json({ data: notifications });
+    } catch (error) {
+      console.error("Error fetching admin notifications:", error);
+      res.status(500).json({ error: "Failed to fetch notifications." });
+    }
+  });
+
+  // POST /api/admin/notifications - Persist and dispatch an in-app notification.
+  app.post("/api/admin/notifications", async (req, res) => {
+    try {
+      const db = await getDb();
+      const {
+        recipientGroup = "all",
+        specificUserId,
+        title,
+        message,
+        type = "info",
+        priority = "normal",
+      } = req.body || {};
+
+      const cleanTitle = String(title || "").trim();
+      const cleanMessage = String(message || "").trim();
+      const allowedGroups = new Set(["all", "students", "providers", "specific"]);
+      const allowedTypes = new Set(["info", "system_alert", "announcement"]);
+      const allowedPriorities = new Set(["normal", "high"]);
+
+      if (!allowedGroups.has(recipientGroup)) {
+        return res.status(400).json({ error: "Invalid recipient group." });
+      }
+      if (!allowedTypes.has(type) || !allowedPriorities.has(priority)) {
+        return res.status(400).json({ error: "Invalid notification type or priority." });
+      }
+      if (!cleanTitle || cleanTitle.length > 160) {
+        return res.status(400).json({ error: "Title is required and must be 160 characters or fewer." });
+      }
+      if (!cleanMessage || cleanMessage.length > 5000) {
+        return res.status(400).json({ error: "Message is required and must be 5000 characters or fewer." });
+      }
+
+      const query = { status: { $ne: "Suspended" }, email: { $exists: true, $nin: [null, ""] } };
+      if (recipientGroup === "students") {
+        query.$or = [
+          { userType: { $in: ["student", "customer"] } },
+          { role: { $in: ["student", "customer", "Student"] } },
+        ];
+      } else if (recipientGroup === "providers") {
+        query.$or = [{ userType: "provider" }, { role: "provider" }];
+      } else if (recipientGroup === "specific") {
+        if (!specificUserId) return res.status(400).json({ error: "Specific user ID is required." });
+        const { ObjectId } = await import("mongodb");
+        query._id = ObjectId.isValid(String(specificUserId))
+          ? new ObjectId(String(specificUserId))
+          : null;
+        if (!query._id) return res.status(400).json({ error: "Specific user ID is invalid." });
+      }
+
+      const recipients = await db.collection("users").find(query, {
+        projection: { _id: 1, email: 1 },
+      }).toArray();
+
+      if (recipients.length === 0) {
+        return res.status(404).json({ error: "No eligible recipients found." });
+      }
+
+      const createdAt = new Date();
+      const documents = recipients.map((recipient) => ({
+        userEmail: String(recipient.email).trim().toLowerCase(),
+        userId: String(recipient._id),
+        userRole: recipient.role === "provider" || recipient.userType === "provider" ? "provider" : "student",
+        type,
+        priority,
+        title: cleanTitle,
+        message: cleanMessage,
+        recipientGroup,
+        source: "admin",
+        read: false,
+        createdAt,
+      }));
+      await db.collection("notifications").insertMany(documents);
+
+      res.status(201).json({
+        message: "Notification sent successfully.",
+        count: documents.length,
+        notification: { title: cleanTitle, message: cleanMessage, type, priority, recipientGroup, createdAt },
+      });
+    } catch (error) {
+      console.error("Error sending admin notification:", error);
+      res.status(500).json({ error: "Failed to send notification." });
+    }
+  });
+
   // GET /api/notifications/:email - Get all notifications for a student
   app.get("/api/notifications/:email", async (req, res) => {
     try {
@@ -4383,7 +5824,7 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
 
       const count = await db.collection("notifications").countDocuments({
         userEmail: email,
-        read: false,
+        $or: [{ read: false }, { is_read: false }],
       });
 
       res.json({ count });
@@ -4412,7 +5853,7 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
 
       await db.collection("notifications").updateOne(
         { _id: new ObjectId(req.params.id), userEmail: email },
-        { $set: { read: true } }
+        { $set: { read: true, is_read: true, readAt: new Date() } }
       );
 
       res.json({ message: "Notification marked as read." });
@@ -4798,11 +6239,55 @@ app.get("/api/applications/:id/my-score", async (req, res) => {
 // PROVIDER AUTH ROUTES
 // ============================================================
 
+// ── Provider credential document upload (multer config) ──────────────────
+const providerCredentialStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(__dirname, "uploads", "provider-credentials");
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ts = Date.now();
+    const safe = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+    cb(null, `${ts}_${safe}`);
+  },
+});
+const uploadProviderCredentials = multer({
+  storage: providerCredentialStorage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB per file
+  fileFilter: (req, file, cb) => {
+    const allowed = ["application/pdf", "image/jpeg", "image/jpg", "image/png"];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error("Only PDF, JPEG, and PNG files are allowed."));
+  },
+});
+
 // POST /api/provider/register — submit account request (no auth required)
-app.post("/api/provider/register", registerProvider);
+// Accepts optional credential files (multipart/form-data)
+app.post(
+  "/api/provider/register",
+  uploadProviderCredentials.array("credentials", 5),
+  async (req, res, next) => {
+    // Attach uploaded file metadata to req.body so registerProvider can store it
+    if (req.files && req.files.length > 0) {
+      req.body.credentialFiles = req.files.map((f) => ({
+        fileName: f.originalname,
+        storedName: f.filename,
+        filePath: f.path,
+        fileSize: f.size,
+        mimeType: f.mimetype,
+        uploadedAt: new Date(),
+      }));
+    }
+    next();
+  },
+  registerProvider,
+);
 
 // POST /api/provider/login — login after approval (no auth required)
 app.post("/api/provider/login", loginProvider);
+app.post("/api/provider/login/verify-otp", verifyProviderLoginOtp);
+app.post("/api/provider/login/resend-otp", resendProviderLoginOtp);
 
 // GET /api/provider/me — get current provider identity (requires provider auth)
 app.get("/api/provider/me", requireProvider, getProviderMe);
@@ -4830,6 +6315,25 @@ app.use("/api/provider/upload-avatar", (err, req, res, next) => {
 // GET /api/admin/providers — list all providers (requires admin auth)
 app.get("/api/admin/providers", requireAdmin, getAllProviders);
 
+// GET /api/admin/profile — return the authenticated administrator's own profile
+app.get("/api/admin/profile", requireAdmin, (req, res) => {
+  const admin = req.admin;
+  return res.json({
+    success: true,
+    data: {
+      id: String(admin._id || req.adminId),
+      fullName: admin.fullName || admin.userName || admin.name || "",
+      email: admin.email || "",
+      phone: admin.phone || "",
+      position: admin.position || admin.title || "",
+      address: admin.address || admin.location || "",
+      profilePicture: admin.profilePicture || admin.profileImage || "",
+      coverPhoto: admin.coverPhoto || "",
+      createdAt: admin.createdAt || null,
+    },
+  });
+});
+
 // PATCH /api/admin/providers/:id/approve — approve a provider (requires admin auth)
 app.patch("/api/admin/providers/:id/approve", requireAdmin, approveProvider);
 
@@ -4842,15 +6346,106 @@ app.patch("/api/admin/providers/:id/deactivate", requireAdmin, deactivateProvide
 // PATCH /api/admin/providers/:id/reactivate — reactivate a provider (requires admin auth)
 app.patch("/api/admin/providers/:id/reactivate", requireAdmin, reactivateProvider);
 
+// GET /api/admin/providers/:id/credentials — get provider's uploaded credential files
+app.get("/api/admin/providers/:id/credentials", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { ObjectId } = await import("mongodb");
+    const db = await getDb();
+
+    // Query via raw driver so we always get the full providerDetails subdoc
+    // regardless of which Mongoose schema version was active at insert time
+    const provider = await db.collection("users").findOne(
+      { _id: new ObjectId(id), role: "provider" },
+      { projection: { "providerDetails": 1, userName: 1, email: 1 } }
+    );
+    if (!provider) {
+      return res.status(404).json({ success: false, message: "Provider not found." });
+    }
+
+    const credentials = provider.providerDetails?.credentials || [];
+    return res.json({ success: true, credentials });
+  } catch (err) {
+    console.error("[Provider Credentials] Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to fetch credentials." });
+  }
+});
+
+// GET /api/admin/providers/:id/credentials/:filename — serve a credential file
+app.get("/api/admin/providers/:id/credentials/:filename", requireAdmin, async (req, res) => {
+  try {
+    const db = await getDb();
+    const { ObjectId } = await import("mongodb");
+    const { id, filename } = req.params;
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid provider ID." });
+    }
+
+    const safe = path.basename(filename);
+    const provider = await db.collection("users").findOne(
+      { _id: new ObjectId(id), role: "provider" },
+      { projection: { "providerDetails.credentials": 1 } },
+    );
+    if (!provider) {
+      return res.status(404).json({ success: false, message: "Provider not found." });
+    }
+
+    const credential = (provider.providerDetails?.credentials || []).find(
+      (item) => item.storedName && path.basename(String(item.storedName)) === safe,
+    );
+    if (!credential) {
+      return res.status(404).json({ success: false, message: "Credential file not found for this provider." });
+    }
+
+    const filePath = path.join(__dirname, "uploads", "provider-credentials", safe);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, message: "File not found." });
+    }
+    res.type(credential.mimeType || "application/octet-stream");
+    res.sendFile(filePath);
+  } catch (err) {
+    console.error("[Provider Credential File] Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to serve file." });
+  }
+});
+
 // ============================================================
 // PROVIDER SCHOLARSHIP ROUTES
 // ============================================================
 
 // GET /api/provider/dashboard/stats — provider dashboard stats
 app.get("/api/provider/dashboard/stats", requireProvider, getProviderDashboardStats);
+app.get("/api/provider/notifications", requireProvider, getProviderNotifications);
+app.get("/api/provider/notifications/unread-count", requireProvider, getProviderUnreadNotificationCount);
+app.patch("/api/provider/notifications/:id/read", requireProvider, markProviderNotificationRead);
 
 // GET /api/provider/scholarships — list provider's own scholarships
 app.get("/api/provider/scholarships", requireProvider, getProviderScholarships);
+
+// Provider timeline and Facebook-style provider updates
+app.get("/api/provider/timeline", requireProvider, getProviderTimeline);
+app.post("/api/provider/posts", requireProvider, createProviderFeedPost);
+app.put("/api/provider/posts/:id", requireProvider, updateProviderFeedPost);
+app.delete("/api/provider/posts/:id", requireProvider, deleteProviderFeedPost);
+
+// Student discovery feed: active scholarships from all providers
+app.get("/api/student/feed", requireAuth, getStudentFeed);
+app.get("/api/student/posts", requireAuth, getStudentHomePosts);
+app.post(
+  "/api/student/posts",
+  requireAuth,
+  (req, res, next) => studentPostUpload.array("attachments", 5)(req, res, (error) => {
+    if (error) {
+      return res.status(400).json({ success: false, message: error.message || "Invalid post attachment." });
+    }
+    return next();
+  }),
+  createStudentPost,
+);
+app.get("/api/posts/:postId/attachments/:attachmentId", requireAuthOrLegacyAdmin, getStudentPostAttachment);
+app.get("/api/provider/student-posts", requireProvider, getProviderStudentPosts);
+app.get("/api/admin/student-posts", getAdminStudentPosts);
+app.patch("/api/admin/student-posts/:id/moderation", moderateStudentPost);
 
 // POST /api/provider/scholarships — create a new scholarship
 app.post("/api/provider/scholarships", requireProvider, createProviderScholarship);
@@ -4861,6 +6456,50 @@ app.get("/api/provider/scholarships/:id", requireProvider, getProviderScholarshi
 // PUT /api/provider/scholarships/:id — update scholarship (must own it)
 app.put("/api/provider/scholarships/:id", requireProvider, updateProviderScholarship);
 
+// PATCH /api/provider/scholarships/:id/renew — extend deadline (must own scholarship)
+app.patch("/api/provider/scholarships/:id/renew", requireProvider, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newDeadline, extensionDays } = req.body;
+    const providerId = req.providerId;
+
+    const scholarship = await Scholarship.findById(id);
+    if (!scholarship) return res.status(404).json({ success: false, message: "Scholarship not found." });
+    if (String(scholarship.createdBy) !== String(providerId)) {
+      return res.status(403).json({ success: false, message: "You do not own this scholarship." });
+    }
+
+    let updatedDeadline;
+    if (newDeadline) {
+      updatedDeadline = new Date(newDeadline);
+    } else {
+      const days = Number(extensionDays) || 90;
+      const base = scholarship.deadline > new Date() ? scholarship.deadline : new Date();
+      updatedDeadline = new Date(base);
+      updatedDeadline.setDate(updatedDeadline.getDate() + days);
+    }
+
+    if (isNaN(updatedDeadline.getTime())) {
+      return res.status(400).json({ success: false, message: "Invalid deadline value." });
+    }
+
+    await Scholarship.findByIdAndUpdate(id, {
+      $set: { deadline: updatedDeadline, status: "Active" },
+    });
+
+    return res.json({
+      success: true,
+      message: "Scholarship deadline extended successfully.",
+      newDeadline: updatedDeadline,
+    });
+  } catch (err) {
+    console.error("[Scholarship Renew] Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to renew scholarship." });
+  }
+});
+
+app.patch("/api/provider/scholarships/:id/renewal-period", requireProvider, setRenewalPeriod);
+
 // DELETE /api/provider/scholarships/:id — delete scholarship (must own it)
 app.delete("/api/provider/scholarships/:id", requireProvider, deleteProviderScholarship);
 
@@ -4870,6 +6509,9 @@ app.delete("/api/provider/scholarships/:id", requireProvider, deleteProviderScho
 
 // GET /api/provider/applications — all applications for provider's scholarships
 app.get("/api/provider/applications", requireProvider, getProviderApplications);
+app.get("/api/provider/renewals", requireProvider, getProviderScholarshipRenewals);
+app.patch("/api/provider/renewals/:id/review", requireProvider, reviewScholarshipRenewal);
+app.get("/api/renewals/:id/documents/:documentType", requireAuth, getScholarshipRenewalDocument);
 
 // GET /api/provider/applications/:scholarshipId/applicants — applicants for one scholarship
 app.get("/api/provider/applications/:scholarshipId/applicants", requireProvider, getApplicantsByScholarship);
@@ -4906,6 +6548,21 @@ app.listen(port, async () => {
     const mongooseDbName = process.env.MONGODB_DB || process.env.MONGO_DB || "thesis_software";
     await mongoose.connect(mongoUri, { dbName: mongooseDbName });
     console.log(`[Mongoose] ✅ Connected to MongoDB (db: ${mongooseDbName})`);
+
+    // Enforce unique email index — use Mongoose's native collection (raw driver)
+    // because getDb() returns a custom wrapper that doesn't expose createIndex.
+    try {
+      await mongoose.connection.collection("users").createIndex(
+        { email: 1 },
+        { unique: true, background: true }
+      );
+      console.log("[DB] ✅ Unique index on users.email ensured.");
+    } catch (idxErr) {
+      console.warn("[DB] ⚠️  Could not create unique index on users.email:", idxErr.message);
+    }
+
+    // Start scholarship renewal notification scheduler
+    startRenewalScheduler();
   } catch (err) {
     console.error("[Mongoose] ❌ Connection failed:", err.message);
   }

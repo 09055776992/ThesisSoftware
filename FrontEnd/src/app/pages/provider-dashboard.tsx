@@ -5,7 +5,8 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Award, Users, FileText, Clock, Plus, ChevronRight } from "lucide-react";
 import { getStoredUser, getAuthToken } from "../lib/user-storage";
-import { API_URL } from "../lib/api-client";
+import { API_URL, fetchProviderStudentPosts, type StudentPost } from "../lib/api-client";
+import { StudentPostCard } from "../components/student-post-card";
 
 interface ProviderStats {
   totalScholarships: number;
@@ -35,6 +36,9 @@ export function ProviderDashboard() {
     approvedApplications: 0,
   });
   const [recentApplications, setRecentApplications] = useState<RecentApplication[]>([]);
+  const [scholarPosts, setScholarPosts] = useState<StudentPost[]>([]);
+  const [postsLoading, setPostsLoading] = useState(true);
+  const [postsError, setPostsError] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -71,6 +75,13 @@ export function ProviderDashboard() {
     };
 
     fetchData();
+  }, []);
+
+  useEffect(() => {
+    fetchProviderStudentPosts()
+      .then((result) => setScholarPosts(result.data || []))
+      .catch((err) => setPostsError(err instanceof Error ? err.message : "Failed to load scholar posts."))
+      .finally(() => setPostsLoading(false));
   }, []);
 
   const orgName = (user as any)?.organizationName || "QCYDO";
@@ -261,6 +272,23 @@ export function ProviderDashboard() {
           )}
         </CardContent>
       </Card>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-xl font-semibold">Scholar Home Feed</h2>
+          <p className="text-sm text-muted-foreground">Approved updates shared by students and scholars.</p>
+        </div>
+        {postsError && <p role="alert" className="text-sm text-destructive">{postsError}</p>}
+        {postsLoading ? (
+          <p className="py-6 text-center text-muted-foreground">Loading scholar posts...</p>
+        ) : scholarPosts.length === 0 ? (
+          <Card><CardContent className="py-8 text-center text-muted-foreground">No approved scholar posts are available yet.</CardContent></Card>
+        ) : (
+          <div className="space-y-4">
+            {scholarPosts.map((post) => <StudentPostCard key={post._id} post={post} />)}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

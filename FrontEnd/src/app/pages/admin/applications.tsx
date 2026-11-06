@@ -31,6 +31,7 @@ import {
   type ShapContribution,
   type ProfileDocumentResponse,
 } from "../../lib/api-client";
+import { getAuthToken } from "../../lib/user-storage";
 
 // ===== Types =====
 
@@ -353,7 +354,7 @@ export function AdminApplications() {
     setLoading(true);
     try {
       const result = await fetchScholarshipApplicationSummary();
-      setScholarshipList((result.data as ScholarshipSummary[]) || []);
+      setScholarshipList((result.data as unknown as ScholarshipSummary[]) || []);
     } catch (err) {
       console.error("Error fetching scholarship summary:", err);
     } finally {
@@ -370,7 +371,7 @@ export function AdminApplications() {
         statusFilter === "all" ? undefined : statusFilter,
         searchQuery || undefined
       );
-      setApplicants((result.data as Application[]) || []);
+      setApplicants((result.data as unknown as Application[]) || []);
       setApplicantStats(result.stats || {});
     } catch (err) {
       console.error("Error fetching applicants:", err);
@@ -524,15 +525,48 @@ export function AdminApplications() {
     if (!reviewApplication?._id) return;
     try {
       setIsUpdating(true);
-      await rejectApplicationWithReason(reviewApplication._id, rejectReason);
+      const result = await rejectApplicationWithReason(reviewApplication._id, rejectReason);
       setShowRejectModal(false);
       await fetchReview();
-      alert("Application rejected and student notified.");
+      alert(result.studentNotified
+        ? "Application rejected and student notified."
+        : "Application rejected, but the student notification could not be created.");
     } catch (err) {
       console.error("Error rejecting application:", err);
-      alert("Failed to reject application.");
+      alert(err instanceof Error ? err.message : "Failed to reject application.");
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const openProfileDocument = async (documentType: string) => {
+    const applicationId = reviewApplication?._id;
+    if (!applicationId) return;
+
+    const previewWindow = window.open("", "_blank");
+    try {
+      const token = getAuthToken();
+      if (!token) throw new Error("Admin session expired. Please sign in again.");
+      const response = await fetch(
+        `${API_BASE_URL}/api/admin/applications/${encodeURIComponent(applicationId)}/profile-documents/${encodeURIComponent(documentType)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || `Unable to open document (HTTP ${response.status}).`);
+      }
+
+      const fileUrl = URL.createObjectURL(await response.blob());
+      if (previewWindow) {
+        previewWindow.location.href = fileUrl;
+        window.setTimeout(() => URL.revokeObjectURL(fileUrl), 60_000);
+      } else {
+        URL.revokeObjectURL(fileUrl);
+        throw new Error("Allow pop-ups to view the submitted document.");
+      }
+    } catch (error) {
+      previewWindow?.close();
+      alert(error instanceof Error ? error.message : "Unable to open submitted document.");
     }
   };
 
@@ -570,9 +604,14 @@ export function AdminApplications() {
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (selectedScholarshipId) {
-      exportApplicants(selectedScholarshipId);
+      try {
+        await exportApplicants(selectedScholarshipId);
+      } catch (error) {
+        console.error("Error exporting applicants:", error);
+        alert(error instanceof Error ? error.message : "Failed to export applicants.");
+      }
     }
   };
 
@@ -743,7 +782,7 @@ export function AdminApplications() {
             onClick={() => setApplicantsTab("rankings")}
           >
             <Trophy className="size-4 inline mr-1" />
-            AI Rankings
+            TOPSIS Rankings
           </button>
         </div>
 
@@ -852,7 +891,7 @@ export function AdminApplications() {
           </>
         )}
 
-        {/* ── TAB: AI Rankings ── */}
+        {/* ── TAB: TOPSIS Rankings ── */}
         {applicantsTab === "rankings" && (
           <div className="space-y-6">
             {/* Controls */}
@@ -863,7 +902,7 @@ export function AdminApplications() {
                 className="gap-2"
               >
                 <Brain className="size-4" />
-                {rankingsLoading ? "Analyzing with AI..." : "Generate AI Rankings"}
+                {rankingsLoading ? "Analyzing with TOPSIS..." : "Generate TOPSIS Rankings"}
               </Button>
               {rankings.length > 0 && (
                 <Button variant="outline" size="sm" onClick={handleLoadSavedRankings} disabled={rankingsLoading}>
@@ -905,7 +944,7 @@ export function AdminApplications() {
                   <Trophy className="size-12 mx-auto mb-4 opacity-30" />
                   <p className="text-lg font-medium">No rankings yet</p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Click "Generate AI Rankings" to score and rank all qualified applicants.
+                    Click "Generate TOPSIS Rankings" to score and rank all qualified applicants.
                   </p>
                 </CardContent>
               </Card>
@@ -915,7 +954,7 @@ export function AdminApplications() {
             {!rankingsLoading && rankings.length > 0 && (
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground font-medium">
-                  {rankings.length} applicants ranked — sorted by AI score (highest first)
+                  {rankings.length} applicants ranked — sorted by TOPSIS score (highest first)
                 </p>
                 {rankings.map((r) => (
                   <RankingCard key={r.student_id} ranking={r} />
@@ -1070,13 +1109,19 @@ export function AdminApplications() {
               ) : (
                 <div className="space-y-2">
                   {profileDocuments.map((doc, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
+                    <div key={idx} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-lg border">
                       <div className="flex items-center gap-3">
                         <FileText className="size-4 text-gray-500" />
                         <div>
                           <p className="text-sm font-medium">{doc.label}</p>
                           {doc.fileName ? (
-                            <p className="text-xs text-gray-500">{doc.fileName}</p>
+                            <button
+                              type="button"
+                              className="text-xs text-blue-600 hover:text-blue-800 hover:underline text-left"
+                              onClick={() => openProfileDocument(doc.type)}
+                            >
+                              {doc.fileName}
+                            </button>
                           ) : (
                             <p className="text-xs text-amber-600">Not uploaded</p>
                           )}
@@ -1085,6 +1130,16 @@ export function AdminApplications() {
                       <div className="flex items-center gap-2">
                         {doc.fileName ? (
                           <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => openProfileDocument(doc.type)}
+                            >
+                              <Eye className="size-3.5 mr-1" />
+                              View
+                            </Button>
                             <Badge className="bg-green-100 text-green-700 text-xs">
                               <CheckCircle className="size-3 mr-1" />
                               Linked from Profile
@@ -1743,4 +1798,3 @@ export function AdminApplications() {
 
   return null;
 }
-

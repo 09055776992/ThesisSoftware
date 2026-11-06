@@ -5,13 +5,14 @@ import { Label } from "../../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Eye, EyeOff } from "lucide-react";
 import { saveRoleSession } from "../../lib/user-storage";
+import { PasswordStrengthIndicator } from "../../components/password-strength";
+import API_BASE_URL from "../../../config/api";
 
 interface AdminSignUpProps {
   onSwitch: () => void;
   onClose: () => void;
   onSuccess?: (user: Record<string, unknown>, token?: string) => void;
 }
-
 export function AdminSignUp({ onSwitch, onClose, onSuccess }: AdminSignUpProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -35,8 +36,6 @@ export function AdminSignUp({ onSwitch, onClose, onSuccess }: AdminSignUpProps) 
 
     try {
       setIsSubmitting(true);
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
-      
       const response = await fetch(`${API_BASE_URL}/api/auth/admin/signup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -55,9 +54,13 @@ export function AdminSignUp({ onSwitch, onClose, onSuccess }: AdminSignUpProps) 
       const result = await response.json();
       const token = result.token ?? "";
       saveRoleSession(token, {
+        _id: result.user._id,
+        id: result.user.id,
         email: result.user.email,
         fullName: result.user.fullName,
         userType: "admin",
+        role: result.user.role,
+        preferences: result.user.preferences,
       });
       onSuccess?.(result.user, token);
       onClose();
@@ -83,7 +86,10 @@ export function AdminSignUp({ onSwitch, onClose, onSuccess }: AdminSignUpProps) 
               placeholder="Admin name"
               required
               value={formData.fullName}
-              onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+              onChange={(e) => {
+                const cleaned = e.target.value.replace(/[^a-zA-Z\s\-'.]/g, "");
+                setFormData({ ...formData, fullName: cleaned });
+              }}
             />
           </div>
 
@@ -118,6 +124,7 @@ export function AdminSignUp({ onSwitch, onClose, onSuccess }: AdminSignUpProps) 
                 {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>
             </div>
+            <PasswordStrengthIndicator password={formData.password} />
           </div>
 
           <div className="space-y-2">

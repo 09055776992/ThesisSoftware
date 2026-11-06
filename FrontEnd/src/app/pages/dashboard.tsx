@@ -1,197 +1,215 @@
-import { useState } from "react";
-import { Card, CardContent, CardHeader } from "../components/ui/card";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ImageIcon, Paperclip, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
+import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Textarea } from "../components/ui/textarea";
+import { Card, CardContent } from "../components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
-import { Heart, MessageCircle, Share2, Bookmark, ImageIcon, FileText } from "lucide-react";
-import { Separator } from "../components/ui/separator";
-import { ImageWithFallback } from "../components/figma/ImageWithFallback";
+import { Textarea } from "../components/ui/textarea";
+import { StudentPostCard } from "../components/student-post-card";
+import {
+  createStudentPost,
+  fetchStudentHomePosts,
+  pickProfileImageUrl,
+  resolvePublicAssetUrl,
+  type StudentPost,
+} from "../lib/api-client";
 import { getInitials, getStoredUser } from "../lib/user-storage";
-import { resolvePublicAssetUrl, pickProfileImageUrl } from "../lib/api-client";
 
-const mockPosts = [
-  {
-    id: 1,
-    author: {
-      name: "Sarah Johnson",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=sarah",
-      headline: "Computer Science @ MIT",
-    },
-    timestamp: "2 hours ago",
-    content: "Excited to announce that I've been awarded the Merit Scholarship from the National Science Foundation! This will help me continue my research in artificial intelligence and machine learning. Grateful for this opportunity! 🎓",
-    image: "https://images.unsplash.com/photo-1762438135827-428acc0e8941?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzdHVkZW50JTIwYWNoaWV2ZW1lbnQlMjBncmFkdWF0aW9uJTIwc3VjY2Vzc3xlbnwxfHx8fDE3NzYzNjEwODV8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-    likes: 124,
-    comments: 18,
-    shares: 7,
-  },
-  {
-    id: 2,
-    author: {
-      name: "Michael Chen",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=michael",
-      headline: "Engineering Student @ Stanford",
-    },
-    timestamp: "5 hours ago",
-    content: "Just submitted my final project for my robotics course! The past semester has been challenging but incredibly rewarding. Looking forward to applying for research positions this summer.",
-    likes: 89,
-    comments: 12,
-    shares: 3,
-  },
-  {
-    id: 3,
-    author: {
-      name: "Emily Rodriguez",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=emily",
-      headline: "Medical Student @ Johns Hopkins",
-    },
-    timestamp: "1 day ago",
-    content: "Honored to receive the Healthcare Leadership Scholarship! This support will enable me to focus on my studies and continue volunteering at the local clinic. Thank you to everyone who supported my application.",
-    image: "https://images.unsplash.com/photo-1638636241638-aef5120c5153?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxzY2hvbGFyc2hpcCUyMGF3YXJkJTIwY2VydGlmaWNhdGV8ZW58MXx8fHwxNzc2MzYxMDg1fDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-    likes: 256,
-    comments: 34,
-    shares: 15,
-  },
-  {
-    id: 4,
-    author: {
-      name: "David Lee",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=david",
-      headline: "Business Administration @ Harvard",
-    },
-    timestamp: "2 days ago",
-    content: "Great networking event at the Business Leaders Summit! Made some amazing connections and learned a lot about entrepreneurship in the tech industry.",
-    image: "https://images.unsplash.com/photo-1600096036367-a2bf5895620e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHx1bml2ZXJzaXR5JTIwbGlicmFyeSUyMHN0dWR5aW5nJTIwYm9va3N8ZW58MXx8fHwxNzc2MzYxMDg2fDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral",
-    likes: 67,
-    comments: 8,
-    shares: 2,
-  },
+type PostFilter = "all" | StudentPost["category"];
+
+const categories: Array<{ value: StudentPost["category"]; label: string }> = [
+  { value: "academic", label: "Academic" },
+  { value: "achievements", label: "Achievements" },
+  { value: "updates", label: "Updates" },
+  { value: "appreciation", label: "Appreciation" },
 ];
 
 export function Dashboard() {
+  const [posts, setPosts] = useState<StudentPost[]>([]);
   const [postContent, setPostContent] = useState("");
-  const [activeFilter, setActiveFilter] = useState("all");
+  const [category, setCategory] = useState<StudentPost["category"]>("updates");
+  const [activeFilter, setActiveFilter] = useState<PostFilter>("all");
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [publishing, setPublishing] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const photoInput = useRef<HTMLInputElement>(null);
+  const documentInput = useRef<HTMLInputElement>(null);
   const user = getStoredUser();
 
+  const loadPosts = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await fetchStudentHomePosts();
+      setPosts(result.data || []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Failed to load scholar posts.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPosts();
+  }, [loadPosts]);
+
+  const addAttachments = (files: FileList | null) => {
+    if (!files?.length) return;
+    const added = Array.from(files);
+    if (attachments.length + added.length > 5) {
+      setError("You can attach up to five photos or documents to a post.");
+      return;
+    }
+    if (added.some((file) => file.size > 5 * 1024 * 1024)) {
+      setError("Each attachment must be 5 MB or smaller.");
+      return;
+    }
+    setError("");
+    setAttachments((current) => [...current, ...added]);
+  };
+
+  const publish = async () => {
+    if (!postContent.trim()) {
+      setError("Write something before submitting your post.");
+      return;
+    }
+    setPublishing(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await createStudentPost({
+        content: postContent.trim(),
+        category,
+        attachments,
+      });
+      setPostContent("");
+      setAttachments([]);
+      setNotice(result.message || "Your post was submitted for admin review.");
+      await loadPosts();
+    } catch (publishError) {
+      setError(publishError instanceof Error ? publishError.message : "Failed to submit your post.");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const visiblePosts = posts.filter((post) =>
+    post.moderationStatus === "pending" || activeFilter === "all" || post.category === activeFilter,
+  );
+  const profileImage = pickProfileImageUrl(user as Record<string, unknown>) || user?.profileImage;
+
   return (
-    <div className="max-w-4xl mx-auto py-8 px-4">
-      {/* Create Post */}
-      <Card className="mb-6">
+    <div className="mx-auto max-w-4xl space-y-6 px-4 py-8">
+      <Card>
         <CardContent className="pt-6">
           <div className="flex gap-3">
             <Avatar>
               <AvatarImage
-                key={pickProfileImageUrl(user as Record<string, unknown>) || user?.profileImage}
-                src={resolvePublicAssetUrl(
-                  pickProfileImageUrl(user as Record<string, unknown>) || user?.profileImage,
-                  true,
-                )}
+                key={profileImage}
+                src={resolvePublicAssetUrl(profileImage, true)}
               />
               <AvatarFallback>{getInitials(user)}</AvatarFallback>
             </Avatar>
-            <div className="flex-1">
+            <div className="min-w-0 flex-1 space-y-3">
               <Textarea
                 placeholder="What's on your mind?"
                 value={postContent}
-                onChange={(e) => setPostContent(e.target.value)}
-                className="min-h-[100px] resize-none"
+                onChange={(event) => setPostContent(event.target.value)}
+                className="min-h-[110px] resize-y"
+                maxLength={5000}
+                aria-label="Write a scholar post"
               />
-              <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
-                <div className="flex gap-2">
-                  <Button type="button" variant="ghost" size="sm">
-                    <ImageIcon className="size-4 mr-2" />
-                    Photo
+              <div className="flex flex-wrap items-center gap-2">
+                <label htmlFor="student-post-category" className="text-sm text-muted-foreground">Category</label>
+                <select
+                  id="student-post-category"
+                  className="h-9 rounded-md border bg-background px-3 text-sm"
+                  value={category}
+                  onChange={(event) => setCategory(event.target.value as StudentPost["category"])}
+                >
+                  {categories.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+                </select>
+                <span className="ml-auto text-xs text-muted-foreground">{postContent.length}/5000</span>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                <div className="flex gap-1">
+                  <input
+                    ref={photoInput}
+                    type="file"
+                    accept="image/jpeg,image/png"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      addAttachments(event.target.files);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                  <input
+                    ref={documentInput}
+                    type="file"
+                    accept="application/pdf"
+                    multiple
+                    className="hidden"
+                    onChange={(event) => {
+                      addAttachments(event.target.files);
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                  <Button type="button" variant="ghost" size="sm" onClick={() => photoInput.current?.click()}>
+                    <ImageIcon className="mr-2 size-4" /> Photo
                   </Button>
-                  <Button type="button" variant="ghost" size="sm">
-                    <FileText className="size-4 mr-2" />
-                    Document
+                  <Button type="button" variant="ghost" size="sm" onClick={() => documentInput.current?.click()}>
+                    <Paperclip className="mr-2 size-4" /> Document
                   </Button>
                 </div>
-                <Button type="button" size="sm">Post</Button>
+                <Button type="button" size="sm" onClick={publish} disabled={publishing || !postContent.trim()}>
+                  {publishing ? "Submitting..." : "Post"}
+                </Button>
               </div>
+              {attachments.length > 0 && (
+                <ul className="space-y-1">
+                  {attachments.map((file, index) => (
+                    <li key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center gap-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                      <Badge variant="outline">{file.type === "application/pdf" ? "Document" : "Photo"}</Badge>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {notice && <p role="status" className="text-sm text-green-700">{notice}</p>}
+              {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+              <p className="text-xs text-muted-foreground">Posts appear to others after admin approval. Up to 5 PDF/JPEG/PNG files, 5 MB each.</p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Feed Filters */}
-      <div className="mb-6">
-        <Tabs value={activeFilter} onValueChange={setActiveFilter}>
-          <TabsList>
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="academic">Academic</TabsTrigger>
-            <TabsTrigger value="achievements">Achievements</TabsTrigger>
-            <TabsTrigger value="updates">Updates</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
+      <Tabs value={activeFilter} onValueChange={(value) => setActiveFilter(value as PostFilter)}>
+        <TabsList className="h-auto flex-wrap">
+          <TabsTrigger value="all">All</TabsTrigger>
+          {categories.map((item) => <TabsTrigger key={item.value} value={item.value}>{item.label}</TabsTrigger>)}
+        </TabsList>
+      </Tabs>
 
-      {/* Posts Feed */}
-      <div className="space-y-6">
-        {mockPosts.map((post) => (
-          <Card key={post.id}>
-            <CardHeader>
-              <div className="flex items-start gap-3">
-                <Avatar>
-                  <AvatarImage src={post.author.avatar} />
-                  <AvatarFallback>{post.author.name[0]}</AvatarFallback>
-                </Avatar>
-                <div className="flex-1">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="font-semibold">{post.author.name}</p>
-                      <p className="text-sm text-muted-foreground">{post.author.headline}</p>
-                    </div>
-                    <span className="text-sm text-muted-foreground">{post.timestamp}</span>
-                  </div>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="mb-4 whitespace-pre-line">{post.content}</p>
-              
-              {post.image && (
-                <div className="rounded-lg overflow-hidden mb-4">
-                  <ImageWithFallback
-                    src={post.image}
-                    alt="Post content"
-                    className="w-full h-auto"
-                  />
-                </div>
-              )}
-
-              <Separator className="mb-3" />
-
-              <div className="flex items-center justify-between text-sm text-muted-foreground mb-3">
-                <span>{post.likes} likes</span>
-                <div className="flex gap-3">
-                  <span>{post.comments} comments</span>
-                  <span>{post.shares} shares</span>
-                </div>
-              </div>
-
-              <Separator className="mb-3" />
-
-              <div className="flex flex-wrap items-center justify-around gap-1">
-                <Button type="button" variant="ghost" size="sm" className="flex-1">
-                  <Heart className="size-4 mr-2" />
-                  Like
-                </Button>
-                <Button type="button" variant="ghost" size="sm" className="flex-1">
-                  <MessageCircle className="size-4 mr-2" />
-                  Comment
-                </Button>
-                <Button type="button" variant="ghost" size="sm" className="flex-1">
-                  <Share2 className="size-4 mr-2" />
-                  Share
-                </Button>
-                <Button type="button" variant="ghost" size="sm" className="flex-1">
-                  <Bookmark className="size-4 mr-2" />
-                  Save
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+      <div className="space-y-5">
+        {loading ? (
+          <p className="py-8 text-center text-muted-foreground">Loading scholar posts...</p>
+        ) : visiblePosts.length === 0 ? (
+          <Card><CardContent className="py-10 text-center text-muted-foreground">No approved posts yet. Share an update with the scholar community.</CardContent></Card>
+        ) : visiblePosts.map((post) => (
+          <StudentPostCard key={post._id} post={post} showModerationStatus />
         ))}
       </div>
     </div>

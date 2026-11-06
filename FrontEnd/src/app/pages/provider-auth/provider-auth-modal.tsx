@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "../../components/ui/dialog";
@@ -26,6 +27,9 @@ export function ProviderAuthModal({ isOpen, onClose, onSuccess }: ProviderAuthMo
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="text-center">Provider Portal</DialogTitle>
+          <DialogDescription className="sr-only">
+            Sign in or create a scholarship provider account.
+          </DialogDescription>
         </DialogHeader>
         <div className="mt-4">
           {mode === "signin" ? (
@@ -38,7 +42,6 @@ export function ProviderAuthModal({ isOpen, onClose, onSuccess }: ProviderAuthMo
             <ProviderSignUp
               onSwitch={() => setMode("signin")}
               onClose={onClose}
-              onSuccess={handleSuccess}
             />
           )}
         </div>

@@ -258,6 +258,7 @@ export function ProfileSetup() {
 
       // Save to local storage for immediate access
       saveStoredUser({
+        ...(storedUser?.fullName ? { fullName: storedUser.fullName } : {}),
         headline: formData.bio,
         location: formData.location,
         dateOfBirth: formData.dateOfBirth,

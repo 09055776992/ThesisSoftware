@@ -1,17 +1,20 @@
 import { createBrowserRouter } from "react-router";
 import { SignUp } from "./pages/sign-up";
 import { SignIn } from "./pages/sign-in";
+import { ForgotPassword } from "./pages/forgot-password";
 import { Redirect } from "./pages/redirect";
 import { LandingPage } from "./pages/landing";
 import { ProfileSetup } from "./pages/profile-setup";
 import { Dashboard } from "./pages/dashboard";
 import { Profile } from "./pages/profile";
 import { Scholarships } from "./pages/scholarships";
+import { StudentFeed } from "./pages/student-feed";
 import { Messages } from "./pages/messages";
 import { Matches } from "./pages/matches";
 import { SavedItems } from "./pages/saved";
 import { Settings } from "./pages/settings";
 import { MyApplications } from "./pages/my-applications";
+import { PrivacyPolicy, TermsOfService } from "./pages/legal";
 
 // Admin pages
 import { AdminDashboard } from "./pages/admin/dashboard";
@@ -23,6 +26,8 @@ import { AdminReports } from "./pages/admin/reports";
 import { AdminNotifications } from "./pages/admin/notifications";
 import { AdminSettings } from "./pages/admin/settings";
 import { AdminProviders } from "./pages/admin/providers";
+import { AdminStudentPostModeration } from "./pages/admin/student-post-moderation";
+import { AdminProfilePage } from "./pages/admin/profile";
 
 // Provider pages
 import { ProviderDashboard } from "./pages/provider-dashboard";
@@ -31,8 +36,10 @@ import { ProviderScholarshipCreate } from "./pages/provider/scholarship-create";
 import { ProviderScholarshipEdit } from "./pages/provider/scholarship-edit";
 import { ProviderProfilePage } from "./pages/provider/profile";
 import { ProviderApplications } from "./pages/provider/applications";
+import { ProviderRenewals } from "./pages/provider/renewals";
 import { ProviderMessages } from "./pages/provider/messages";
 import { ProviderNotifications } from "./pages/provider/notifications";
+import { ProviderTimeline } from "./pages/provider/timeline";
 
 // Layouts
 import { RootLayout } from "./layouts/root-layout";
@@ -60,6 +67,9 @@ export const router = createBrowserRouter([
         children: [
           { path: "signup", Component: SignUp },
           { path: "signin", Component: SignIn },
+          { path: "forgot-password", Component: ForgotPassword },
+          { path: "terms", Component: TermsOfService },
+          { path: "privacy", Component: PrivacyPolicy },
         ],
       },
       {
@@ -72,6 +82,7 @@ export const router = createBrowserRouter([
         Component: DashboardLayout,
         children: [
           { index: true, Component: Dashboard },
+          { path: "feed", Component: StudentFeed },
           { path: "profile", Component: Profile },
           { path: "scholarships", Component: Scholarships },
           { path: "matches", Component: Matches },
@@ -87,10 +98,12 @@ export const router = createBrowserRouter([
         Component: AdminLayout,
         children: [
           { index: true, Component: AdminDashboard },
+          { path: "profile", Component: AdminProfilePage },
           { path: "users", Component: AdminUsers },
           { path: "providers", Component: AdminProviders },
           { path: "scholarships", Component: AdminScholarships },
           { path: "applications", Component: AdminApplications },
+          { path: "student-posts", Component: AdminStudentPostModeration },
           { path: "messages", Component: AdminMessages },
           { path: "reports", Component: AdminReports },
           { path: "notifications", Component: AdminNotifications },
@@ -103,11 +116,13 @@ export const router = createBrowserRouter([
         Component: ProviderLayout,
         children: [
           { path: "dashboard", Component: ProviderDashboard },
+          { path: "timeline", Component: ProviderTimeline },
           { path: "scholarships", Component: ProviderScholarships },
           { path: "scholarships/create", Component: ProviderScholarshipCreate },
           { path: "scholarships/:id/edit", Component: ProviderScholarshipEdit },
           { path: "profile", Component: ProviderProfilePage },
           { path: "applications", Component: ProviderApplications },
+          { path: "renewals", Component: ProviderRenewals },
           { path: "messages", Component: ProviderMessages },
           { path: "notifications", Component: ProviderNotifications },
         ],

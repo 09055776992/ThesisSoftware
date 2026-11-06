@@ -6,6 +6,10 @@
       "env": {},
       "disabled": false,
       "autoApprove": ["fetch"]
+    },
+    "unity-mcp": {
+      "command": "C:/Users/Gabri/.unity/relay/relay_win.exe",
+      "args": ["--mcp"]
     }
   }
 }

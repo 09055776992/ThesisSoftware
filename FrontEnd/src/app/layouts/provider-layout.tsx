@@ -1,13 +1,12 @@
 import { useState, useEffect } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
-import { LayoutDashboard, Award, FileText, MessageSquare, Bell, Loader2, LogOut, User as UserIcon, Menu } from "lucide-react";
+import { LayoutDashboard, Award, FileText, MessageSquare, Bell, Loader2, LogOut, User as UserIcon, Menu, Rss, RefreshCw } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { Sheet, SheetContent } from "../components/ui/sheet";
 import { Button } from "../components/ui/button";
-import { Redirect } from "../pages/redirect";
 import { getStoredUser, getAuthToken, clearStoredUser, getInitials } from "../lib/user-storage";
-import { API_URL } from "../lib/api-client";
+import { API_URL, fetchProviderUnreadNotificationCount, fetchUnreadMessageCount } from "../lib/api-client";
 
 interface ProviderStats {
   totalScholarships: number;
@@ -18,20 +17,36 @@ export function ProviderLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [stats, setStats] = useState<ProviderStats | null>(null);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const user = getStoredUser();
 
-  // Guard: must be a provider
-  if (!user || (user.userType !== "provider" && user.role !== "provider")) {
-    return <Redirect to="/auth/signin" />;
-  }
+  // ── Route guard: re-check role on every navigation AND on popstate
+  // (back/forward button). This prevents a logged-out or wrong-role user
+  // from landing here via browser history.
+  useEffect(() => {
+    const check = () => {
+      const current = getStoredUser();
+      const token = getAuthToken();
+      if (!current || !token || (current.userType !== "provider" && (current as any).role !== "provider")) {
+        clearStoredUser();
+        navigate("/", { replace: true });
+      }
+    };
+    check();
+    window.addEventListener("popstate", check);
+    return () => window.removeEventListener("popstate", check);
+  }, [location.pathname, navigate]);
 
   const navItems = [
     { href: "/provider/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/provider/timeline", label: "Timeline", icon: Rss },
     { href: "/provider/profile", label: "Organization Profile", icon: UserIcon },
     { href: "/provider/scholarships", label: "My Scholarships", icon: Award },
     { href: "/provider/applications", label: "Applications", icon: FileText },
+    { href: "/provider/renewals", label: "Scholarship Renewals", icon: RefreshCw },
     { href: "/provider/messages", label: "Messages", icon: MessageSquare },
     { href: "/provider/notifications", label: "Notifications", icon: Bell },
   ];
@@ -59,10 +74,49 @@ export function ProviderLayout() {
     fetchStats();
   }, []);
 
+  useEffect(() => {
+    if (!user?.email) return;
+    let active = true;
+    const refresh = () => fetchUnreadMessageCount(user.email!)
+      .then((result) => {
+        if (active) setUnreadMessageCount(result.count || 0);
+      })
+      .catch((error) => console.error("Failed to refresh unread message count:", error));
+    void refresh();
+    const interval = window.setInterval(refresh, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [user?.email]);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = () => fetchProviderUnreadNotificationCount()
+      .then((result) => {
+        if (active) setUnreadNotificationCount(result.count || 0);
+      })
+      .catch((error) => console.error("Failed to refresh provider notification count:", error));
+    const handleNotificationUpdate = () => void refresh();
+    void refresh();
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener("provider-notifications-updated", handleNotificationUpdate);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("provider-notifications-updated", handleNotificationUpdate);
+    };
+  }, []);
+
   const handleLogout = () => {
     clearStoredUser();
-    navigate("/auth/signin");
+    navigate("/", { replace: true });
   };
+
+  // Render nothing while the guard effect is evaluating an invalid session
+  if (!user || (user.userType !== "provider" && (user as any).role !== "provider")) {
+    return null;
+  }
 
   const displayName = user.fullName || user.email?.split("@")[0] || "Provider";
   const orgName = (user as any).organizationName || "QCYDO";
@@ -115,6 +169,16 @@ export function ProviderLayout() {
                         {stats!.pendingApplications}
                       </Badge>
                     )}
+                  {item.href === "/provider/messages" && unreadMessageCount > 0 && (
+                    <span className="ml-auto flex min-w-5 h-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold leading-none text-white" aria-label={`${unreadMessageCount} unread messages`}>
+                      {unreadMessageCount > 99 ? "99+" : unreadMessageCount}
+                    </span>
+                  )}
+                  {item.href === "/provider/notifications" && unreadNotificationCount > 0 && (
+                    <span className="ml-auto flex min-w-5 h-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold leading-none text-white" aria-label={`${unreadNotificationCount} unread notifications`}>
+                      {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -210,6 +274,16 @@ export function ProviderLayout() {
                           {stats!.pendingApplications}
                         </Badge>
                       )}
+                    {item.href === "/provider/messages" && unreadMessageCount > 0 && (
+                      <span className="ml-auto flex min-w-5 h-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold leading-none text-white" aria-label={`${unreadMessageCount} unread messages`}>
+                        {unreadMessageCount > 99 ? "99+" : unreadMessageCount}
+                      </span>
+                    )}
+                    {item.href === "/provider/notifications" && unreadNotificationCount > 0 && (
+                      <span className="ml-auto flex min-w-5 h-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-semibold leading-none text-white" aria-label={`${unreadNotificationCount} unread notifications`}>
+                        {unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}
+                      </span>
+                    )}
                   </Link>
                 );
               })}

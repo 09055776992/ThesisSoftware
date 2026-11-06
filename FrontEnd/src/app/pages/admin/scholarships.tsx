@@ -36,7 +36,7 @@ export function AdminScholarships() {
   const fetchScholarships = async () => {
     try {
       const result = await fetchScholarshipsAdmin();
-      setScholarships((result.data as Scholarship[] | undefined) || []);
+      setScholarships((result.data as unknown as Scholarship[] | undefined) || []);
     } catch (error) {
       console.error("Error fetching scholarships:", error);
     } finally {

@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "../components/ui/select";
 import { Checkbox } from "../components/ui/checkbox";
-import { MapPin, Mail, Calendar, Award, BookOpen, DollarSign, Pencil, Loader2, Lock, FileText, CheckCircle, Trash2, Upload, Camera } from "lucide-react";
+import { MapPin, Mail, Calendar, Award, BookOpen, Wallet, Pencil, Loader2, Lock, FileText, CheckCircle, Trash2, Upload, Camera } from "lucide-react";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
 import { getDisplayName, getInitials, getStoredUser, saveStoredUser, getActiveUserEmail } from "../lib/user-storage";
 import type { UserProfile } from "../lib/user-storage";
@@ -28,6 +28,7 @@ import {
   patchAcademicProfile,
   patchAchievementsProfile,
   uploadUserAvatar,
+  uploadUserCoverPhoto,
   fetchProfileDocuments,
   uploadProfileDocument,
   deleteProfileDocument,
@@ -40,29 +41,11 @@ import { toast } from "sonner";
 const DEFAULT_COVER_PHOTO =
   "https://images.unsplash.com/photo-1707640590939-3953ab4c0a8b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBvZmZpY2UlMjBiYWNrZ3JvdW5kJTIwYmFubmVyfGVufDF8fHx8MTc3NjM2MTEyMHww&ixlib=rb-4.1.0&q=80&w=1080";
 
-function coverPhotoStorageKey(email?: string | null) {
-  const normalized = String(email ?? "").trim().toLowerCase();
-  return normalized
-    ? `scholarship-portal-cover-photo:${normalized}`
-    : "scholarship-portal-cover-photo";
-}
-
-function loadCoverPhoto(email?: string | null): string {
-  if (typeof window === "undefined") return DEFAULT_COVER_PHOTO;
-  try {
-    return window.localStorage.getItem(coverPhotoStorageKey(email)) || DEFAULT_COVER_PHOTO;
-  } catch {
-    return DEFAULT_COVER_PHOTO;
-  }
-}
-
-function persistCoverPhoto(email: string | null | undefined, dataUrl: string) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(coverPhotoStorageKey(email), dataUrl);
-  } catch {
-    toast.error("Could not save cover photo locally. Preview still updated for this session.");
-  }
+function resolveCoverPhotoSrc(coverPhoto?: string | null): string {
+  const raw = String(coverPhoto ?? "").trim();
+  if (!raw || raw.startsWith("data:")) return DEFAULT_COVER_PHOTO;
+  if (raw.startsWith("blob:") || /^https?:\/\//i.test(raw)) return raw;
+  return resolvePublicAssetUrl(raw, true) || DEFAULT_COVER_PHOTO;
 }
 
 function titleCase(value: string) {
@@ -188,6 +171,10 @@ interface AboutViewProps {
 }
 
 function AboutView({ user, onEditToggle }: AboutViewProps) {
+  const financialNeedVal = Array.isArray(user?.financialNeed)
+    ? user.financialNeed[0]
+    : user?.financialNeed;
+
   return (
     <div className="space-y-4">
       <Card>
@@ -201,9 +188,9 @@ function AboutView({ user, onEditToggle }: AboutViewProps) {
         </CardHeader>
         <CardContent>
           {user?.about ? (
-            <p className="text-sm text-gray-700 leading-relaxed">{user.about}</p>
+            <p className="text-sm text-gray-700 dark:text-slate-300 leading-relaxed">{user.about}</p>
           ) : (
-            <p className="text-sm text-gray-400 italic">No profile info</p>
+            <p className="text-sm text-gray-400 dark:text-slate-500 italic">No profile info</p>
           )}
         </CardContent>
       </Card>
@@ -215,12 +202,26 @@ function AboutView({ user, onEditToggle }: AboutViewProps) {
           {user?.skills && user.skills.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {user.skills.map((skill) => (
-                <Badge key={skill} variant="secondary">{skill}</Badge>
+                <Badge key={skill} className="bg-slate-100 text-slate-800 hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-700">{skill}</Badge>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-400 italic">No skills added yet.</p>
+            <p className="text-sm text-gray-400 dark:text-slate-500 italic">No skills added yet.</p>
           )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Financial Information <Lock className="inline size-3 text-gray-400" /> <span className="text-xs font-normal text-gray-400">(Private)</span></CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-1 text-sm text-gray-600 dark:text-slate-400">
+            <p>Income Category: {user?.incomeCategory || "Not provided"}</p>
+            <p>Financial Need: {financialNeedVal ? `${financialNeedVal}/5` : "Not provided"}</p>
+            <p>Household Income: {user?.householdIncome ? `₱${user.householdIncome.toLocaleString()}/mo` : "Not provided"}</p>
+            <p>Financial Support Source: {user?.financialSupportSource || "Not provided"}</p>
+            <p>Economic Dependency: {user?.economicDependency ? `${user.economicDependency} dependent(s)` : "Not provided"}</p>
+          </div>
         </CardContent>
       </Card>
     </div>
@@ -251,6 +252,15 @@ function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps
   const [saving, setSaving] = useState(false);
   const [fullNameError, setFullNameError] = useState("");
   const [locationError, setLocationError] = useState("");
+  const rawFinancialNeed = Array.isArray(user?.financialNeed) ? user.financialNeed[0] : user?.financialNeed;
+  const [draftFinancialNeed, setDraftFinancialNeed] = useState(rawFinancialNeed ? String(rawFinancialNeed) : "");
+  const [draftNetWorth, setDraftNetWorth] = useState(user?.netWorth ?? "");
+  const [draftCurrency, setDraftCurrency] = useState(user?.currency ?? "PHP");
+  const [draftIncomeCategory, setDraftIncomeCategory] = useState(user?.incomeCategory ?? "");
+  const [draftHouseholdIncome, setDraftHouseholdIncome] = useState(user?.householdIncome ? String(user.householdIncome) : "");
+  const [draftFinancialSupportSource, setDraftFinancialSupportSource] = useState(user?.financialSupportSource ?? "");
+  const [draftEconomicDependency, setDraftEconomicDependency] = useState(user?.economicDependency ? String(user.economicDependency) : "");
+  const [financialNeedError, setFinancialNeedError] = useState("");
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -283,11 +293,28 @@ function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps
     setAvatarError("");
     setFullNameError("");
     setLocationError("");
+    const rawFinancialNeed = Array.isArray(user?.financialNeed) ? user.financialNeed[0] : user?.financialNeed;
+    setDraftFinancialNeed(rawFinancialNeed ? String(rawFinancialNeed) : "");
+    setDraftNetWorth(user?.netWorth ?? "");
+    setDraftCurrency(user?.currency ?? "PHP");
+    setDraftIncomeCategory(user?.incomeCategory ?? "");
+    setDraftHouseholdIncome(user?.householdIncome ? String(user.householdIncome) : "");
+    setDraftFinancialSupportSource(user?.financialSupportSource ?? "");
+    setDraftEconomicDependency(user?.economicDependency ? String(user.economicDependency) : "");
+    setFinancialNeedError("");
     onEditToggle();
   };
 
   const handleSave = async () => {
     let valid = true;
+    setFinancialNeedError("");
+    if (draftFinancialNeed) {
+      const financialNeed = Number(draftFinancialNeed);
+      if (!Number.isInteger(financialNeed) || financialNeed < 1 || financialNeed > 5) {
+        setFinancialNeedError("Financial need must be a whole number between 1 and 5.");
+        valid = false;
+      }
+    }
     if (!draftFullName.trim()) {
       setFullNameError("Full name is required.");
       valid = false;
@@ -323,6 +350,16 @@ function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps
         headline: draftBio.trim(),
         skills: skillList,
       });
+      await patchAchievementsProfile({
+        email: user?.email ?? "",
+        financialNeed: draftFinancialNeed ? Number(draftFinancialNeed) : undefined,
+        netWorth: draftNetWorth.trim() || undefined,
+        currency: draftCurrency || undefined,
+        incomeCategory: draftIncomeCategory || undefined,
+        householdIncome: draftHouseholdIncome ? Number(draftHouseholdIncome) : undefined,
+        financialSupportSource: draftFinancialSupportSource || undefined,
+        economicDependency: draftEconomicDependency ? Number(draftEconomicDependency) : undefined,
+      });
 
       const savedFields: Partial<UserProfile> = {
         fullName: draftFullName.trim(),
@@ -332,6 +369,13 @@ function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps
         about: draftBio.trim(),
         headline: draftBio.trim(),
         skills: skillList,
+        financialNeed: draftFinancialNeed ? [Number(draftFinancialNeed)] : user?.financialNeed,
+        netWorth: draftNetWorth.trim(),
+        currency: draftCurrency,
+        incomeCategory: draftIncomeCategory,
+        householdIncome: draftHouseholdIncome ? Number(draftHouseholdIncome) : undefined,
+        financialSupportSource: draftFinancialSupportSource || undefined,
+        economicDependency: draftEconomicDependency ? Number(draftEconomicDependency) : undefined,
       };
       if (avatarUrl) {
         savedFields.profileImage = avatarUrl;
@@ -454,12 +498,53 @@ function AboutEditForm({ user, onEditToggle, onSaveSuccess }: AboutEditFormProps
             onChange={(e) => setDraftSkills(e.target.value)}
             placeholder="Python, React, Data Analysis"
           />
-          <p className="text-xs text-gray-500">Separate skills with commas.</p>
+          <p className="text-xs text-gray-500 dark:text-slate-400">Separate skills with commas.</p>
+        </div>
+
+        <div className="border-t pt-4 space-y-4">
+          <p className="text-sm font-semibold">Financial Information</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label htmlFor="about-fn">Financial Need (1–5) <span className="text-red-500">*</span></Label>
+              <Input id="about-fn" type="number" min="1" max="5" value={draftFinancialNeed} onChange={(e) => setDraftFinancialNeed(e.target.value)} placeholder="e.g. 4" />
+              {financialNeedError && <p className="text-sm text-red-500">{financialNeedError}</p>}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="about-nw">Net Worth (Optional)</Label>
+              <div className="relative"><span className="absolute inset-y-0 left-3 flex items-center text-sm text-gray-500">₱</span><Input id="about-nw" className="pl-7" value={draftNetWorth} onChange={(e) => setDraftNetWorth(e.target.value)} placeholder="50000" /></div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label>Currency</Label>
+              <Select value={draftCurrency} onValueChange={setDraftCurrency}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="PHP">PHP (₱)</SelectItem></SelectContent></Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Income Category</Label>
+              <Select value={draftIncomeCategory} onValueChange={setDraftIncomeCategory}><SelectTrigger><SelectValue placeholder="Select bracket" /></SelectTrigger><SelectContent>{incomeCategoryOptions.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent></Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label htmlFor="about-hi">Household Income (Monthly ₱)</Label>
+              <div className="relative"><span className="absolute inset-y-0 left-3 flex items-center text-sm text-gray-500">₱</span><Input id="about-hi" className="pl-7" type="number" min="0" value={draftHouseholdIncome} onChange={(e) => setDraftHouseholdIncome(e.target.value)} placeholder="e.g. 25000" /></div>
+            </div>
+            <div className="space-y-1">
+              <Label>Financial Support Source</Label>
+              <Select value={draftFinancialSupportSource} onValueChange={setDraftFinancialSupportSource}><SelectTrigger><SelectValue placeholder="Select source" /></SelectTrigger><SelectContent>
+                <SelectItem value="Parents">Parents</SelectItem><SelectItem value="Self-supporting / Working Student">Self-supporting / Working Student</SelectItem><SelectItem value="Government Aid">Government Aid</SelectItem><SelectItem value="Relative / Guardian">Relative / Guardian</SelectItem><SelectItem value="Scholarship / Grant">Scholarship / Grant</SelectItem>
+              </SelectContent></Select>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="about-ed">Economic Dependency (No. of Household Dependents)</Label>
+            <Input id="about-ed" type="number" min="0" max="20" value={draftEconomicDependency} onChange={(e) => setDraftEconomicDependency(e.target.value)} placeholder="e.g. 4" />
+          </div>
         </div>
 
         <div className="flex gap-2 pt-2">
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? <><Loader2 className="size-4 mr-2 animate-spin" />Saving…</> : "Save Personal Info"}
+            {saving ? <><Loader2 className="size-4 mr-2 animate-spin" />Saving…</> : "Save Personal & Financial Info"}
           </Button>
           <Button variant="outline" onClick={handleCancel} disabled={saving}>Cancel</Button>
         </div>
@@ -517,33 +602,33 @@ function EducationView({ user, onEditToggle }: EducationViewProps) {
                   {user.schoolName}{user?.schoolCampus ? ` (${user.schoolCampus})` : ""}
                 </h3>
               )}
-              {user?.fieldOfStudy && <p className="text-sm text-gray-600">{user.fieldOfStudy}</p>}
+              {user?.fieldOfStudy && <p className="text-sm text-gray-600 dark:text-slate-400">{user.fieldOfStudy}</p>}
               {(user?.educationLevel || user?.yearLevel) && (
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 dark:text-slate-400">
                   {user?.educationLevel ? titleCase(user.educationLevel) : ""}
                   {user?.yearLevel ? ` — ${user.yearLevel}` : ""}
                 </p>
               )}
               {user?.graduationYear && (
-                <p className="text-sm text-gray-500">Expected graduation {user.graduationYear}</p>
+                <p className="text-sm text-gray-500 dark:text-slate-400">Expected graduation {user.graduationYear}</p>
               )}
               {(user?.gwa || user?.gpa) && (
                 <p className="text-sm font-semibold">
                   GWA: {user?.gwa || user?.gpa}
-                  {getGwaLabel(user?.gwa || user?.gpa, user?.educationLevel) ? <span className="ml-1 text-gray-500 font-normal">({getGwaLabel(user?.gwa || user?.gpa, user?.educationLevel)})</span> : null}
+                  {getGwaLabel(user?.gwa || user?.gpa, user?.educationLevel) ? <span className="ml-1 text-gray-500 dark:text-slate-400 font-normal">({getGwaLabel(user?.gwa || user?.gpa, user?.educationLevel)})</span> : null}
                 </p>
               )}
               <div className="flex flex-wrap gap-2 mt-2">
                 {user?.schoolType && (
-                  <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">{user.schoolType}</Badge>
+                  <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100 dark:bg-blue-950/50 dark:text-blue-300 dark:hover:bg-blue-950/50">{user.schoolType}</Badge>
                 )}
                 {user?.schoolLocation && (
-                  <Badge className={user.schoolLocation === "Quezon City" ? "bg-green-100 text-green-800 hover:bg-green-100" : "bg-yellow-100 text-yellow-800 hover:bg-yellow-100"}>
+                  <Badge className={user.schoolLocation === "Quezon City" ? "bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-950/50 dark:text-green-300 dark:hover:bg-green-950/50" : "bg-yellow-100 text-yellow-800 hover:bg-yellow-100 dark:bg-yellow-950/50 dark:text-yellow-300 dark:hover:bg-yellow-950/50"}>
                     {user.schoolLocation === "Quezon City" ? "Quezon City ✓" : user.schoolLocation}
                   </Badge>
                 )}
                 {user?.hasAcademicHonors && (
-                  <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-100">Academic Honors</Badge>
+                  <Badge className="bg-purple-100 text-purple-800 hover:bg-purple-100 dark:bg-purple-950/50 dark:text-purple-300 dark:hover:bg-purple-950/50">Academic Honors</Badge>
                 )}
               </div>
             </div>
@@ -721,7 +806,7 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
             placeholder={gwaPlaceholder}
             className={gwaError ? "border-red-500 focus-visible:ring-red-500" : ""}
           />
-          <p className="text-xs text-gray-500">{gwaHelperText}</p>
+          <p className="text-xs text-gray-500 dark:text-slate-400">{gwaHelperText}</p>
           {gwaError && (
             <div className="flex items-center gap-1.5 text-sm text-red-500">
               <span className="inline-flex items-center justify-center size-4 rounded-full bg-red-100 text-red-500 text-xs">!</span>
@@ -760,7 +845,7 @@ function EducationEditForm({ user, onEditToggle, onSaveSuccess }: EducationEditF
           </div>
         </div>
         <div className="border-t pt-4">
-          <p className="text-xs font-semibold text-blue-700 bg-blue-50 px-2 py-1 rounded inline-block mb-3">REQUIRED FOR ELIGIBILITY</p>
+          <p className="text-xs font-semibold text-blue-700 bg-blue-50 dark:bg-blue-950/50 dark:text-blue-300 px-2 py-1 rounded inline-block mb-3">REQUIRED FOR ELIGIBILITY</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label htmlFor="edu-school">School / Institution Name <span className="text-red-500">*</span></Label>
@@ -854,10 +939,6 @@ function AchievementsView({ user, onEditToggle }: AchievementsViewProps) {
     user?.isSoloParent ? "Solo Parent" : null,
   ].filter(Boolean) as string[];
 
-  const financialNeedVal = Array.isArray(user?.financialNeed)
-    ? user.financialNeed[0]
-    : user?.financialNeed;
-
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -870,30 +951,16 @@ function AchievementsView({ user, onEditToggle }: AchievementsViewProps) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div>
-          <p className="text-sm font-semibold text-gray-700 mb-2">Special Categories</p>
+          <p className="text-sm font-semibold text-gray-700 dark:text-slate-300 mb-2">Special Categories</p>
           {specialCategories.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {specialCategories.map((cat) => (
-                <Badge key={cat} className="bg-green-100 text-green-800 hover:bg-green-100">{cat}</Badge>
+                <Badge key={cat} className="bg-green-100 text-green-800 hover:bg-green-100 dark:bg-green-950/50 dark:text-green-300 dark:hover:bg-green-950/50">{cat}</Badge>
               ))}
             </div>
           ) : (
             <p className="text-sm text-gray-400 italic">No special categories set.</p>
           )}
-        </div>
-        <div className="border-t pt-3">
-          <div className="flex items-center gap-1 mb-2">
-            <p className="text-sm font-semibold text-gray-700">Financial Information</p>
-            <Lock className="size-3 text-gray-400" />
-            <span className="text-xs text-gray-400">(Private)</span>
-          </div>
-          <div className="space-y-1 text-sm text-gray-600">
-            <p>Income Category: {user?.incomeCategory || "Not provided"}</p>
-            <p>Financial Need: {financialNeedVal ? `${financialNeedVal}/5` : "Not provided"}</p>
-            <p>Household Income: {user?.householdIncome ? `₱${user.householdIncome.toLocaleString()}/mo` : "Not provided"}</p>
-            <p>Financial Support Source: {user?.financialSupportSource || "Not provided"}</p>
-            <p>Economic Dependency: {user?.economicDependency ? `${user.economicDependency} dependent(s)` : "Not provided"}</p>
-          </div>
         </div>
       </CardContent>
     </Card>
@@ -914,15 +981,6 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
   const [draftIsIndigent, setDraftIsIndigent] = useState(user?.isIndigent === true);
   const [draftIsPWD, setDraftIsPWD] = useState(user?.isPWD === true);
   const [draftIsSoloParent, setDraftIsSoloParent] = useState(user?.isSoloParent === true);
-  const rawFN = Array.isArray(user?.financialNeed) ? user.financialNeed[0] : user?.financialNeed;
-  const [draftFinancialNeed, setDraftFinancialNeed] = useState(rawFN ? String(rawFN) : "");
-  const [draftNetWorth, setDraftNetWorth] = useState(user?.netWorth ?? "");
-  const [draftCurrency, setDraftCurrency] = useState(user?.currency ?? "PHP");
-  const [draftIncomeCategory, setDraftIncomeCategory] = useState(user?.incomeCategory ?? "");
-  const [draftHouseholdIncome, setDraftHouseholdIncome] = useState(user?.householdIncome ? String(user.householdIncome) : "");
-  const [draftFinancialSupportSource, setDraftFinancialSupportSource] = useState(user?.financialSupportSource ?? "");
-  const [draftEconomicDependency, setDraftEconomicDependency] = useState(user?.economicDependency ? String(user.economicDependency) : "");
-  const [financialNeedError, setFinancialNeedError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const handleCancel = () => {
@@ -933,30 +991,10 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
     setDraftIsIndigent(user?.isIndigent === true);
     setDraftIsPWD(user?.isPWD === true);
     setDraftIsSoloParent(user?.isSoloParent === true);
-    const rawFN2 = Array.isArray(user?.financialNeed) ? user.financialNeed[0] : user?.financialNeed;
-    setDraftFinancialNeed(rawFN2 ? String(rawFN2) : "");
-    setDraftNetWorth(user?.netWorth ?? "");
-    setDraftCurrency(user?.currency ?? "PHP");
-    setDraftIncomeCategory(user?.incomeCategory ?? "");
-    setDraftHouseholdIncome(user?.householdIncome ? String(user.householdIncome) : "");
-    setDraftFinancialSupportSource(user?.financialSupportSource ?? "");
-    setDraftEconomicDependency(user?.economicDependency ? String(user.economicDependency) : "");
-    setFinancialNeedError("");
     onEditToggle();
   };
 
   const handleSave = async () => {
-    setFinancialNeedError("");
-
-    // Validate financialNeed before hitting the network
-    if (draftFinancialNeed) {
-      const fn = Number(draftFinancialNeed);
-      if (!Number.isInteger(fn) || fn < 1 || fn > 5) {
-        setFinancialNeedError("Financial need must be a whole number between 1 and 5.");
-        return;
-      }
-    }
-
     // Guard: email must be available
     if (!user?.email) {
       toast.error("Session expired. Please sign in again.");
@@ -974,13 +1012,6 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
         isIndigent: draftIsIndigent,
         isPWD: draftIsPWD,
         isSoloParent: draftIsSoloParent,
-        financialNeed: draftFinancialNeed ? Number(draftFinancialNeed) : undefined,
-        netWorth: draftNetWorth.trim() || undefined,
-        currency: draftCurrency || undefined,
-        incomeCategory: draftIncomeCategory || undefined,
-        householdIncome: draftHouseholdIncome ? Number(draftHouseholdIncome) : undefined,
-        financialSupportSource: draftFinancialSupportSource || undefined,
-        economicDependency: draftEconomicDependency ? Number(draftEconomicDependency) : undefined,
       });
       const savedFields: Partial<UserProfile> = {
         isAthlete: draftIsAthlete,
@@ -990,26 +1021,14 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
         isIndigent: draftIsIndigent,
         isPWD: draftIsPWD,
         isSoloParent: draftIsSoloParent,
-        financialNeed: draftFinancialNeed ? [Number(draftFinancialNeed)] : user?.financialNeed,
-        netWorth: draftNetWorth.trim(),
-        currency: draftCurrency,
-        incomeCategory: draftIncomeCategory,
-        householdIncome: draftHouseholdIncome ? Number(draftHouseholdIncome) : undefined,
-        financialSupportSource: draftFinancialSupportSource || undefined,
-        economicDependency: draftEconomicDependency ? Number(draftEconomicDependency) : undefined,
       };
       onSaveSuccess(savedFields);
       onEditToggle();
-      toast.success("Achievements & financial info saved.");
+      toast.success("Achievements saved.");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[AchievementsEdit] Save failed:", msg);
-      if (msg.toLowerCase().includes("financialneed")) {
-        setFinancialNeedError(msg);
-      } else {
-        // Show the actual server error so the user knows what went wrong
-        toast.error(msg && msg !== "Request failed" ? msg : "Failed to save. Please try again.");
-      }
+      toast.error(msg && msg !== "Request failed" ? msg : "Failed to save. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -1018,13 +1037,13 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">Edit Achievements & Financial Info</CardTitle>
+        <CardTitle className="text-base">Edit Achievements</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div>
-          <p className="text-xs font-semibold text-purple-700 bg-purple-50 px-2 py-1 rounded inline-block mb-3">SCHOLARSHIP ELIGIBILITY</p>
+          <p className="text-xs font-semibold text-purple-700 bg-purple-50 dark:bg-purple-950/50 dark:text-purple-300 px-2 py-1 rounded inline-block mb-3">SCHOLARSHIP ELIGIBILITY</p>
           <p className="text-sm font-semibold mb-2">Special Categories (Check all that apply)</p>
-          <p className="text-xs text-gray-500 mb-3">These categories determine eligibility for specific scholarships.</p>
+          <p className="text-xs text-gray-500 dark:text-slate-400 mb-3">These categories determine eligibility for specific scholarships.</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-2">
               {([
@@ -1053,78 +1072,9 @@ function AchievementsEditForm({ user, onEditToggle, onSaveSuccess }: Achievement
             </div>
           </div>
         </div>
-        <div className="border-t pt-4 space-y-4">
-          <p className="text-sm font-semibold">Financial Information</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <Label htmlFor="ach-fn">Financial Need (1–5) <span className="text-red-500">*</span></Label>
-              <Input id="ach-fn" type="number" min="1" max="5" value={draftFinancialNeed}
-                onChange={(e) => setDraftFinancialNeed(e.target.value)} placeholder="e.g. 4" />
-              {financialNeedError && <p className="text-sm text-red-500">{financialNeedError}</p>}
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="ach-nw">Net Worth (Optional)</Label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-3 flex items-center text-sm text-gray-500">₱</span>
-                <Input id="ach-nw" className="pl-7" value={draftNetWorth}
-                  onChange={(e) => setDraftNetWorth(e.target.value)} placeholder="50000" />
-              </div>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <Label>Currency</Label>
-              <Select value={draftCurrency} onValueChange={setDraftCurrency}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="PHP">PHP (₱)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>Income Category</Label>
-              <Select value={draftIncomeCategory} onValueChange={setDraftIncomeCategory}>
-                <SelectTrigger><SelectValue placeholder="Select bracket" /></SelectTrigger>
-                <SelectContent>
-                  {incomeCategoryOptions.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <Label htmlFor="ach-hi">Household Income (Monthly ₱)</Label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-3 flex items-center text-sm text-gray-500">₱</span>
-                <Input id="ach-hi" className="pl-7" type="number" min="0" value={draftHouseholdIncome}
-                  onChange={(e) => setDraftHouseholdIncome(e.target.value)} placeholder="e.g. 25000" />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label>Financial Support Source</Label>
-              <Select value={draftFinancialSupportSource} onValueChange={setDraftFinancialSupportSource}>
-                <SelectTrigger><SelectValue placeholder="Select source" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Parents">Parents</SelectItem>
-                  <SelectItem value="Self-supporting / Working Student">Self-supporting / Working Student</SelectItem>
-                  <SelectItem value="Government Aid">Government Aid</SelectItem>
-                  <SelectItem value="Relative / Guardian">Relative / Guardian</SelectItem>
-                  <SelectItem value="Scholarship / Grant">Scholarship / Grant</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <Label htmlFor="ach-ed">Economic Dependency (No. of Household Dependents)</Label>
-              <Input id="ach-ed" type="number" min="0" max="20" value={draftEconomicDependency}
-                onChange={(e) => setDraftEconomicDependency(e.target.value)} placeholder="e.g. 4" />
-            </div>
-          </div>
-        </div>
         <div className="flex gap-2 pt-2">
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? <><Loader2 className="size-4 mr-2 animate-spin" />Saving…</> : "Save Achievements & Financial"}
+            {saving ? <><Loader2 className="size-4 mr-2 animate-spin" />Saving…</> : "Save Achievements"}
           </Button>
           <Button variant="outline" onClick={handleCancel} disabled={saving}>Cancel</Button>
         </div>
@@ -1267,7 +1217,7 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
               </p>
             </div>
             {isComplete && (
-              <Badge className="bg-green-100 text-green-700">
+              <Badge className="bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300">
                 <CheckCircle className="size-3 mr-1" />
                 Complete
               </Badge>
@@ -1276,26 +1226,26 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Status Banner */}
-          <div className={`p-4 rounded-lg border ${isComplete ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+          <div className={`p-4 rounded-lg border ${isComplete ? 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800' : 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'}`}>
             <div className="flex items-start gap-3">
               {isComplete ? (
                 <>
-                  <CheckCircle className="size-5 text-green-600 mt-0.5" />
+                  <CheckCircle className="size-5 text-green-600 dark:text-green-400 mt-0.5" />
                   <div>
-                    <p className="font-medium text-green-800">All documents uploaded!</p>
-                    <p className="text-sm text-green-700">
+                    <p className="font-medium text-green-800 dark:text-green-300">All documents uploaded!</p>
+                    <p className="text-sm text-green-700 dark:text-green-400">
                       Your general documents are ready. When you apply for scholarships, these will be automatically linked.
                     </p>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="size-5 rounded-full bg-amber-100 flex items-center justify-center mt-0.5">
-                    <span className="text-amber-600 text-xs">!</span>
+                  <div className="size-5 rounded-full bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center mt-0.5">
+                    <span className="text-amber-600 dark:text-amber-400 text-xs">!</span>
                   </div>
                   <div>
-                    <p className="font-medium text-amber-800">Complete your document vault</p>
-                    <p className="text-sm text-amber-700">
+                    <p className="font-medium text-amber-800 dark:text-amber-300">Complete your document vault</p>
+                    <p className="text-sm text-amber-700 dark:text-amber-400">
                       Please upload all 3 required documents to enable quick scholarship applications.
                     </p>
                   </div>
@@ -1313,14 +1263,14 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
               return (
                 <div
                   key={config.key}
-                  className={`border rounded-lg p-4 ${hasFile ? 'bg-gray-50' : 'bg-white'}`}
+                  className={`border border-gray-200 dark:border-slate-800 rounded-lg p-4 ${hasFile ? 'bg-gray-50 dark:bg-slate-800/50' : 'bg-white dark:bg-slate-900'}`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-start gap-2">
                         <h4 className="font-medium text-sm leading-snug">{config.label}</h4>
                         {hasFile ? (
-                          <Badge className="bg-green-100 text-green-700 text-xs shrink-0">
+                          <Badge className="bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-300 text-xs shrink-0">
                             <CheckCircle className="size-3 mr-1" />
                             Uploaded
                           </Badge>
@@ -1333,7 +1283,7 @@ function DocumentVaultTab({ user }: DocumentVaultTabProps) {
                       <p className="text-xs text-muted-foreground mt-1">{config.description}</p>
 
                       {hasFile && doc && (
-                        <div className="mt-3 p-3 bg-white rounded border">
+                        <div className="mt-3 p-3 bg-white dark:bg-slate-900 rounded border border-gray-200 dark:border-slate-700">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <FileText className="size-4 text-gray-500" />
@@ -1414,9 +1364,10 @@ export function Profile() {
   const [aboutEditMode, setAboutEditMode] = useState(false);
   const [educationEditMode, setEducationEditMode] = useState(false);
   const [achievementsEditMode, setAchievementsEditMode] = useState(false);
-  const [coverPhoto, setCoverPhoto] = useState(() =>
-    loadCoverPhoto(getStoredUser()?.email || getActiveUserEmail())
+  const [coverPhoto, setCoverPhoto] = useState(
+    () => getStoredUser()?.coverPhoto || ""
   );
+  const [uploadingCover, setUploadingCover] = useState(false);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch full user profile from MongoDB on mount to guarantee fresh name and fields
@@ -1430,8 +1381,9 @@ export function Profile() {
           // saveStoredUser merges with existing data and preserves a known
           // display name when the server payload has empty name fields.
           saveStoredUser(res.user as UserProfile);
-          setLocalUser(getStoredUser());
-          setCoverPhoto(loadCoverPhoto(res.user.email || activeEmail));
+          const nextUser = getStoredUser();
+          setLocalUser(nextUser);
+          setCoverPhoto(String(res.user.coverPhoto || nextUser?.coverPhoto || "").trim());
         }
       })
       .catch((err) => {
@@ -1444,7 +1396,7 @@ export function Profile() {
     const handleStorageUpdate = () => {
       const nextUser = getStoredUser();
       setLocalUser(nextUser);
-      setCoverPhoto(loadCoverPhoto(nextUser?.email || getActiveUserEmail()));
+      setCoverPhoto(String(nextUser?.coverPhoto || "").trim());
     };
     window.addEventListener("scholarship-portal-user-updated", handleStorageUpdate);
     window.addEventListener("storage", handleStorageUpdate);
@@ -1459,7 +1411,7 @@ export function Profile() {
     setAboutEditMode(true);
   };
 
-  const handleCoverPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCoverPhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -1475,19 +1427,34 @@ export function Profile() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = typeof reader.result === "string" ? reader.result : "";
-      if (!dataUrl) return;
-      setCoverPhoto(dataUrl);
-      persistCoverPhoto(localUser?.email || getActiveUserEmail(), dataUrl);
+    const email = localUser?.email || getActiveUserEmail() || "";
+    if (!email) {
+      toast.error("Session expired. Please sign in again.");
+      e.target.value = "";
+      return;
+    }
+
+    const previousCover = coverPhoto;
+    const localPreview = URL.createObjectURL(file);
+    setCoverPhoto(localPreview);
+    setUploadingCover(true);
+
+    try {
+      const coverPhotoUrl = await uploadUserCoverPhoto(file, email);
+      setCoverPhoto(coverPhotoUrl);
+      const merged = { ...localUser, coverPhoto: coverPhotoUrl } as UserProfile;
+      setLocalUser(merged);
+      saveStoredUser(merged);
       toast.success("Cover photo updated.");
-    };
-    reader.onerror = () => {
-      toast.error("Failed to read the selected image.");
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
+    } catch (err) {
+      setCoverPhoto(previousCover);
+      const msg = err instanceof Error ? err.message : "Failed to upload cover photo.";
+      toast.error(msg);
+    } finally {
+      URL.revokeObjectURL(localPreview);
+      setUploadingCover(false);
+      e.target.value = "";
+    }
   };
 
   const handleSaveSuccess = (updatedFields: Partial<UserProfile>) => {
@@ -1524,8 +1491,8 @@ export function Profile() {
           {/* Cover Photo */}
           <div className="h-56 md:h-64 bg-gradient-to-r from-primary to-secondary relative group">
             <ImageWithFallback
-              key={coverPhoto}
-              src={coverPhoto}
+              key={coverPhoto || "default-cover"}
+              src={resolveCoverPhotoSrc(coverPhoto)}
               alt="Cover"
               className="w-full h-full object-cover"
             />
@@ -1535,15 +1502,25 @@ export function Profile() {
               accept="image/*"
               className="hidden"
               onChange={handleCoverPhotoChange}
+              disabled={uploadingCover}
             />
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="absolute top-3 right-3 bg-white/90 hover:bg-white shadow-sm backdrop-blur-sm"
+              className="absolute top-3 right-3 bg-white/90 hover:bg-white dark:bg-slate-900/90 dark:hover:bg-slate-900 shadow-sm backdrop-blur-sm"
               onClick={() => coverInputRef.current?.click()}
+              disabled={uploadingCover}
             >
-              <Camera className="size-4 mr-1" /> Change Cover Photo
+              {uploadingCover ? (
+                <>
+                  <Loader2 className="size-4 mr-1 animate-spin" /> Uploading...
+                </>
+              ) : (
+                <>
+                  <Camera className="size-4 mr-1" /> Change Cover Photo
+                </>
+              )}
             </Button>
           </div>
 
@@ -1601,7 +1578,7 @@ export function Profile() {
             {eligibilityBadges.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-border">
                 {eligibilityBadges.map((badge) => (
-                  <Badge key={badge} className="bg-accent">{badge}</Badge>
+                  <Badge key={badge} className="bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-100 dark:border-slate-600 dark:hover:bg-slate-700">{badge}</Badge>
                 ))}
               </div>
             )}
@@ -1687,7 +1664,7 @@ export function Profile() {
                       : "Not provided"}
                   </p>
                   {(localUser?.gwa || localUser?.gpa) && (
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-gray-500 dark:text-slate-400 mt-1">
                       {localUser.educationLevel === "Senior High School" 
                         ? "SHS Percentage Scale (70-100)"
                         : "College GWA Scale (1.00-5.00)"}
@@ -1723,7 +1700,7 @@ export function Profile() {
                 <div className="space-y-2">
                   {eligibilityBadges.length > 0 ? (
                     eligibilityBadges.map((badge) => (
-                      <Badge key={badge} className="w-full justify-center bg-accent">{badge}</Badge>
+                      <Badge key={badge} className="w-full justify-center bg-slate-100 text-slate-800 border-slate-200 hover:bg-slate-100 dark:bg-slate-700 dark:text-slate-100 dark:border-slate-600 dark:hover:bg-slate-700">{badge}</Badge>
                     ))
                   ) : (
                     <p className="text-sm text-muted-foreground">Add profile details to calculate scholarship eligibility.</p>
@@ -1735,7 +1712,7 @@ export function Profile() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <DollarSign className="size-5" />
+                  <Wallet className="size-5" />
                   Financial Profile
                 </CardTitle>
               </CardHeader>

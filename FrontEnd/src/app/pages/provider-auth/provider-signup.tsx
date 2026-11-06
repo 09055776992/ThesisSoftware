@@ -3,8 +3,9 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
-import { Eye, EyeOff, Clock } from "lucide-react";
+import { Eye, EyeOff, Clock, Upload, X, FileText, AlertCircle } from "lucide-react";
 import { API_URL } from "../../lib/api-client";
+import { PasswordStrengthIndicator } from "../../components/password-strength";
 
 interface ProviderSignUpProps {
   onSwitch: () => void;
@@ -24,8 +25,27 @@ export function ProviderSignUp({ onSwitch, onClose }: ProviderSignUpProps) {
     password: "",
     confirmPassword: "",
   });
+  const [credentialFiles, setCredentialFiles] = useState<File[]>([]);
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleCredentialAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    const allowed = ["application/pdf", "image/jpeg", "image/jpg", "image/png"];
+    const valid = files.filter((f) => allowed.includes(f.type) && f.size <= 10 * 1024 * 1024);
+    if (valid.length !== files.length) {
+      setErrorMessage("Some files were skipped. Only PDF, JPEG, PNG under 10 MB are allowed.");
+    }
+    setCredentialFiles((prev) => {
+      const combined = [...prev, ...valid];
+      return combined.slice(0, 5); // max 5 files
+    });
+    e.target.value = "";
+  };
+
+  const removeCredential = (idx: number) => {
+    setCredentialFiles((prev) => prev.filter((_, i) => i !== idx));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,21 +61,27 @@ export function ProviderSignUp({ onSwitch, onClose }: ProviderSignUpProps) {
       return;
     }
 
+    if (credentialFiles.length === 0) {
+      setErrorMessage("Please upload at least one verification document (e.g., organization ID, SEC registration, or authorization letter).");
+      return;
+    }
+
     try {
       setIsSubmitting(true);
-      const API_BASE_URL = API_URL;
 
-      const response = await fetch(`${API_BASE_URL}/api/provider/register`, {
+      // Use FormData so credential files are sent as multipart/form-data
+      const body = new FormData();
+      body.append("fullName", formData.fullName.trim());
+      body.append("email", formData.email.trim().toLowerCase());
+      body.append("password", formData.password);
+      body.append("phone", formData.phone.trim());
+      body.append("organizationName", formData.organizationName.trim());
+      body.append("position", formData.position.trim());
+      credentialFiles.forEach((file) => body.append("credentials", file));
+
+      const response = await fetch(`${API_URL}/api/provider/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fullName: formData.fullName.trim(),
-          email: formData.email.trim().toLowerCase(),
-          password: formData.password,
-          phone: formData.phone.trim(),
-          organizationName: formData.organizationName.trim(),
-          position: formData.position.trim(),
-        }),
+        body, // no Content-Type header — browser sets multipart boundary automatically
       });
 
       const payload = await response.json().catch(() => ({}));
@@ -64,7 +90,6 @@ export function ProviderSignUp({ onSwitch, onClose }: ProviderSignUpProps) {
         throw new Error(payload.message || "Registration failed");
       }
 
-      // Show pending state — do NOT log the user in
       setSubmitted(true);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to submit request");
@@ -73,7 +98,7 @@ export function ProviderSignUp({ onSwitch, onClose }: ProviderSignUpProps) {
     }
   };
 
-  // Pending confirmation screen
+  // Done / pending screen
   if (submitted) {
     return (
       <Card>
@@ -91,15 +116,9 @@ export function ProviderSignUp({ onSwitch, onClose }: ProviderSignUpProps) {
             Thank you for submitting your provider account request. An administrator will review
             your request and you will receive an email notification once it has been approved or rejected.
           </p>
-          <p className="text-sm text-muted-foreground">
-            This typically takes <strong>1–2 business days</strong>.
-          </p>
-          <p className="text-xs text-muted-foreground">
-            You will not be able to log in until your account has been approved.
-          </p>
-          <Button className="w-full" onClick={onClose}>
-            Back to Home
-          </Button>
+          <p className="text-sm text-muted-foreground">This typically takes <strong>1–2 business days</strong>.</p>
+          <p className="text-xs text-muted-foreground">You will not be able to log in until your account has been approved.</p>
+          <Button className="w-full" onClick={onClose}>Back to Home</Button>
         </CardContent>
       </Card>
     );
@@ -121,7 +140,10 @@ export function ProviderSignUp({ onSwitch, onClose }: ProviderSignUpProps) {
               placeholder="Your full name"
               required
               value={formData.fullName}
-              onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+              onChange={(e) => {
+                const cleaned = e.target.value.replace(/[^a-zA-Z\s\-'.]/g, "");
+                setFormData({ ...formData, fullName: cleaned });
+              }}
             />
           </div>
 
@@ -170,6 +192,57 @@ export function ProviderSignUp({ onSwitch, onClose }: ProviderSignUpProps) {
             />
           </div>
 
+          {/* Credential Documents Upload */}
+          <div className="space-y-2">
+            <Label>
+              Verification Documents <span className="text-destructive">*</span>
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Upload at least one document to verify your organization (e.g., valid ID, SEC/DTI registration, authorization letter). PDF, JPEG, PNG — max 10 MB each, up to 5 files.
+            </p>
+            <div className="border-2 border-dashed border-border rounded-lg p-4 space-y-3">
+              {credentialFiles.length > 0 && (
+                <ul className="space-y-2">
+                  {credentialFiles.map((file, idx) => (
+                    <li key={idx} className="flex items-center gap-2 text-sm bg-muted/50 rounded px-3 py-1.5">
+                      <FileText className="size-4 text-blue-600 flex-shrink-0" />
+                      <span className="flex-1 truncate">{file.name}</span>
+                      <span className="text-xs text-muted-foreground flex-shrink-0">
+                        {(file.size / 1024).toFixed(0)} KB
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeCredential(idx)}
+                        className="text-muted-foreground hover:text-destructive flex-shrink-0"
+                        aria-label="Remove file"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {credentialFiles.length < 5 && (
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-blue-600 hover:text-blue-700 font-medium">
+                  <Upload className="size-4" />
+                  Add document
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    multiple
+                    className="sr-only"
+                    onChange={handleCredentialAdd}
+                  />
+                </label>
+              )}
+            </div>
+            {credentialFiles.length === 0 && (
+              <p className="flex items-center gap-1 text-xs text-amber-600">
+                <AlertCircle className="size-3" /> At least one document is required.
+              </p>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="provider-password-signup">Password</Label>
             <div className="relative">
@@ -189,6 +262,7 @@ export function ProviderSignUp({ onSwitch, onClose }: ProviderSignUpProps) {
                 {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>
             </div>
+            <PasswordStrengthIndicator password={formData.password} />
           </div>
 
           <div className="space-y-2">
@@ -213,7 +287,14 @@ export function ProviderSignUp({ onSwitch, onClose }: ProviderSignUpProps) {
           </div>
 
           {errorMessage && (
-            <p className="text-sm text-destructive">{errorMessage}</p>
+            <div className="space-y-2">
+              <p role="alert" className="text-sm text-destructive">{errorMessage}</p>
+              {errorMessage.includes("already exists") && (
+                <Button type="button" variant="outline" className="w-full" onClick={onSwitch}>
+                  Go to Provider Sign In
+                </Button>
+              )}
+            </div>
           )}
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>

@@ -1,6 +1,10 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/user.model.js";
+import { getDb } from "../db.js";
+import { ObjectId } from "mongodb";
+import { generateOTP, getOTPExpiry } from "../utils/otpUtils.js";
+import { getProviderLoginOtpStatus } from "../utils/provider-login-otp.js";
 import {
   sendProviderRequestReceivedEmail,
   sendProviderApprovedEmail,
@@ -8,6 +12,21 @@ import {
   sendAdminNewProviderRequestEmail,
   sendOTPEmail,
 } from "../services/emailService.js";
+
+async function insertProviderStatusNotification(user, title, message) {
+  const db = await getDb();
+  await db.collection("notifications").insertOne({
+    userEmail: String(user.email).trim().toLowerCase(),
+    userId: String(user._id),
+    userRole: "provider",
+    type: "provider_status",
+    title,
+    message,
+    read: false,
+    is_read: false,
+    createdAt: new Date(),
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Helper: create a signed JWT for a provider
@@ -27,8 +46,8 @@ function createProviderToken(user) {
 
 // ---------------------------------------------------------------------------
 // POST /api/provider/register
-// Provider submits account request — does NOT log them in.
-// Sets isApproved: false, notifies provider + admin.
+// Provider submits account request — does NOT log them in or require OTP.
+// Sets isApproved: false and notifies provider + admin.
 // ---------------------------------------------------------------------------
 export const registerProvider = async (req, res) => {
   try {
@@ -53,7 +72,6 @@ export const registerProvider = async (req, res) => {
       });
     }
     // Also check pending student signups (not yet verified)
-    const { getDb } = await import("../db.js");
     const db = await getDb();
     const pendingStudent = await db.collection("pendingSignups").findOne({ email: normalizedEmail });
     if (pendingStudent) {
@@ -65,7 +83,7 @@ export const registerProvider = async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // Create provider user with isApproved: false, email not yet verified
+    // Provider email is verified as part of the sign-in OTP after approval.
     const user = await User.create({
       userName: String(fullName).trim(),
       email: normalizedEmail,
@@ -79,7 +97,7 @@ export const registerProvider = async (req, res) => {
         isApproved: false,
         isActive: true,
         isEmailVerified: false,
-        requestedAt: null, // Set to now only after email verified
+        requestedAt: new Date(),
         credentials: Array.isArray(req.body.credentialFiles) ? req.body.credentialFiles : [],
       },
     });
@@ -94,27 +112,28 @@ export const registerProvider = async (req, res) => {
       );
     }
 
-    // Generate OTP for email verification
-    const { generateOTP, getOTPExpiry } = await import("../utils/otpUtils.js");
-    const otpCode = generateOTP();
-    const otpExpiry = getOTPExpiry();
-
-    // Store OTP against the provider's user ID
-    await User.collection.updateOne(
-      { _id: user._id },
-      { $set: { providerOtp: otpCode, providerOtpExpiry: otpExpiry } }
-    );
-
-    // Send OTP email to provider
-    sendOTPEmail(normalizedEmail, otpCode, user.userName)
-      .catch((err) => console.error("[Provider Register] OTP email failed:", err.message));
+    void Promise.all([
+      sendProviderRequestReceivedEmail({
+        to: user.email,
+        providerName: user.userName,
+        organizationName: user.providerDetails?.organizationName || "",
+      }),
+      User.find({ role: "admin" }, { email: 1 }).lean().then((admins) =>
+        Promise.all(admins.map((admin) => sendAdminNewProviderRequestEmail({
+          adminEmail: admin.email,
+          providerName: user.userName,
+          organizationName: user.providerDetails?.organizationName || "",
+          position: user.providerDetails?.position || "",
+          providerEmail: user.email,
+        }))),
+      ),
+    ]).catch((err) => console.error("[Provider Register] Request notification failed:", err));
 
     res.status(201).json({
       success: true,
-      requiresOTP: true,
       providerId: String(user._id),
-      maskedEmail: normalizedEmail.replace(/(.{2})(.*)(@.*)/, "$1***$3"),
-      message: "Please verify your email address. A 6-digit code has been sent to your email.",
+      pending: true,
+      message: "Your provider account request has been submitted for admin review. You can sign in after it is approved.",
     });
   } catch (err) {
     console.error("[Provider Register] Error:", err);
@@ -125,7 +144,7 @@ export const registerProvider = async (req, res) => {
 // ---------------------------------------------------------------------------
 // POST /api/provider/login
 // Provider logs in — blocked if not approved or deactivated.
-// No OTP for providers (simpler flow, can be added later if needed).
+// Approved providers must also complete email OTP verification.
 // ---------------------------------------------------------------------------
 export const loginProvider = async (req, res) => {
   try {
@@ -139,7 +158,10 @@ export const loginProvider = async (req, res) => {
     const user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
-      return res.status(401).json({ success: false, message: "Invalid email or password" });
+      return res.status(404).json({
+        success: false,
+        message: "This email is not registered as a provider. Please check the email or create a provider account.",
+      });
     }
 
     // Must be a provider account
@@ -185,16 +207,6 @@ export const loginProvider = async (req, res) => {
       user.providerDetails.isEmailVerified = true;
     }
 
-    // Block if email not yet verified via OTP (only applies to unapproved accounts)
-    if (!user.providerDetails?.isEmailVerified && !user.providerDetails?.isApproved) {
-      return res.status(403).json({
-        success: false,
-        pending: true,
-        emailUnverified: true,
-        message: "Please verify your email address before logging in. Check your inbox for the verification code.",
-      });
-    }
-
     // Block if not yet approved by admin
     if (!user.providerDetails?.isApproved) {
       return res.status(403).json({
@@ -213,24 +225,226 @@ export const loginProvider = async (req, res) => {
       });
     }
 
-    const token = createProviderToken(user);
+    const db = await getDb();
+    const providerId = new ObjectId(String(user._id));
+    const recentOtp = await db.collection("otps").findOne({
+      userId: { $in: [providerId, String(user._id)] },
+      purpose: "provider-login",
+      isUsed: false,
+      otpExpiry: { $gt: new Date() },
+      createdAt: { $gt: new Date(Date.now() - 60 * 1000) },
+    });
+    if (recentOtp) {
+      return res.json({
+        success: true,
+        requiresOTP: true,
+        userId: String(user._id),
+        maskedEmail: normalizedEmail.replace(/(.{2})(.*)(@.*)/, "$1***$3"),
+        message: "A sign-in code was recently sent. Please check your email.",
+      });
+    }
+
+    await db.collection("otps").deleteMany({
+      userId: { $in: [providerId, String(user._id)] },
+      purpose: "provider-login",
+      isUsed: false,
+    });
+
+    const otp = generateOTP();
+    const createdAt = new Date();
+    await db.collection("otps").insertOne({
+      userId: providerId,
+      email: user.email,
+      otp,
+      otpExpiry: getOTPExpiry(),
+      isUsed: false,
+      attempts: 0,
+      purpose: "provider-login",
+      userType: "provider",
+      createdAt,
+    });
+
+    sendOTPEmail(user.email, otp, user.userName || user.email)
+      .catch((err) => console.error("[Provider Login] OTP email failed:", err.message));
 
     res.json({
       success: true,
-      token,
-      user: {
-        id: user._id.toString(),
-        name: user.userName,
-        email: user.email,
-        role: "provider",
-        userType: "provider",
-        organizationName: user.providerDetails?.organizationName || "",
-        position: user.providerDetails?.position || "",
-      },
+      requiresOTP: true,
+      userId: String(user._id),
+      maskedEmail: normalizedEmail.replace(/(.{2})(.*)(@.*)/, "$1***$3"),
+      message: "A 6-digit sign-in code has been sent to your email.",
     });
   } catch (err) {
     console.error("[Provider Login] Error:", err);
     res.status(500).json({ success: false, message: "Login failed" });
+  }
+};
+
+function providerLoginResponse(user) {
+  const token = createProviderToken(user);
+  return {
+    success: true,
+    token,
+    user: {
+      id: user._id.toString(),
+      name: user.userName,
+      email: user.email,
+      role: "provider",
+      userType: "provider",
+      organizationName: user.providerDetails?.organizationName || "",
+      position: user.providerDetails?.position || "",
+    },
+  };
+}
+
+export const verifyProviderLoginOtp = async (req, res) => {
+  let stage = "validating request";
+  try {
+    const { userId, otp } = req.body ?? {};
+    if (!userId || !otp) {
+      return res.status(400).json({ success: false, message: "userId and otp are required." });
+    }
+    if (!ObjectId.isValid(String(userId))) {
+      return res.status(400).json({ success: false, message: "Invalid provider ID." });
+    }
+
+    stage = "loading OTP record";
+    const db = await getDb();
+    const providerId = new ObjectId(String(userId));
+    const otpRecord = await db.collection("otps").findOne({
+      userId: { $in: [providerId, String(userId)] },
+      purpose: "provider-login",
+      userType: "provider",
+      isUsed: false,
+    });
+    if (!otpRecord) {
+      return res.status(400).json({ success: false, message: "Sign-in code expired or not found. Please sign in again." });
+    }
+    stage = "validating OTP";
+    const submittedOtp = String(otp).trim();
+    const otpStatus = getProviderLoginOtpStatus(otpRecord, submittedOtp);
+    if (otpStatus === "expired") {
+      await db.collection("otps").deleteOne({ _id: otpRecord._id });
+      return res.status(400).json({ success: false, message: "Sign-in code expired. Please sign in again." });
+    }
+    if (otpStatus === "locked") {
+      await db.collection("otps").deleteOne({ _id: otpRecord._id });
+      return res.status(429).json({ success: false, message: "Too many incorrect attempts. Please sign in again." });
+    }
+    if (otpStatus === "incorrect") {
+      await db.collection("otps").updateOne(
+        { _id: otpRecord._id, isUsed: false },
+        { $inc: { attempts: 1 } },
+      );
+      return res.status(400).json({ success: false, message: "Invalid verification code." });
+    }
+    if (otpStatus !== "valid") {
+      return res.status(400).json({ success: false, message: "Sign-in code expired or not found. Please sign in again." });
+    }
+
+    stage = "loading provider account";
+    const user = await User.findById(String(userId)).lean();
+    if (!user || (user.role !== "provider" && user.userType !== "provider")) {
+      return res.status(403).json({ success: false, message: "Provider account not found." });
+    }
+    if (!user.providerDetails?.isApproved) {
+      return res.status(403).json({
+        success: false,
+        pending: true,
+        message: "Your account is pending admin approval. You will receive an email once it has been reviewed.",
+      });
+    }
+    if (user.providerDetails?.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        deactivated: true,
+        message: "Your provider account has been deactivated. Please contact the administrator.",
+      });
+    }
+
+    stage = "creating provider session";
+    const loginResponse = providerLoginResponse(user);
+
+    stage = "consuming OTP";
+    const consumed = await db.collection("otps").updateOne(
+      {
+        _id: otpRecord._id,
+        isUsed: false,
+        otp: submittedOtp,
+        otpExpiry: { $gt: new Date() },
+        attempts: { $lt: 5 },
+      },
+      { $set: { isUsed: true, usedAt: new Date() } },
+    );
+    if (consumed.modifiedCount !== 1) {
+      return res.status(400).json({ success: false, message: "Sign-in code is no longer valid. Please sign in again." });
+    }
+
+    return res.json(loginResponse);
+  } catch (err) {
+    console.error(`[Provider Login OTP] Verification error while ${stage}:`, err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to verify sign-in code.",
+      stage,
+    });
+  }
+};
+
+export const resendProviderLoginOtp = async (req, res) => {
+  try {
+    const { userId } = req.body ?? {};
+    if (!userId || !ObjectId.isValid(String(userId))) {
+      return res.status(400).json({ success: false, message: "A valid provider ID is required." });
+    }
+
+    const provider = await User.findById(userId).lean();
+    if (!provider || (provider.role !== "provider" && provider.userType !== "provider")) {
+      return res.status(404).json({ success: false, message: "Provider not found." });
+    }
+    if (!provider.providerDetails?.isApproved || provider.providerDetails?.isActive === false) {
+      return res.status(403).json({ success: false, message: "This provider account cannot sign in." });
+    }
+
+    const db = await getDb();
+    const providerId = new ObjectId(String(provider._id));
+    const recentOtp = await db.collection("otps").findOne({
+      userId: { $in: [providerId, String(provider._id)] },
+      purpose: "provider-login",
+      createdAt: { $gt: new Date(Date.now() - 60 * 1000) },
+    });
+    if (recentOtp) {
+      return res.status(429).json({ success: false, message: "Please wait 60 seconds before requesting another code." });
+    }
+
+    await db.collection("otps").deleteMany({
+      userId: { $in: [providerId, String(provider._id)] },
+      purpose: "provider-login",
+      isUsed: false,
+    });
+    const otp = generateOTP();
+    await db.collection("otps").insertOne({
+      userId: providerId,
+      email: provider.email,
+      otp,
+      otpExpiry: getOTPExpiry(),
+      isUsed: false,
+      attempts: 0,
+      purpose: "provider-login",
+      userType: "provider",
+      createdAt: new Date(),
+    });
+    sendOTPEmail(provider.email, otp, provider.userName || provider.email)
+      .catch((err) => console.error("[Provider Login] Resend OTP email failed:", err.message));
+
+    return res.json({
+      success: true,
+      message: "A new sign-in code has been sent to your email.",
+      maskedEmail: provider.email.replace(/(.{2})(.*)(@.*)/, "$1***$3"),
+    });
+  } catch (err) {
+    console.error("[Provider Login OTP] Resend error:", err);
+    return res.status(500).json({ success: false, message: "Failed to resend sign-in code." });
   }
 };
 
@@ -300,6 +514,11 @@ export const approveProvider = async (req, res) => {
     );
 
     const updated = await User.findById(id);
+    await insertProviderStatusNotification(
+      user,
+      "Provider Account Approved",
+      "Your provider account has been approved. You can now access your provider dashboard.",
+    );
 
     // Notify provider
     sendProviderApprovedEmail({
@@ -346,6 +565,13 @@ export const rejectProvider = async (req, res) => {
     user.providerDetails.rejectedAt = new Date();
     user.providerDetails.rejectionReason = String(reason || "").trim() || null;
     await user.save();
+    await insertProviderStatusNotification(
+      user,
+      "Provider Account Update",
+      user.providerDetails.rejectionReason
+        ? `Your provider account request was rejected. Reason: ${user.providerDetails.rejectionReason}`
+        : "Your provider account request was rejected.",
+    );
 
     // Notify provider
     sendProviderRejectedEmail({
@@ -383,6 +609,11 @@ export const deactivateProvider = async (req, res) => {
     user.providerDetails.isActive = false;
     user.providerDetails.deactivatedAt = new Date();
     await user.save();
+    await insertProviderStatusNotification(
+      user,
+      "Provider Account Deactivated",
+      "Your provider account has been deactivated. Contact support if you believe this is an error.",
+    );
 
     res.json({
       success: true,
@@ -410,6 +641,11 @@ export const reactivateProvider = async (req, res) => {
     user.providerDetails.isActive = true;
     user.providerDetails.deactivatedAt = null;
     await user.save();
+    await insertProviderStatusNotification(
+      user,
+      "Provider Account Reactivated",
+      "Your provider account has been reactivated.",
+    );
 
     res.json({
       success: true,

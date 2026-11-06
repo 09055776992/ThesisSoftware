@@ -11,6 +11,9 @@ import FormData from "form-data";
 const AI_BASE_URL = process.env.AI_SERVICE_URL || "http://localhost:8000";
 const TIMEOUT_MS = 60000; // 60s — BERT can be slow on CPU
 
+// Cloudflare tunnel requires this header to skip the browser interstitial warning page
+const CF_HEADERS = process.env.AI_SERVICE_URL ? { "cf-access-skip-interstitial": "true" } : {};
+
 /**
  * Generic fetch wrapper with timeout and error handling.
  */
@@ -24,6 +27,7 @@ async function aiRequest(path, options = {}) {
       signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
+        ...CF_HEADERS,
         ...(options.headers || {}),
       },
     });
@@ -121,7 +125,7 @@ export async function analyzeDocumentFile(fileBuffer, filename, docType) {
       method: "POST",
       body: form,
       signal: controller.signal,
-      headers: form.getHeaders(),
+      headers: { ...form.getHeaders(), ...CF_HEADERS },
     });
 
     clearTimeout(timer);

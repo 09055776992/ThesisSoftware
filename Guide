@@ -101,7 +101,7 @@ npm run dev
 cd AI-Backend
 venv\Scripts\activate
 python -m uvicorn main:app --reload --port 8000
-```
+ ```
 ✅ Ready when you see:
 ```
 ==================================================

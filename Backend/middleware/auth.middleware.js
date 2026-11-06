@@ -209,6 +209,32 @@ export const requireAuth = async (req, res, next) => {
   }
 };
 
+export const requireAuthOrLegacyAdmin = async (req, res, next) => {
+  try {
+    const decoded = extractTokenPayload(req);
+    const userId = decoded?.userId || decoded?.id || null;
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized: Please log in" });
+    }
+
+    const user = await findUserOrAdmin(userId);
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized: User not found" });
+    }
+
+    req.userId = String(userId);
+    req.currentUser = user;
+    if (isAdminAccount(user, decoded)) {
+      req.adminId = String(userId);
+      req.admin = user;
+    }
+    return next();
+  } catch (err) {
+    console.error("requireAuthOrLegacyAdmin error:", err);
+    return res.status(500).json({ error: "Authentication check failed" });
+  }
+};
+
 /**
  * requireAdminOrProvider
  * Allows both admins and approved providers.

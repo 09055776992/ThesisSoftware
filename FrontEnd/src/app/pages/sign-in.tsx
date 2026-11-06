@@ -86,12 +86,57 @@ function OtpInput({
 }
 
 // ---------------------------------------------------------------------------
+// OTP Session Persistence (resilient against mobile app/tab switching)
+// ---------------------------------------------------------------------------
+interface PendingOtpSession {
+  type: "signin" | "signup";
+  userId: string;
+  maskedEmail: string;
+  expiresAt: number;
+  resendCooldownEnd: number;
+  email?: string;
+}
+
+const OTP_STORAGE_KEY = "scholar_pending_otp";
+
+function saveOtpSession(data: PendingOtpSession) {
+  try {
+    localStorage.setItem(OTP_STORAGE_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.error("Error saving OTP session:", e);
+  }
+}
+
+function clearOtpSession() {
+  try {
+    localStorage.removeItem(OTP_STORAGE_KEY);
+  } catch (e) {
+    console.error("Error clearing OTP session:", e);
+  }
+}
+
+function getStoredOtpSession(): PendingOtpSession | null {
+  try {
+    const raw = localStorage.getItem(OTP_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PendingOtpSession;
+    if (Date.now() >= parsed.expiresAt) {
+      localStorage.removeItem(OTP_STORAGE_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Countdown timer hook
 // ---------------------------------------------------------------------------
 function useCountdown(initial: number) {
   const [timeLeft, setTimeLeft] = useState(initial);
 
-  const reset = () => setTimeLeft(initial);
+  const reset = (seconds?: number) => setTimeLeft(typeof seconds === "number" ? seconds : initial);
 
   useEffect(() => {
     if (timeLeft <= 0) return;
@@ -129,9 +174,29 @@ export function SignIn() {
 
   const { timeLeft, formatted: timerDisplay, reset: resetTimer } = useCountdown(600);
 
-  // Clear form on mount
+  // Restore any pending OTP session from localStorage if tab was backgrounded / refreshed
   useEffect(() => {
-    setFormData({ email: "", password: "" });
+    const saved = getStoredOtpSession();
+    if (!saved || saved.type !== "signin") {
+      setFormData({ email: "", password: "" });
+      return;
+    }
+
+    const remainingSecs = Math.max(0, Math.floor((saved.expiresAt - Date.now()) / 1000));
+    const remainingCooldown = Math.max(0, Math.floor((saved.resendCooldownEnd - Date.now()) / 1000));
+
+    if (remainingSecs <= 0) {
+      clearOtpSession();
+      setFormData({ email: "", password: "" });
+      return;
+    }
+
+    setUserId(saved.userId);
+    setMaskedEmail(saved.maskedEmail);
+    if (saved.email) setFormData({ email: saved.email, password: "" });
+    setStep("otp");
+    resetTimer(remainingSecs);
+    setResendCooldown(remainingCooldown);
   }, []);
 
   // Resend cooldown countdown
@@ -157,7 +222,23 @@ export function SignIn() {
         setUserId(result.userId);
         setMaskedEmail(result.maskedEmail);
         setStep("otp");
-        resetTimer();
+        resetTimer(600);
+        setResendCooldown(60);
+        saveOtpSession({
+          type: "signin",
+          userId: result.userId,
+          maskedEmail: result.maskedEmail,
+          email: normalizedEmail,
+          expiresAt: Date.now() + 600 * 1000,
+          resendCooldownEnd: Date.now() + 60 * 1000,
+        });
+      } else if (result.token && result.user) {
+        clearStoredUser();
+        saveAuthToken(result.token);
+        const user = result.user as Record<string, unknown>;
+        const userType = String(user.userType || user.role || "student").toLowerCase();
+        saveStoredUser({ ...user, email: normalizedEmail });
+        navigate(userType === "admin" ? "/admin" : userType === "provider" ? "/provider/dashboard" : "/dashboard", { replace: true });
       }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to sign in.");
@@ -187,6 +268,7 @@ export function SignIn() {
         const normalizedEmail = String(user.email || formData.email).toLowerCase();
 
         clearStoredUser();
+        clearOtpSession();
         saveAuthToken(result.token ?? null);
 
         let profileFromServer: Record<string, unknown> = {};
@@ -201,11 +283,13 @@ export function SignIn() {
           pickProfileImageUrl(profileFromServer) || pickProfileImageUrl(user);
 
         saveStoredUser({
+          _id: String(user._id || profileFromServer._id || ""),
+          id: String(user.id || profileFromServer.id || ""),
+          userId: String(user.userId || profileFromServer.userId || ""),
           ...profileFromServer,
           email: normalizedEmail,
           fullName:
-            String(user.fullName || "").trim() ||
-            String(profileFromServer.fullName || "").trim() ||
+            String(profileFromServer.fullName || user.fullName || profileFromServer.userName || user.userName || profileFromServer.name || "").trim() ||
             buildNameFromEmail(normalizedEmail),
           phone: String(user.phone || profileFromServer.phone || ""),
           userType:
@@ -239,8 +323,16 @@ export function SignIn() {
     if (resendCooldown > 0) return;
     try {
       await resendOTP(userId);
-      resetTimer();
+      resetTimer(600);
       setResendCooldown(60);
+      saveOtpSession({
+        type: "signin",
+        userId,
+        maskedEmail,
+        email: formData.email,
+        expiresAt: Date.now() + 600 * 1000,
+        resendCooldownEnd: Date.now() + 60 * 1000,
+      });
       setOtp(["", "", "", "", "", ""]);
       setOtpError("");
     } catch (error) {
@@ -312,7 +404,7 @@ export function SignIn() {
                 <div className="flex items-center justify-end">
                   <Link
                     to="/auth/forgot-password"
-                    className="text-sm text-blue-600 hover:text-blue-700 hover:underline"
+                    className="text-sm text-blue-600 hover:text-blue-700 hover:underline py-2 px-1 -mr-1 touch-manipulation"
                   >
                     Forgot Password?
                   </Link>
@@ -415,6 +507,7 @@ export function SignIn() {
                 <button
                   type="button"
                   onClick={() => {
+                    clearOtpSession();
                     setStep("login");
                     setOtp(["", "", "", "", "", ""]);
                     setOtpError("");

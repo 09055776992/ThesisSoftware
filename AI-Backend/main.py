@@ -1,16 +1,26 @@
 """
-SCHOLAR AI Backend — FastAPI Server
+SCHOLAR AI Backend â€” FastAPI Server
 Port: 8000
 
 Endpoints:
-  GET  /health                  — health check
-  POST /analyze-document        — BERT document analysis (raw text input)
-  POST /analyze-document-file   — OCR + BERT analysis (file upload: PDF, JPG, PNG, TXT)
-  POST /rank-students           — score + rank all applicants for a scholarship
-  POST /explain-score           — SHAP explanation for a single score breakdown
-  POST /train-explainer         — train SHAP model on historical data
+  GET  /health                  â€” health check
+  POST /analyze-document        â€” BERT document analysis (raw text input)
+  POST /analyze-document-file   â€” OCR + BERT analysis (file upload: PDF, JPG, PNG, TXT)
+  POST /rank-students           â€” score + rank all applicants for a scholarship
+  POST /explain-score           â€” SHAP explanation for a single score breakdown
+  POST /train-explainer         â€” train SHAP model on historical data
 """
 
+import os
+import sys
+
+# Ensure torch/lib DLLs are loaded properly on Windows
+torch_lib_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "venv", "Lib", "site-packages", "torch", "lib"))
+if os.path.exists(torch_lib_path) and hasattr(os, "add_dll_directory"):
+    try:
+        os.add_dll_directory(torch_lib_path)
+    except Exception:
+        pass
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -52,6 +62,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:4000",
     ],
+    allow_origin_regex=r"https://.*\.trycloudflare\.com",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -111,7 +122,7 @@ class TrainRequest(BaseModel):
 
 @app.get("/health")
 async def health_check():
-    """Quick health check — confirms all modules loaded."""
+    """Quick health check â€” confirms all modules loaded."""
     return {
         "status": "running",
         "bert_loaded": True,

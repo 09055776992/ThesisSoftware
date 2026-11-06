@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
-import { Users, Award, FileText, TrendingUp, DollarSign, CheckCircle } from "lucide-react";
-import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { Users, Award, FileText, TrendingUp, CheckCircle } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { API_URL } from "../../lib/api-client";
+import { getAuthToken } from "../../lib/user-storage";
 
 interface Stats {
   totalUsers: number;
@@ -13,78 +16,27 @@ interface Stats {
   newUsersThisMonth: number;
   activeScholarships: number;
   userGrowthByMonth: Array<{ month: string; users: number }>;
+  scholarshipDistribution: Array<{ category: string; count: number }>;
+  applicationsByStatus: Array<{ status: string; count: number }>;
 }
 
-const userGrowthData = [
-  { month: "Jan", users: 1200 },
-  { month: "Feb", users: 1890 },
-  { month: "Mar", users: 2400 },
-  { month: "Apr", users: 3200 },
-  { month: "May", users: 4100 },
-  { month: "Jun", users: 5200 },
-  { month: "Jul", users: 6800 },
-  { month: "Aug", users: 8200 },
-  { month: "Sep", users: 9600 },
-  { month: "Oct", users: 10800 },
-  { month: "Nov", users: 11900 },
-  { month: "Dec", users: 12458 },
-];
-
-const scholarshipDistribution = [
-  { name: "Merit-Based", value: 45 },
-  { name: "Need-Based", value: 30 },
-  { name: "Athletic", value: 15 },
-  { name: "Minority", value: 10 },
-];
-
-const applicationsByStatus = [
-  { status: "Pending", count: 890 },
-  { status: "Under Review", count: 1240 },
-  { status: "Approved", count: 867 },
-  { status: "Rejected", count: 250 },
-];
-
-const COLORS = ["#2563EB", "#10B981", "#F59E0B", "#EF4444"];
-
-const recentActivity = [
-  {
-    user: "John Smith",
-    action: "Applied for NSF Merit Scholarship",
-    time: "2 minutes ago",
-  },
-  {
-    user: "Admin Team",
-    action: "Approved 15 scholarship applications",
-    time: "1 hour ago",
-  },
-  {
-    user: "Sarah Johnson",
-    action: "Created new scholarship: Tech Leaders Award",
-    time: "3 hours ago",
-  },
-  {
-    user: "Michael Chen",
-    action: "Updated profile with academic documents",
-    time: "5 hours ago",
-  },
-  {
-    user: "System",
-    action: "Generated monthly analytics report",
-    time: "1 day ago",
-  },
-];
+type Activity = { actor: string; action: string; subject: string; createdAt?: string };
 
 export function AdminDashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activity, setActivity] = useState<Activity[]>([]);
 
   useEffect(() => {
     const fetchStats = async () => {
       try {
         setLoading(true);
         setError(null);
-        const response = await fetch("/api/admin/stats");
+        const response = await fetch(`${API_URL}/api/admin/stats`, {
+          headers: { Authorization: `Bearer ${getAuthToken()}` },
+        });
         
         if (!response.ok) {
           throw new Error("Failed to fetch statistics");
@@ -100,24 +52,20 @@ export function AdminDashboard() {
           activeUsers: data.activeUsers ?? data.stats?.activeUsers ?? 0,
           newUsersThisMonth: data.newThisMonth ?? data.stats?.newUsersThisMonth ?? 0,
           activeScholarships: data.activeScholarships ?? data.stats?.activeScholarships ?? 0,
-          userGrowthByMonth: data.userGrowthByMonth ?? data.stats?.userGrowthByMonth ?? userGrowthData,
+          userGrowthByMonth: data.userGrowthByMonth ?? data.stats?.userGrowthByMonth ?? [],
+          scholarshipDistribution: data.scholarshipDistribution ?? [],
+          applicationsByStatus: data.applicationsByStatus ?? [],
         });
+        const activityResponse = await fetch(`${API_URL}/api/admin/activity`, {
+          headers: { Authorization: `Bearer ${getAuthToken()}` },
+        });
+        if (!activityResponse.ok) throw new Error("Failed to fetch recent activity");
+        setActivity((await activityResponse.json()).data || []);
       } catch (err) {
         console.error("Error fetching stats:", err);
-        // Gracefully fall back to placeholder stats if fetch fails
         setError(err instanceof Error ? err.message : "Failed to load stats");
-        // Use default stats so dashboard still shows something
-        setStats({
-          totalUsers: 0,
-          totalStudents: 0,
-          totalProviders: 0,
-          totalMentors: 0,
-          totalAdmins: 0,
-          activeUsers: 0,
-          newUsersThisMonth: 0,
-          activeScholarships: 0,
-          userGrowthByMonth: userGrowthData,
-        });
+        setStats(null);
+        setActivity([]);
       } finally {
         setLoading(false);
       }
@@ -166,9 +114,9 @@ export function AdminDashboard() {
       </div>
 
       {error && (
-        <Card className="border-yellow-600 bg-yellow-50">
+        <Card className="border-yellow-600 bg-yellow-50 dark:bg-yellow-950/30">
           <CardContent className="pt-6">
-            <p className="text-yellow-800 text-sm">⚠️ Note: Could not load real-time stats. Showing default values. ({error})</p>
+            <p className="text-yellow-800 text-sm">Could not load real-time dashboard data. ({error})</p>
           </CardContent>
         </Card>
       )}
@@ -205,8 +153,8 @@ export function AdminDashboard() {
             <CardDescription>Monthly user registration trend</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={stats?.userGrowthByMonth?.length ? stats.userGrowthByMonth : userGrowthData}>
+            {stats?.userGrowthByMonth?.length ? <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={stats.userGrowthByMonth}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" />
                 <YAxis />
@@ -214,7 +162,7 @@ export function AdminDashboard() {
                 <Legend />
                 <Line type="monotone" dataKey="users" stroke="#2563EB" strokeWidth={2} />
               </LineChart>
-            </ResponsiveContainer>
+            </ResponsiveContainer> : <p className="py-24 text-center text-muted-foreground">No user growth data available.</p>}
           </CardContent>
         </Card>
 
@@ -225,25 +173,14 @@ export function AdminDashboard() {
             <CardDescription>Scholarships by type</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={scholarshipDistribution}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                >
-                  {scholarshipDistribution.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
+            {stats?.scholarshipDistribution?.length ? (
+              <div className="space-y-4 py-4">
+                {stats.scholarshipDistribution.map((item) => {
+                  const total = stats.scholarshipDistribution.reduce((sum, entry) => sum + entry.count, 0);
+                  return <div key={item.category}><div className="flex justify-between text-sm mb-1"><span>{item.category}</span><span>{item.count}</span></div><div className="h-2 rounded bg-muted"><div className="h-2 rounded bg-primary" style={{ width: `${total ? (item.count / total) * 100 : 0}%` }} /></div></div>;
+                })}
+              </div>
+            ) : <p className="py-24 text-center text-muted-foreground">No active scholarship data available.</p>}
           </CardContent>
         </Card>
 
@@ -254,16 +191,11 @@ export function AdminDashboard() {
             <CardDescription>Current application pipeline</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={applicationsByStatus}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="status" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="count" fill="#2563EB" />
-              </BarChart>
-            </ResponsiveContainer>
+            {stats?.applicationsByStatus?.length ? (
+              <div className="grid grid-cols-2 gap-3 py-8">
+                {stats.applicationsByStatus.map((item) => <div key={item.status} className="rounded-lg border border-border p-4"><p className="text-sm text-muted-foreground">{item.status}</p><p className="text-2xl font-bold">{item.count.toLocaleString()}</p></div>)}
+              </div>
+            ) : <p className="py-24 text-center text-muted-foreground">No application data available.</p>}
           </CardContent>
         </Card>
 
@@ -274,19 +206,7 @@ export function AdminDashboard() {
             <CardDescription>Latest platform updates</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {recentActivity.map((activity, index) => (
-                <div key={index} className="flex items-start gap-3">
-                  <div className="size-2 rounded-full bg-primary mt-2" />
-                  <div className="flex-1">
-                    <p className="text-sm">
-                      <span className="font-semibold">{activity.user}</span> {activity.action}
-                    </p>
-                    <p className="text-xs text-muted-foreground">{activity.time}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+            {activity.length ? <div className="space-y-4 py-2">{activity.map((item, index) => <div key={`${item.createdAt}-${index}`} className="border-b border-border pb-3 last:border-0"><p className="text-sm"><strong>{item.actor}</strong> {item.action} {item.subject}</p><p className="text-xs text-muted-foreground">{item.createdAt ? new Date(item.createdAt).toLocaleString() : "Unknown date"}</p></div>)}</div> : <p className="py-24 text-center text-muted-foreground">No recent activity available.</p>}
           </CardContent>
         </Card>
       </div>
@@ -298,22 +218,22 @@ export function AdminDashboard() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <button className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
+            <button onClick={() => navigate("/admin/users")} className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
               <Users className="size-8 text-primary mb-2" />
               <p className="font-semibold">Manage Users</p>
               <p className="text-xs text-muted-foreground">View and edit user accounts</p>
             </button>
-            <button className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
+            <button onClick={() => navigate("/admin/scholarships")} className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
               <Award className="size-8 text-accent mb-2" />
               <p className="font-semibold">Add Scholarship</p>
               <p className="text-xs text-muted-foreground">Create new scholarship</p>
             </button>
-            <button className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
+            <button onClick={() => navigate("/admin/applications")} className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
               <CheckCircle className="size-8 text-green-600 mb-2" />
               <p className="font-semibold">Review Applications</p>
               <p className="text-xs text-muted-foreground">Process pending applications</p>
             </button>
-            <button className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
+            <button onClick={() => navigate("/admin/reports")} className="p-4 border border-border rounded-lg hover:bg-muted transition-colors text-left">
               <TrendingUp className="size-8 text-purple-600 mb-2" />
               <p className="font-semibold">View Analytics</p>
               <p className="text-xs text-muted-foreground">Detailed reports</p>

@@ -83,6 +83,10 @@ AI_BACKEND_URL=http://localhost:8000
 # Backend API URL
 VITE_API_BASE_URL=http://localhost:5000
 
+# Vite proxy target (optional; defaults to VITE_API_BASE_URL, then localhost:5000)
+# Set this to a public backend tunnel URL only when using a tunnel.
+# VITE_API_PROXY_TARGET=https://your-backend-tunnel.trycloudflare.com
+
 # AI-Backend URL (if needed directly from frontend)
 VITE_AI_BACKEND_URL=http://localhost:8000
 ```
@@ -245,6 +249,7 @@ curl http://localhost:8000/health
 - ✅ Check `Backend/.env` has correct `MONGODB_URI`
 - ✅ Verify Backend terminal shows "Server running on port 5000"
 - ✅ Check `FrontEnd/.env` has `VITE_API_BASE_URL=http://localhost:5000`
+- ✅ Remove stale tunnel values, or set `VITE_API_PROXY_TARGET` to the active backend tunnel URL
 
 ### "AI-Backend not responding"
 - ✅ Check AI-Backend terminal for "[ModernBERT] Model loaded"
@@ -264,6 +269,13 @@ curl http://localhost:8000/health
 - ✅ Check internet connection
 - ✅ Optional: Set HuggingFace token for higher rate limits
 - ✅ Clear cache and retry: `rmdir /s %USERPROFILE%\.cache\huggingface`
+
+## Scholar Home Posts
+
+- Students can submit text posts with up to five PDF, JPEG, or PNG attachments (5 MB each) from **Home**.
+- New posts stay pending until an administrator approves them in **Admin → Scholar Posts**. A warning sends the author an in-app notification with the administrator's reason.
+- Approved posts appear on student Home feeds and in the provider dashboard's **Scholar Home Feed**. Pending and removed posts are not shown to other students or providers.
+- Run the backend model checks with `cd Backend` then `node --test test/student-post.model.test.js`.
 
 ### Git "LF will be replaced by CRLF" warnings
 These are normal on Windows. Safe to ignore, or run:
@@ -321,4 +333,3 @@ db.dropDatabase()
 ```
 
 **Questions?** Check the README.md files in each folder or ask in the group chat.
-

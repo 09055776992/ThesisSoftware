@@ -3,6 +3,88 @@ import fs from "fs";
 import Scholarship from "../models/scholarship.model.js";
 import Application from "../models/application.model.js";
 import User from "../models/user.model.js";
+import { notifyUsersOfNewScholarshipAsync } from "../services/newScholarshipNotificationService.js";
+import { getDb } from "../db.js";
+import { ObjectId } from "mongodb";
+
+function providerNotificationFilter(req, notificationId) {
+  const identity = [
+    { userId: String(req.providerId) },
+    { userEmail: String(req.provider?.email || "").trim().toLowerCase() },
+  ];
+  return {
+    ...(notificationId ? { _id: ObjectId.isValid(notificationId) ? new ObjectId(notificationId) : null } : {}),
+    $and: [
+      { $or: identity.filter((item) => Object.values(item)[0]) },
+      {
+        $or: [
+          { userRole: "provider" },
+          { recipientGroup: { $in: ["providers", "all"] } },
+        ],
+      },
+    ],
+  };
+}
+
+export const getProviderNotifications = async (req, res) => {
+  try {
+    const db = await getDb();
+    const notifications = await db.collection("notifications")
+      .find(providerNotificationFilter(req))
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .toArray();
+    return res.json({
+      success: true,
+      data: notifications,
+      unreadCount: notifications.filter((item) => item.read !== true && item.is_read !== true).length,
+    });
+  } catch (error) {
+    console.error("[Provider Notifications GET] Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch provider notifications." });
+  }
+};
+
+export const getProviderUnreadNotificationCount = async (req, res) => {
+  try {
+    const db = await getDb();
+    const count = await db.collection("notifications").countDocuments({
+      ...providerNotificationFilter(req),
+      read: { $ne: true },
+      is_read: { $ne: true },
+    });
+    return res.json({ success: true, count });
+  } catch (error) {
+    console.error("[Provider Notifications Count] Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch unread provider notifications." });
+  }
+};
+
+export const markProviderNotificationRead = async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid notification ID." });
+    }
+
+    const db = await getDb();
+    const filter = providerNotificationFilter(req, req.params.id);
+    const notification = await db.collection("notifications").findOne(filter);
+    if (!notification) {
+      return res.status(404).json({ success: false, message: "Notification not found." });
+    }
+    if (notification.read === true && notification.is_read === true) {
+      return res.json({ success: true, message: "Notification is already read." });
+    }
+
+    await db.collection("notifications").updateOne(filter, {
+      $set: { read: true, is_read: true, readAt: new Date() },
+    });
+    return res.json({ success: true, message: "Notification marked as read." });
+  } catch (error) {
+    console.error("[Provider Notifications PATCH] Error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update provider notification." });
+  }
+};
 
 // ============================================================
 // PROVIDER SCHOLARSHIP MANAGEMENT
@@ -16,7 +98,10 @@ import User from "../models/user.model.js";
  */
 export const getProviderScholarships = async (req, res) => {
   try {
-    const scholarships = await Scholarship.find()
+    const providerId = req.providerId;
+
+    // Strictly scoped: only scholarships this provider created
+    const scholarships = await Scholarship.find({ createdBy: new mongoose.Types.ObjectId(providerId) })
       .sort({ createdAt: -1 })
       .lean();
 
@@ -119,8 +204,8 @@ export const createProviderScholarship = async (req, res) => {
       });
     }
 
-    const normalizedName = String(name).trim();
-    const normalizedProvider = provider.providerDetails?.organizationName || provider.userName;
+    const normalizedName = String(name ?? "").trim();
+    const normalizedProvider = provider.providerDetails?.organizationName || provider.fullName || provider.userName;
 
     // Check for existing scholarship with same name and provider (case-insensitive)
     const existing = await Scholarship.findOne({
@@ -157,6 +242,11 @@ export const createProviderScholarship = async (req, res) => {
     });
 
     const saved = await scholarship.save();
+
+    // Fan out emails + in-app notifications to every registered student.
+    // Scheduled via setImmediate, so the provider's response is not blocked
+    // and a delivery failure can never fail the creation request.
+    notifyUsersOfNewScholarshipAsync(saved);
 
     res.status(201).json({ success: true, data: saved });
   } catch (err) {
@@ -252,9 +342,13 @@ export const deleteProviderScholarship = async (req, res) => {
 export const getProviderApplications = async (req, res) => {
   try {
     const { status, scholarshipId } = req.query;
+    const providerId = req.providerId;
 
-    // Get all scholarship IDs (no createdBy filter — seeded scholarships lack that field)
-    const providerScholarships = await Scholarship.find({}, { _id: 1 }).lean();
+    // Strictly scoped: only scholarships this provider created
+    const providerScholarships = await Scholarship.find(
+      { createdBy: new mongoose.Types.ObjectId(providerId) },
+      { _id: 1 }
+    ).lean();
 
     const scholarshipIds = providerScholarships.map((s) => s._id);
 
@@ -275,18 +369,17 @@ export const getProviderApplications = async (req, res) => {
           { scholarshipId: { $in: stringScholarshipIds } },
         ];
 
-    if (status) {
-      orConditions.forEach((c) => (c.status = status));
-    }
-
-    const filter = { $or: orConditions };
+    // Build the data filter — apply status separately so statConditions stay unaffected
+    const dataFilter = status
+      ? { $or: orConditions, status }
+      : { $or: orConditions };
 
     const applications = await Application.collection
-      .find(filter)
+      .find(dataFilter)
       .sort({ submittedAt: -1 })
       .toArray();
 
-    // Stats for this provider's applications only (both types)
+    // Stats always use ALL statuses — never filtered by the tab's status param
     const statConditions = scholarshipId
       ? [
           { scholarshipId: new mongoose.Types.ObjectId(scholarshipId) },
@@ -305,8 +398,11 @@ export const getProviderApplications = async (req, res) => {
       .toArray();
 
     const stats = {
+      // "Pending" DB status
       pending: counts.find((c) => c._id === "Pending")?.count || 0,
-      underReview: counts.find((c) => c._id === "Under Review")?.count || 0,
+      // "Under Review" and "System Qualified" both map to Under Evaluation
+      underReview: (counts.find((c) => c._id === "Under Review")?.count || 0) +
+                   (counts.find((c) => c._id === "System Qualified")?.count || 0),
       approved: counts.find((c) => c._id === "Approved")?.count || 0,
       rejected: counts.find((c) => c._id === "Rejected")?.count || 0,
     };
@@ -377,19 +473,26 @@ export const approveApplicationByProvider = async (req, res) => {
       return res.status(404).json({ success: false, message: "Application not found" });
     }
 
-    // Verify the scholarship belongs to this provider
+    // Strictly verify the scholarship belongs to this provider — no bypass
     const scholarship = await Scholarship.findById(application.scholarshipId);
-    if (!scholarship || String(scholarship.createdBy) !== String(providerId)) {
+    if (!scholarship) {
+      return res.status(404).json({ success: false, message: "Scholarship not found" });
+    }
+    if (String(scholarship.createdBy) !== String(providerId)) {
       return res.status(403).json({ success: false, message: "You do not have permission to approve this application" });
     }
 
-    application.status = "Approved";
-    application.approvedBy = new mongoose.Types.ObjectId(providerId);
-    application.approvedByRole = "provider";
-    application.approvedAt = new Date();
-    await application.save();
+    const update = {
+      status: "Approved",
+      approvedBy: new mongoose.Types.ObjectId(providerId),
+      approvedByRole: "provider",
+      approvedAt: new Date(),
+      updatedAt: new Date(),
+    };
+    await Application.findByIdAndUpdate(id, { $set: update });
+    const updated = await Application.findById(id);
 
-    res.json({ success: true, data: application, message: "Application approved" });
+    res.json({ success: true, data: updated, message: "Application approved" });
   } catch (err) {
     console.error("[Provider Approve Application] Error:", err);
     res.status(500).json({ success: false, message: "Failed to approve application" });
@@ -411,20 +514,27 @@ export const rejectApplicationByProvider = async (req, res) => {
       return res.status(404).json({ success: false, message: "Application not found" });
     }
 
-    // Verify the scholarship belongs to this provider
+    // Strictly verify the scholarship belongs to this provider — no bypass
     const scholarship = await Scholarship.findById(application.scholarshipId);
-    if (!scholarship || String(scholarship.createdBy) !== String(providerId)) {
+    if (!scholarship) {
+      return res.status(404).json({ success: false, message: "Scholarship not found" });
+    }
+    if (String(scholarship.createdBy) !== String(providerId)) {
       return res.status(403).json({ success: false, message: "You do not have permission to reject this application" });
     }
 
-    application.status = "Rejected";
-    application.rejectedBy = new mongoose.Types.ObjectId(providerId);
-    application.rejectedByRole = "provider";
-    application.rejectedAt = new Date();
-    application.rejectionReason = String(reason || "").trim() || null;
-    await application.save();
+    const update = {
+      status: "Rejected",
+      rejectedBy: new mongoose.Types.ObjectId(providerId),
+      rejectedByRole: "provider",
+      rejectedAt: new Date(),
+      rejectionReason: String(reason || "").trim() || null,
+      updatedAt: new Date(),
+    };
+    await Application.findByIdAndUpdate(id, { $set: update });
+    const updated = await Application.findById(id);
 
-    res.json({ success: true, data: application, message: "Application rejected" });
+    res.json({ success: true, data: updated, message: "Application rejected" });
   } catch (err) {
     console.error("[Provider Reject Application] Error:", err);
     res.status(500).json({ success: false, message: "Failed to reject application" });
@@ -447,17 +557,23 @@ export const qualifyApplicationByProvider = async (req, res) => {
       return res.status(404).json({ success: false, message: "Application not found" });
     }
 
-    // Verify the scholarship belongs to this provider
+    // Strictly verify the scholarship belongs to this provider — no bypass
     const scholarship = await Scholarship.findById(application.scholarshipId);
-    if (!scholarship || String(scholarship.createdBy) !== String(providerId)) {
+    if (!scholarship) {
+      return res.status(404).json({ success: false, message: "Scholarship not found" });
+    }
+    if (String(scholarship.createdBy) !== String(providerId)) {
       return res.status(403).json({ success: false, message: "You do not have permission to qualify this application" });
     }
 
-    application.status = "System Qualified";
+    const update = {
+      status: "System Qualified",
+      updatedAt: new Date(),
+    };
 
     // Schedule virtual meeting if details provided
     if (scheduledDate && scheduledTime && venue) {
-      application.screeningSchedule = {
+      update.screeningSchedule = {
         scheduledDate: new Date(scheduledDate),
         scheduledTime,
         venue,
@@ -468,11 +584,12 @@ export const qualifyApplicationByProvider = async (req, res) => {
       };
     }
 
-    await application.save();
+    await Application.findByIdAndUpdate(id, { $set: update });
+    const updated = await Application.findById(id);
 
     res.json({
       success: true,
-      data: application,
+      data: updated,
       message: scheduledDate
         ? "Application qualified and screening scheduled"
         : "Application qualified for final screening",
@@ -666,14 +783,37 @@ export const updateProviderProfile = async (req, res) => {
  */
 export const getProviderDashboardStats = async (req, res) => {
   try {
-    // Fetch ALL scholarships — no createdBy filter (Requirements 3.1)
-    const scholarships = await Scholarship.find({}, { _id: 1, status: 1 }).lean();
+    const providerId = req.providerId;
+
+    // Strictly scoped: only this provider's scholarships
+    const scholarships = await Scholarship.find(
+      { createdBy: new mongoose.Types.ObjectId(providerId) },
+      { _id: 1, status: 1 }
+    ).lean();
 
     const totalScholarships = scholarships.length;
     const activeScholarships = scholarships.filter((s) => s.status === "Active").length;
 
-    // Count ALL applications regardless of scholarship ownership (Requirements 3.2)
+    if (totalScholarships === 0) {
+      return res.json({
+        success: true,
+        stats: { totalScholarships: 0, activeScholarships: 0, totalApplicants: 0, pendingApplications: 0, approvedApplications: 0 },
+      });
+    }
+
+    // Count applications only for this provider's scholarships
+    const scholarshipIds = scholarships.map((s) => s._id);
+    const stringIds = scholarshipIds.map((id) => String(id));
+
     const appCounts = await Application.aggregate([
+      {
+        $match: {
+          $or: [
+            { scholarshipId: { $in: scholarshipIds } },
+            { scholarshipId: { $in: stringIds } },
+          ],
+        },
+      },
       { $group: { _id: "$status", count: { $sum: 1 } } },
     ]);
 

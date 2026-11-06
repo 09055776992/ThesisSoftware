@@ -85,7 +85,10 @@ export function ProviderApplications() {
         method: "PATCH",
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("Failed to approve");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || data.error || "Failed to approve");
+      }
       fetchApplications();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to approve");
@@ -104,7 +107,10 @@ export function ProviderApplications() {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ reason: rejectReason }),
       });
-      if (!res.ok) throw new Error("Failed to reject");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || data.error || "Failed to reject");
+      }
       setRejectingId(null);
       setRejectReason("");
       fetchApplications();
@@ -125,7 +131,10 @@ export function ProviderApplications() {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify(qualifyForm),
       });
-      if (!res.ok) throw new Error("Failed to qualify");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || data.error || "Failed to qualify");
+      }
       setQualifyingId(null);
       setQualifyForm({ scheduledDate: "", scheduledTime: "", venue: "", notes: "" });
       fetchApplications();
@@ -139,17 +148,32 @@ export function ProviderApplications() {
   const formatDate = (d: string) =>
     new Date(d).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 
-  const statusColor: Record<string, string> = {
-    Pending: "bg-amber-100 text-amber-800",
-    "System Qualified": "bg-blue-100 text-blue-800",
-    "Under Review": "bg-purple-100 text-purple-800",
-    Approved: "bg-green-100 text-green-800",
-    Rejected: "bg-red-100 text-red-800",
-  };
+  // Map raw DB status values to the same human-readable labels shown on the
+  // student side — keeps both portals in sync.
+  function mapStatus(raw: string): { label: string; className: string } {
+    switch (raw) {
+      case "Pending":
+      case "Needs Resubmission":
+        return { label: "Application Submitted", className: "bg-amber-100 text-amber-800" };
+      case "Under Review":
+      case "System Qualified":
+        return { label: "Under Evaluation", className: "bg-blue-100 text-blue-800" };
+      case "Qualified for Final Screening":
+      case "Action Required: Submit Specific Requirements":
+        return { label: "Qualified for Final Screening", className: "bg-green-100 text-green-800" };
+      case "Approved":
+        return { label: "Slot Secured & Awarded", className: "bg-emerald-100 text-emerald-800" };
+      case "Rejected":
+        return { label: "Rejected", className: "bg-red-100 text-red-800" };
+      default:
+        return { label: raw, className: "bg-gray-100 text-gray-600" };
+    }
+  }
 
   const filterTabs = [
-    { value: "all", label: "All", count: applications.length },
+    { value: "all", label: "All", count: stats.pending + stats.underReview + stats.approved + stats.rejected },
     { value: "Pending", label: "Pending", count: stats.pending },
+    { value: "Under Review", label: "Under Evaluation", count: stats.underReview },
     { value: "Approved", label: "Approved", count: stats.approved },
     { value: "Rejected", label: "Rejected", count: stats.rejected },
   ];
@@ -237,9 +261,11 @@ export function ProviderApplications() {
                       <span className="font-mono text-sm font-semibold">{app.matchScore}%</span>
                     </TableCell>
                     <TableCell>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor[app.status] || "bg-gray-100 text-gray-600"}`}>
-                        {app.status}
-                      </span>
+                      {(() => { const s = mapStatus(app.status); return (
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${s.className}`}>
+                          {s.label}
+                        </span>
+                      ); })()}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-1 justify-end">

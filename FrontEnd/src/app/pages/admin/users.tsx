@@ -8,9 +8,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
-import { Search, MoreVertical, Eye, Edit, UserX, Download, Loader2 } from "lucide-react";
-import { resolvePublicAssetUrl } from "../../lib/api-client";
+import { Label } from "../../components/ui/label";
+import { Search, MoreVertical, Eye, Edit, UserX, UserCheck, Download, Loader2, Send } from "lucide-react";
+import { fetchAdminUserActivity, fetchAdminUserApplications, resolvePublicAssetUrl } from "../../lib/api-client";
+import { getAuthToken } from "../../lib/user-storage";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../../components/ui/dropdown-menu";
+import { toast } from "sonner";
+import { API_URL } from "../../lib/api-client";
+import { Textarea } from "../../components/ui/textarea";
 
 interface User {
   id: string;
@@ -20,6 +25,7 @@ interface User {
   type: string;
   status: string;
   joinedDate: string;
+  createdAt?: string | null;
   profileCompleteness: number;
 }
 
@@ -39,30 +45,132 @@ export function AdminUsers() {
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
 
-  // Fetch users from API on component mount
-  useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await fetch("/api/admin/users");
-        
-        if (!response.ok) {
-          throw new Error(`Failed to fetch users: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        setUsers(Array.isArray(data) ? data : (data.data || []));
-      } catch (err) {
-        console.error("Error fetching users:", err);
-        setError(err instanceof Error ? err.message : "Failed to load users");
-      } finally {
-        setLoading(false);
-      }
-    };
+  // Edit modal state
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", email: "", role: "" });
+  const [editSaving, setEditSaving] = useState(false);
 
-    fetchUsers();
-  }, []);
+  // Action loading
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [messageUser, setMessageUser] = useState<User | null>(null);
+  const [messageBody, setMessageBody] = useState("");
+  const [userActivity, setUserActivity] = useState<Array<{ action: string; detail: string; createdAt?: string }>>([]);
+  const [userApplications, setUserApplications] = useState<Array<Record<string, unknown>>>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const exportUsers = () => {
+    const header = ["ID", "Name", "Email", "Role", "Status", "Created At"];
+    const rows = filteredUsers.map((user) => [
+      user.id,
+      user.name,
+      user.email,
+      user.type,
+      user.status,
+      user.createdAt || user.joinedDate,
+    ]);
+    const csv = [header, ...rows].map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `admin-users-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${rows.length} users.`);
+  };
+
+  const sendMessage = () => {
+    if (!messageUser || !messageBody.trim()) return;
+    const params = new URLSearchParams({
+      userId: messageUser.id,
+      email: messageUser.email,
+      message: messageBody.trim(),
+    });
+    window.location.href = `/admin/messages?${params.toString()}`;
+    setMessageUser(null);
+    setMessageBody("");
+  };
+
+  const fetchUsers = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const token = getAuthToken();
+      const response = await fetch(`${API_URL}/api/admin/users`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error(`Failed to fetch users: ${response.statusText}`);
+      const data = await response.json();
+      setUsers(Array.isArray(data) ? data : (data.data || []));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load users");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchUsers(); }, []);
+
+  const openEdit = (user: User) => {
+    setEditForm({ name: user.name, email: user.email, role: user.type.toLowerCase() });
+    setEditingUser(user);
+  };
+
+  useEffect(() => {
+    if (!selectedUser) return;
+    setDetailLoading(true);
+    Promise.all([fetchAdminUserActivity(selectedUser.id), fetchAdminUserApplications(selectedUser.id)])
+      .then(([activity, applications]) => {
+        setUserActivity(activity.data || []);
+        setUserApplications(applications.data || []);
+      })
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load user details."))
+      .finally(() => setDetailLoading(false));
+  }, [selectedUser]);
+
+  const handleEditSave = async () => {
+    if (!editingUser) return;
+    setEditSaving(true);
+    try {
+      const token = getAuthToken();
+      const res = await fetch(`${API_URL}/api/admin/users/${editingUser.id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editForm.name, email: editForm.email, role: editForm.role }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update user");
+      toast.success("User updated successfully.");
+      setEditingUser(null);
+      fetchUsers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update user");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleToggleSuspend = async (user: User) => {
+    const isSuspended = user.status === "Suspended";
+    const action = isSuspended ? "reactivate" : "suspend";
+    if (!confirm(`Are you sure you want to ${action} ${user.name}?`)) return;
+    setActionLoading(user.id);
+    try {
+      const token = getAuthToken();
+      const res = await fetch(`${API_URL}/api/admin/users/${user.id}/suspend`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ suspended: !isSuspended }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Failed to ${action} user`);
+      toast.success(data.message || `User ${action}d successfully.`);
+      fetchUsers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Failed to ${action} user`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const filteredUsers = users.filter((user) => {
     const matchesSearch = user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -127,7 +235,7 @@ export function AdminUsers() {
                   <SelectItem value="suspended">Suspended</SelectItem>
                 </SelectContent>
               </Select>
-              <Button disabled={loading}>
+              <Button disabled={loading || filteredUsers.length === 0} onClick={exportUsers}>
                 <Download className="size-4 mr-2" />
                 Export
               </Button>
@@ -196,7 +304,7 @@ export function AdminUsers() {
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm">
+                          <Button variant="ghost" size="sm" disabled={actionLoading === user.id}>
                             <MoreVertical className="size-4" />
                           </Button>
                         </DropdownMenuTrigger>
@@ -205,14 +313,21 @@ export function AdminUsers() {
                             <Eye className="size-4 mr-2" />
                             View Details
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openEdit(user)}>
                             <Edit className="size-4 mr-2" />
                             Edit User
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive">
-                            <UserX className="size-4 mr-2" />
-                            Suspend User
-                          </DropdownMenuItem>
+                          {user.status === "Suspended" ? (
+                            <DropdownMenuItem onClick={() => handleToggleSuspend(user)}>
+                              <UserCheck className="size-4 mr-2" />
+                              Reactivate User
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem className="text-destructive" onClick={() => handleToggleSuspend(user)}>
+                              <UserX className="size-4 mr-2" />
+                              Suspend User
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -287,9 +402,7 @@ export function AdminUsers() {
                 <TabsContent value="activity">
                   <Card>
                     <CardContent className="pt-6">
-                      <p className="text-center text-muted-foreground py-8">
-                        No recent activity
-                      </p>
+                      {detailLoading ? <div className="flex justify-center py-8"><Loader2 className="size-5 animate-spin" /></div> : userActivity.length ? <div className="space-y-3">{userActivity.map((item, index) => <div key={`${item.createdAt}-${index}`} className="border-b border-border pb-3 last:border-0"><p className="font-medium">{item.action}</p><p className="text-sm text-muted-foreground">{item.detail}</p><p className="text-xs text-muted-foreground">{item.createdAt ? new Date(item.createdAt).toLocaleString() : "Unknown date"}</p></div>)}</div> : <p className="text-center text-muted-foreground py-8">No recent activity</p>}
                     </CardContent>
                   </Card>
                 </TabsContent>
@@ -297,21 +410,88 @@ export function AdminUsers() {
                 <TabsContent value="applications">
                   <Card>
                     <CardContent className="pt-6">
-                      <p className="text-center text-muted-foreground py-8">
-                        No applications found
-                      </p>
+                      {detailLoading ? <div className="flex justify-center py-8"><Loader2 className="size-5 animate-spin" /></div> : userApplications.length ? <div className="space-y-3">{userApplications.map((item, index) => <div key={String(item._id || index)} className="border-b border-border pb-3 last:border-0"><p className="font-medium">{String(item.scholarshipName || item.scholarshipTitle || item.scholarshipId || "Scholarship application")}</p><p className="text-sm text-muted-foreground">Status: {String(item.status || "Unknown")}</p><p className="text-xs text-muted-foreground">{item.updatedAt || item.createdAt ? new Date(String(item.updatedAt || item.createdAt)).toLocaleString() : "Unknown date"}</p></div>)}</div> : <p className="text-center text-muted-foreground py-8">No applications found</p>}
                     </CardContent>
                   </Card>
                 </TabsContent>
               </Tabs>
 
               <div className="flex flex-wrap gap-3 pt-4">
-                <Button className="flex-1">Edit User</Button>
-                <Button variant="outline" className="flex-1">Send Message</Button>
-                <Button variant="destructive">Suspend</Button>
+                <Button className="flex-1" onClick={() => { setSelectedUser(null); openEdit(selectedUser!); }}>
+                  <Edit className="size-4 mr-2" />Edit User
+                </Button>
+                <Button variant="outline" className="flex-1" onClick={() => setMessageUser(selectedUser)}>
+                  <Send className="size-4 mr-2" />Send Message
+                </Button>
+                <Button
+                  variant={selectedUser.status === "Suspended" ? "default" : "destructive"}
+                  onClick={() => { setSelectedUser(null); handleToggleSuspend(selectedUser!); }}
+                >
+                  {selectedUser.status === "Suspended" ? (
+                    <><UserCheck className="size-4 mr-1" />Reactivate</>
+                  ) : (
+                    <><UserX className="size-4 mr-1" />Suspend</>
+                  )}
+                </Button>
               </div>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!messageUser} onOpenChange={(open) => { if (!open) setMessageUser(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Message {messageUser?.name}</DialogTitle>
+            <DialogDescription>Compose a message addressed to {messageUser?.email}.</DialogDescription>
+          </DialogHeader>
+          <Textarea value={messageBody} onChange={(event) => setMessageBody(event.target.value)} placeholder="Write your message..." rows={6} />
+          <Button onClick={sendMessage} disabled={!messageBody.trim()}><Send className="size-4 mr-2" />Open Email</Button>
+        </DialogContent>
+      </Dialog>
+      {/* Edit User Dialog */}
+      <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit User</DialogTitle>
+            <DialogDescription>Update this user's name, email, or role.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Full Name</Label>
+              <Input
+                id="edit-name"
+                value={editForm.name}
+                onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-email">Email Address</Label>
+              <Input
+                id="edit-email"
+                type="email"
+                value={editForm.email}
+                onChange={(e) => setEditForm((p) => ({ ...p, email: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-role">Role</Label>
+              <Select value={editForm.role} onValueChange={(v) => setEditForm((p) => ({ ...p, role: v }))}>
+                <SelectTrigger id="edit-role"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="student">Student</SelectItem>
+                  <SelectItem value="provider">Provider</SelectItem>
+                  <SelectItem value="mentor">Mentor</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <Button className="flex-1" disabled={editSaving} onClick={handleEditSave}>
+                {editSaving ? <><Loader2 className="size-4 mr-2 animate-spin" />Saving…</> : "Save Changes"}
+              </Button>
+              <Button variant="outline" onClick={() => setEditingUser(null)}>Cancel</Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

@@ -1,23 +1,41 @@
-// utils/profileCompleteness.ts
-export const calculateCompleteness = (user: any) => {
-  const fields = [
-    { key: 'name', fallback: 'userName', weight: 10 },
-    { key: 'email', weight: 10 },
-    { key: 'phone', weight: 10 },
-    { key: 'location', fallback: 'address', weight: 10 },
-    { key: 'about', weight: 10 },
-    { key: 'profileImage', fallback: 'avatar', weight: 10 },
-    { key: 'skills', weight: 10 },
-    { key: 'gpa', fallback: 'gwa', weight: 10 },
-    { key: 'fieldOfStudy', fallback: 'course', weight: 10 },
-    { key: 'incomeCategory', fallback: 'netWorth', weight: 10 },
-  ]
-  return fields.reduce((total, field) => {
-    const value = user[field.key] ?? user[field.fallback]
-    const filled = value !== null &&
-      value !== undefined &&
-      value !== '' &&
-      !(Array.isArray(value) && value.length === 0)
-    return total + (filled ? field.weight : 0)
-  }, 0)
+import type { UserProfile } from "./user-storage";
+
+function hasText(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function hasTruthyValue(value: unknown): boolean {
+  return Boolean(value) || value === 0;
+}
+
+function hasNonEmptyArray(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0;
+}
+
+export function calculateCompleteness(user?: UserProfile | null): number {
+  if (!user) return 0;
+
+  const checks = [
+    hasText(user.fullName),
+    hasText(user.email),
+    hasText(user.phone),
+    hasText(user.location),
+    hasText(user.dateOfBirth),
+    hasText(user.gwa || user.gpa),
+    hasText(user.educationLevel),
+    hasText(user.yearLevel),
+    hasText(user.schoolName),
+    hasText(user.schoolType),
+    hasText(user.schoolLocation),
+    hasText(user.fieldOfStudy),
+    hasText(user.graduationYear),
+    hasTruthyValue(user.profileImage || user.profilePicture),
+    hasTruthyValue(user.currency),
+    hasTruthyValue(user.incomeCategory),
+    hasTruthyValue(user.financialNeed?.[0]),
+    hasNonEmptyArray(user.profileDocuments ? Object.values(user.profileDocuments).filter(Boolean) : []),
+  ];
+
+  const completed = checks.filter(Boolean).length;
+  return Math.round((completed / checks.length) * 100);
 }

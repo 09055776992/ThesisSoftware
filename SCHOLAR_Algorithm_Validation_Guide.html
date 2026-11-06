@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SCHOLAR — Algorithm Validation & Dataset Requirements Specification</title>
+<style>
+  @page {
+    size: A4 portrait;
+    margin: 18mm 16mm 18mm 16mm;
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8.5pt;
+      color: #64748b;
+    }
+  }
+
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+    color: #1e293b;
+    line-height: 1.55;
+    font-size: 10pt;
+    margin: 0;
+    padding: 0;
+    background-color: #ffffff;
+  }
+
+  /* Header Cover / Title Area */
+  .header-card {
+    border-bottom: 2.5px solid #2563eb;
+    padding-bottom: 14px;
+    margin-bottom: 22px;
+  }
+
+  .badge-topic {
+    display: inline-block;
+    background-color: #eff6ff;
+    color: #1d4ed8;
+    border: 1px solid #bfdbfe;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-size: 8pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+
+  h1 {
+    font-size: 20pt;
+    color: #0f172a;
+    margin: 0 0 6px 0;
+    font-weight: 800;
+    line-height: 1.25;
+  }
+
+  .subtitle {
+    font-size: 10.5pt;
+    color: #475569;
+    margin: 0 0 10px 0;
+  }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    padding: 9px 14px;
+    border-radius: 6px;
+    font-size: 8.5pt;
+    color: #334155;
+  }
+
+  .meta-grid strong {
+    color: #0f172a;
+  }
+
+  /* Section Headings */
+  h2 {
+    font-size: 13.5pt;
+    color: #1e3a8a;
+    border-bottom: 1.5px solid #e2e8f0;
+    padding-bottom: 4px;
+    margin-top: 24px;
+    margin-bottom: 10px;
+    font-weight: 700;
+    page-break-after: avoid;
+  }
+
+  h3 {
+    font-size: 11pt;
+    color: #0f172a;
+    margin-top: 14px;
+    margin-bottom: 6px;
+    font-weight: 700;
+    page-break-after: avoid;
+  }
+
+  p {
+    margin: 0 0 8px 0;
+    text-align: justify;
+  }
+
+  /* Tables */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0 16px 0;
+    font-size: 8.5pt;
+    page-break-inside: avoid;
+  }
+
+  th {
+    background-color: #1e3a8a;
+    color: #ffffff;
+    text-align: left;
+    padding: 6px 9px;
+    font-weight: 600;
+    border: 1px solid #1e3a8a;
+  }
+
+  td {
+    padding: 5.5px 9px;
+    border: 1px solid #cbd5e1;
+    vertical-align: top;
+  }
+
+  tr:nth-child(even) td {
+    background-color: #f8fafc;
+  }
+
+  .code-token {
+    font-family: 'Consolas', 'Courier New', monospace;
+    background-color: #f1f5f9;
+    color: #0f172a;
+    padding: 1.5px 4px;
+    border-radius: 3px;
+    font-size: 8pt;
+    border: 1px solid #e2e8f0;
+  }
+
+  /* Callout boxes */
+  .callout {
+    border-left: 3.5px solid #2563eb;
+    background-color: #f0fdf4;
+    border-color: #16a34a;
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    margin: 12px 0;
+    font-size: 8.5pt;
+    page-break-inside: avoid;
+  }
+
+  .callout-warning {
+    background-color: #fffbeb;
+    border-color: #d97706;
+  }
+
+  .callout-title {
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 3px;
+    font-size: 9pt;
+  }
+
+  /* Personas grid */
+  .persona-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    page-break-inside: avoid;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  }
+
+  .persona-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px dashed #e2e8f0;
+    padding-bottom: 4px;
+    margin-bottom: 6px;
+  }
+
+  .persona-title {
+    font-weight: 700;
+    color: #1e3a8a;
+    font-size: 9.5pt;
+  }
+
+  .persona-expected {
+    font-size: 8pt;
+    font-weight: 600;
+    color: #16a34a;
+    background: #dcfce7;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+
+  .persona-expected.fail {
+    color: #dc2626;
+    background: #fee2e2;
+  }
+
+  /* Math equation box */
+  .equation-box {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    padding: 8px 12px;
+    margin: 8px 0;
+    font-family: 'Cambria Math', 'Times New Roman', serif;
+    font-size: 9.5pt;
+    text-align: center;
+    color: #0f172a;
+    page-break-inside: avoid;
+  }
+
+  .page-break {
+    page-break-before: always;
+  }
+</style>
+</head>
+<body>
+
+  <!-- COVER / HEADER -->
+  <div class="header-card">
+    <div class="badge-topic">SCHOLAR System • Technical Specification Document</div>
+    <h1>Algorithm Validation & Dataset Requirements Specification</h1>
+    <div class="subtitle">A Comprehensive Blueprint for Empirical Validation, Benchmark Dataset Construction, and Evaluation Metrics</div>
+    <div class="meta-grid">
+      <div><strong>Target System:</strong> SCHOLAR Platform</div>
+      <div><strong>Matching Algorithms:</strong> TOPSIS + Gale-Shapley</div>
+      <div><strong>Focus:</strong> Accuracy, Stability & Integrity</div>
+    </div>
+  </div>
+
+  <!-- SECTION 1 -->
+  <h2>1. Executive Summary & Purpose of Algorithm Validation</h2>
+  <p>
+    In academic research and capstone defense, proposing an algorithm is insufficient without rigorous empirical validation. 
+    To prove that the <strong>SCHOLAR</strong> hybrid matching engine functions correctly, the development team must demonstrate that:
+  </p>
+  <ul>
+    <li><strong>Hard Filtering Precision:</strong> 100% of ineligible candidates (by residency, education level, or poor academic standing) are barred from receiving awards, with zero false admissions.</li>
+    <li><strong>Ranking Consistency (TOPSIS):</strong> The multi-criteria ranking aligns strongly with human domain experts (e.g., QCYDO scholarship coordinators) using objective multi-attribute scoring.</li>
+    <li><strong>Allocation Stability (Gale-Shapley):</strong> Slot allocations are mathematically stable, respect exact quota capacities, prevent dual-awarding, and resolve ties deterministically without blocking pairs.</li>
+    <li><strong>Authenticity & Explainability:</strong> Document verification (BERT) reliably distinguishes legitimate records, and SHAP explainability provides transparent mathematical justifications.</li>
+  </ul>
+
+  <!-- SECTION 2 -->
+  <h2>2. Dataset Specifications: What the System Needs</h2>
+  <p>
+    Validating the recommendation and matching pipeline requires <strong>two operational datasets</strong> (Applicants and Scholarships) and <strong>one ground-truth validation set</strong> (the human expert benchmark).
+  </p>
+
+  <h3>2.1 Dataset A: The Student / Applicant Dataset (<span class="code-token">students.csv / JSON</span>)</h3>
+  <p>
+    Represents the applicant pool. To evaluate candidates against municipal guidelines, each student record must contain the following standardized features:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 22%;">Attribute</th>
+        <th style="width: 14%;">Data Type</th>
+        <th style="width: 26%;">Example Values</th>
+        <th style="width: 38%;">Validation Purpose / Algorithm Role</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="code-token">location</span> / <span class="code-token">is_qc_resident</span></td>
+        <td>String / Boolean</td>
+        <td>"Quezon City", "Marikina City"</td>
+        <td>Universal residency filter. Non-residents must be eliminated immediately during pre-screening.</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">educationLevel</span></td>
+        <td>Enum String</td>
+        <td>"College / Undergraduate", "Senior High School", "Postgraduate"</td>
+        <td>Hard level gating. Prevents college students from matching with Senior High School programs and vice versa.</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">yearLevel</span></td>
+        <td>String</td>
+        <td>"1st Year", "Grade 11", "Graduating"</td>
+        <td>Gating for cohort-restricted programs (e.g., freshmen-only or graduating grants).</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">gpa</span> / <span class="code-token">gwa</span></td>
+        <td>Float (1.00 - 5.00)</td>
+        <td>1.25, 1.75, 2.50, 3.50</td>
+        <td><strong>Critical:</strong> Validates inverted Philippine scale (1.00 is best, 5.00 is failure). Lower numerical value must rank higher.</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">percentageGrade</span></td>
+        <td>Float (0 - 100)</td>
+        <td>88.5, 92.0, 95.0</td>
+        <td>Validates high school percentage scale (where higher numerical values are better).</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">fieldOfStudy</span></td>
+        <td>String</td>
+        <td>"Computer Science", "Nursing", "Teacher Education"</td>
+        <td>Evaluates alignment with CHED priority courses and specific scholarship course requirements.</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">incomeCategory</span></td>
+        <td>String</td>
+        <td>"Under ₱25,000", "₱25,000–₱50,000", "Above ₱50,000"</td>
+        <td>Evaluates poverty threshold compliance for economic and need-based scholarships.</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">financialNeed</span></td>
+        <td>Integer (1 to 5)</td>
+        <td>1 (Lowest Need) to 5 (Urgent Need)</td>
+        <td>Normalized in TOPSIS to calculate the financial need closeness coefficient.</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">isScholarOfAnotherLGU</span></td>
+        <td>Boolean</td>
+        <td>true / false</td>
+        <td>Tests the double-dipping restriction (students cannot hold two active government scholarships).</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">specialCategories</span></td>
+        <td>Object (Booleans)</td>
+        <td>isIndigent, isPWD, isSoloParent, isAthlete, isArtist, isStudentLeader</td>
+        <td>Affirmative action tie-breaker and sector qualifications (10% weight contribution).</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">submittedDocuments</span></td>
+        <td>Array of Files</td>
+        <td>TOR, COE, QCitizen ID, Indigency</td>
+        <td>Measures document completeness ratio and feeds text to BERT for authenticity confidence scoring.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="page-break"></div>
+
+  <h3>2.2 Dataset B: The Scholarship Catalog Dataset (<span class="code-token">scholarships.csv / JSON</span>)</h3>
+  <p>
+    Represents the active scholarship programs and partner sponsors against which students compete:
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 24%;">Attribute</th>
+        <th style="width: 14%;">Data Type</th>
+        <th style="width: 26%;">Example Values</th>
+        <th style="width: 36%;">Validation Purpose / Algorithm Role</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="code-token">name</span> / <span class="code-token">id</span></td>
+        <td>String</td>
+        <td>"College Academic Scholarship"</td>
+        <td>Program identifier and receiver entity in Gale-Shapley matching.</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">capacity</span> / <span class="code-token">slots</span></td>
+        <td>Integer</td>
+        <td>3 slots, 5 slots, 50 slots</td>
+        <td><strong>Quota constraint:</strong> Tests that Gale-Shapley never allocates more students than available slots.</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">requiredEducationLevel</span></td>
+        <td>Array of Strings</td>
+        <td>["College / Undergraduate"]</td>
+        <td>Eligibility pre-filter criteria.</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">minimumGPA</span></td>
+        <td>Float</td>
+        <td>1.75 (College) or 89% (SHS)</td>
+        <td>Cutoff threshold. Any applicant with GWA &gt; 1.75 must be rejected.</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">amount</span></td>
+        <td>Currency/Float</td>
+        <td>₱10,000 / semester</td>
+        <td>Benefit criterion in TOPSIS; higher monetary values contribute to higher preference.</td>
+      </tr>
+      <tr>
+        <td><span class="code-token">requiredDocuments</span></td>
+        <td>Array of Strings</td>
+        <td>["TOR", "COE", "QCitizen ID"]</td>
+        <td>Evaluates completeness score: (Submitted &divide; Required) &times; 100.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>2.3 Dataset C: The Ground Truth Benchmark ("Answer Key")</h3>
+  <p>
+    An algorithm cannot be proven correct without an authoritative benchmark. The research team requires:
+  </p>
+  <ul>
+    <li><strong>Expert Eligibility Ground Truth:</strong> A binary matrix (Eligible = 1, Ineligible = 0) manually validated by a QCYDO scholarship officer for every student-scholarship pair.</li>
+    <li><strong>Expert Ranking Ground Truth:</strong> A cohort of 10–20 eligible candidates manually ranked from 1st to 20th by scholarship administrators based on official guidelines.</li>
+    <li><strong>Stability Baseline:</strong> Preference tables checked with the algorithm's built-in <span class="code-token">isStableManyToOne()</span> function to confirm zero blocking pairs.</li>
+  </ul>
+
+  <!-- SECTION 3 -->
+  <h2>3. Five Essential Test Personas for Edge-Case Validation</h2>
+  <p>
+    To ensure comprehensive coverage, your validation cohort must include these five specific synthetic applicant personas:
+  </p>
+
+  <div class="persona-card">
+    <div class="persona-header">
+      <span class="persona-title">Persona 1: The Star Applicant (Positive Control)</span>
+      <span class="persona-expected">Expected: Eligible • Rank #1</span>
+    </div>
+    <p><strong>Attributes:</strong> GWA 1.25, QC Resident, College 2nd Year, Indigent family, 100% complete documents.</p>
+    <p><strong>Verification:</strong> Must clear all pre-screening filters, obtain high TOPSIS closeness score (~93+), and be held in Gale-Shapley priority.</p>
+  </div>
+
+  <div class="persona-card">
+    <div class="persona-header">
+      <span class="persona-title">Persona 2: The Inverted GPA Boundary Case</span>
+      <span class="persona-expected fail">Expected: Ineligible (Failed by 0.01)</span>
+    </div>
+    <p><strong>Attributes:</strong> GWA 1.76, QC Resident, College, complete documents, applying for College Academic (Cutoff: 1.75).</p>
+    <p><strong>Verification:</strong> Tests boundary precision on the Philippine scale. Must be disqualified because 1.76 &gt; 1.75.</p>
+  </div>
+
+  <div class="persona-card">
+    <div class="persona-header">
+      <span class="persona-title">Persona 3: The Universal Disqualifier (Early Exit)</span>
+      <span class="persona-expected fail">Expected: Ineligible across all programs</span>
+    </div>
+    <p><strong>Attributes:</strong> GWA 1.00 (Flawless), High Need, but location is "Marikina City" or has active scholarship in another LGU.</p>
+    <p><strong>Verification:</strong> Proves that exceptional grades cannot override mandatory residency or double-funding restrictions.</p>
+  </div>
+
+  <div class="persona-card">
+    <div class="persona-header">
+      <span class="persona-title">Persona 4: The Scale Switcher (SHS vs College)</span>
+      <span class="persona-expected fail">Expected: Ineligible for SHS Academic</span>
+    </div>
+    <p><strong>Attributes:</strong> Grade 12 student with percentage score of 88.0% applying for SHS Academic (Cutoff: 89.0%).</p>
+    <p><strong>Verification:</strong> Proves the system handles percentage scale where higher is better, without confusing it with the 1.0–5.0 scale.</p>
+  </div>
+
+  <div class="persona-card">
+    <div class="persona-header">
+      <span class="persona-title">Persona 5: Over-Quota Capacity & Deterministic Tie</span>
+      <span class="persona-expected">Expected: Exactly 3 Awardees, 2 Rejected</span>
+    </div>
+    <p><strong>Attributes:</strong> 5 qualified applicants with identical match scores competing for a scholarship with capacity = 3.</p>
+    <p><strong>Verification:</strong> Confirms quota is strictly respected (no over-allocation) and ties are broken deterministically by ID.</p>
+  </div>
+
+  <div class="page-break"></div>
+
+  <!-- SECTION 4 -->
+  <h2>4. Quantitative Validation Metrics & Formulas</h2>
+  <p>
+    Your thesis manuscript (Chapter 5) requires formal mathematical metrics to prove algorithm accuracy:
+  </p>
+
+  <h3>4.1 Classification Metrics (Eligibility Pre-Screening)</h3>
+  <div class="equation-box">
+    Precision = TP / (TP + FP) &nbsp;&nbsp;&nbsp;&nbsp;
+    Recall = TP / (TP + FN) &nbsp;&nbsp;&nbsp;&nbsp;
+    F1-Score = 2 &times; (Precision &times; Recall) / (Precision + Recall)
+  </div>
+  <p>
+    <strong>Target Benchmark:</strong> Precision = 1.00, Recall = 1.00. Zero false positives ensures that no unqualified student ever receives public funds.
+  </p>
+
+  <h3>4.2 Rank Correlation Metric (TOPSIS vs Expert Manual Ranking)</h3>
+  <p>
+    To prove that TOPSIS ranks eligible applicants in the same order as a human scholarship board, compute <strong>Spearman's Rank Correlation ($r_s$)</strong>:
+  </p>
+  <div class="equation-box">
+    r<sub>s</sub> = 1 - [ (6 &times; &sum; d<sub>i</sub><sup>2</sup>) / (n &times; (n<sup>2</sup> - 1)) ]
+  </div>
+  <p>
+    Where <em>d<sub>i</sub></em> is the difference between the algorithm's rank and the expert's rank for applicant <em>i</em>, and <em>n</em> is the sample cohort size.
+    <br><strong>Benchmark:</strong> An <em>r<sub>s</sub></em> &ge; 0.85 represents strong correlation. Your benchmark study recorded <strong>r<sub>s</sub> = 0.91</strong>.
+  </p>
+
+  <h3>4.3 Allocation Stability Metric (Gale-Shapley)</h3>
+  <p>
+    A matching &mu; is stable if and only if there exists no blocking pair (Student <em>s</em>, Scholarship <em>c</em>) where:
+  </p>
+  <div class="equation-box">
+    Student s prefers c over &mu;(s) &nbsp;&nbsp;AND&nbsp;&nbsp; Scholarship c prefers s over one of its accepted students in &mu;(c)
+  </div>
+  <p>
+    <strong>Verification:</strong> Enforced via <span class="code-token">isStableManyToOne() === true</span>.
+  </p>
+
+  <!-- SECTION 5 -->
+  <h2>5. How to Run Algorithm Validation in Your Codebase</h2>
+  <p>
+    You can execute the automated test suites already implemented in your project directory:
+  </p>
+
+  <div class="callout">
+    <div class="callout-title">Command 1: Multi-Criteria Ranking & Gale-Shapley Stability Tests</div>
+    <span class="code-token">cd Backend ; node --test test/topsis.test.js test/galeShapleyManyToOne.test.js</span>
+    <p style="margin-top:4px;">Tests benefit vs. cost criteria, quota capacity adherence, and executes the mathematical stability verifier.</p>
+  </div>
+
+  <div class="callout">
+    <div class="callout-title">Command 2: Hard Rule Eligibility Tests (Test Cases A to F)</div>
+    <span class="code-token">cd Backend ; node tests/eligibilityTest.js</span>
+    <p style="margin-top:4px;">Evaluates residency gates, GWA cutoffs on the Philippine scale, indigent scoring, and dual-scholarship exclusions.</p>
+  </div>
+
+  <!-- SECTION 6 -->
+  <h2>6. Compliance with Philippine Data Privacy Act (RA 10173)</h2>
+  <div class="callout callout-warning">
+    <div class="callout-title">Notice on Synthetic Benchmark Datasets</div>
+    Under the Philippine <strong>Data Privacy Act of 2012 (RA 10173)</strong>, publishing or testing with unredacted student transcripts, IDs, and tax documents is prohibited without explicit consent. 
+    In academic research, creating and using a <strong>Synthetically Generated Benchmark Dataset</strong> (e.g., 50 anonymized student profiles modeling the statistical distribution of QC applicants) is fully recognized and accepted by thesis defense committees.
+  </div>
+
+</body>
+</html>

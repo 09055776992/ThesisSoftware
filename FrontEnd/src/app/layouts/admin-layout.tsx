@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
-import { LayoutDashboard, Users, Award, FileText, MessageSquare, BarChart3, Settings, Loader2, ShieldCheck, Menu } from "lucide-react";
+import { LayoutDashboard, Users, Award, FileText, MessageSquare, BarChart3, Settings, Loader2, ShieldCheck, Menu, Flag, UserRound } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { Sheet, SheetContent } from "../components/ui/sheet";
 import { Button } from "../components/ui/button";
 import { Redirect } from "../pages/redirect";
-import { getStoredUser, getDisplayName, getInitials, clearStoredUser } from "../lib/user-storage";
+import { getStoredUser, getDisplayName, getInitials, clearStoredUser, getAuthToken } from "../lib/user-storage";
 import { API_URL } from "../lib/api-client";
 
 interface QuickStats {
@@ -24,16 +24,34 @@ export function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const user = getStoredUser();
 
-  if (user?.userType !== "admin") {
-    return <Redirect to="/" />;
+  // ── Route guard: re-check role on every navigation AND on popstate
+  useEffect(() => {
+    const check = () => {
+      const current = getStoredUser();
+      const token = getAuthToken();
+      if (!current || !token || (current.userType !== "admin" && current.role !== "admin")) {
+        clearStoredUser();
+        navigate("/", { replace: true });
+      }
+    };
+    check();
+    window.addEventListener("popstate", check);
+    return () => window.removeEventListener("popstate", check);
+  }, [location.pathname, navigate]);
+
+  // Render nothing while the guard effect is evaluating an invalid session
+  if (!user || (user.userType !== "admin" && user.role !== "admin")) {
+    return null;
   }
 
   const navItems = [
     { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/admin/profile", label: "My Profile", icon: UserRound },
     { href: "/admin/users", label: "Manage Users", icon: Users },
     { href: "/admin/providers", label: "Provider Accounts", icon: ShieldCheck },
     { href: "/admin/scholarships", label: "Scholarships", icon: Award },
     { href: "/admin/applications", label: "Applications", icon: FileText },
+    { href: "/admin/student-posts", label: "Scholar Posts", icon: Flag },
     { href: "/admin/messages", label: "Messages", icon: MessageSquare },
     { href: "/admin/reports", label: "Reports", icon: BarChart3 },
     { href: "/admin/settings", label: "Settings", icon: Settings },
@@ -43,7 +61,9 @@ export function AdminLayout() {
     const fetchQuickStats = async () => {
       try {
         const API_BASE = API_URL;
-        const response = await fetch(`${API_BASE}/api/admin/analytics`);
+        const response = await fetch(`${API_BASE}/api/admin/analytics`, {
+          headers: { Authorization: "Bearer " + getAuthToken() },
+        });
         if (response.ok) {
           const data = await response.json();
           setQuickStats(data.quickStats);
@@ -59,9 +79,9 @@ export function AdminLayout() {
   }, []);
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen bg-background text-foreground">
       {/* Admin Sidebar */}
-      <aside className="hidden lg:flex flex-col w-[280px] bg-white border-r border-gray-200 sticky top-0 h-screen overflow-y-auto shrink-0">
+      <aside className="hidden lg:flex flex-col w-[280px] bg-sidebar text-sidebar-foreground border-r border-sidebar-border sticky top-0 h-screen overflow-y-auto shrink-0">
         <div className="p-4">
           {/* Admin Header */}
           <div className="mb-6 pt-2">
@@ -73,7 +93,7 @@ export function AdminLayout() {
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold text-gray-900 text-base truncate">{getDisplayName(user)}</p>
+                <p className="font-semibold text-sidebar-foreground text-base truncate">{getDisplayName(user)}</p>
                 <Badge className="bg-orange-600 hover:bg-orange-600 text-white text-xs px-2 py-0.5 mt-1">
                   Administrator
                 </Badge>
@@ -95,7 +115,7 @@ export function AdminLayout() {
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
                     isActive
                       ? "bg-[#1E3A5F] text-white shadow-sm"
-                      : "text-gray-700 hover:bg-gray-100"
+                      : "text-sidebar-foreground hover:bg-sidebar-accent"
                   }`}
                 >
                   <Icon className="size-5 flex-shrink-0" />
@@ -111,8 +131,8 @@ export function AdminLayout() {
           </nav>
 
           {/* Quick Stats Section */}
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 px-3">
+          <div className="mt-8 pt-6 border-t border-sidebar-border">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 px-3">
               Quick Stats
             </h3>
             <div className="space-y-2.5">
@@ -123,19 +143,19 @@ export function AdminLayout() {
               ) : (
                 <>
                   <div className="flex items-center justify-between px-3 py-1.5">
-                    <span className="text-sm text-gray-600">Total Scholars</span>
+                    <span className="text-sm text-muted-foreground">Total Scholars</span>
                     <Badge className="bg-[#1E3A5F] hover:bg-[#1E3A5F] text-white px-2.5 py-0.5 text-xs font-semibold">
                       {quickStats?.totalScholars?.toLocaleString() ?? "—"}
                     </Badge>
                   </div>
                   <div className="flex items-center justify-between px-3 py-1.5">
-                    <span className="text-sm text-gray-600">Pending Applications</span>
+                    <span className="text-sm text-muted-foreground">Pending Applications</span>
                     <Badge className="bg-amber-600 hover:bg-amber-600 text-white px-2.5 py-0.5 text-xs font-semibold">
                       {quickStats?.pendingApplications?.toLocaleString() ?? "—"}
                     </Badge>
                   </div>
                   <div className="flex items-center justify-between px-3 py-1.5">
-                    <span className="text-sm text-gray-600">Active Scholarships</span>
+                    <span className="text-sm text-muted-foreground">Active Scholarships</span>
                     <Badge className="bg-green-600 hover:bg-green-600 text-white px-2.5 py-0.5 text-xs font-semibold">
                       {quickStats?.activeScholarships?.toLocaleString() ?? "—"}
                     </Badge>
@@ -146,10 +166,10 @@ export function AdminLayout() {
           </div>
 
           {/* Back to Scholar Panel Link */}
-          <div className="mt-8 pt-6 border-t border-gray-200">
+          <div className="mt-8 pt-6 border-t border-sidebar-border">
             <Link
               to="/dashboard"
-              className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 text-sm font-medium"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-muted-foreground hover:bg-sidebar-accent text-sm font-medium"
             >
               ← Back to Scholar Panel
             </Link>
@@ -171,7 +191,7 @@ export function AdminLayout() {
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900 text-base truncate">{getDisplayName(user)}</p>
+                  <p className="font-semibold text-sidebar-foreground text-base truncate">{getDisplayName(user)}</p>
                   <Badge className="bg-orange-600 hover:bg-orange-600 text-white text-xs px-2 py-0.5 mt-1">
                     Administrator
                   </Badge>
@@ -194,7 +214,7 @@ export function AdminLayout() {
                     className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
                       isActive
                         ? "bg-[#1E3A5F] text-white shadow-sm"
-                        : "text-gray-700 hover:bg-gray-100"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent"
                     }`}
                   >
                     <Icon className="size-5 flex-shrink-0" />
@@ -210,8 +230,8 @@ export function AdminLayout() {
             </nav>
 
             {/* Quick Stats Section */}
-            <div className="mt-8 pt-6 border-t border-gray-200">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 px-3">
+            <div className="mt-8 pt-6 border-t border-sidebar-border">
+              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 px-3">
                 Quick Stats
               </h3>
               <div className="space-y-2.5">
@@ -222,19 +242,19 @@ export function AdminLayout() {
                 ) : (
                   <>
                     <div className="flex items-center justify-between px-3 py-1.5">
-                      <span className="text-sm text-gray-600">Total Scholars</span>
+                      <span className="text-sm text-muted-foreground">Total Scholars</span>
                       <Badge className="bg-[#1E3A5F] hover:bg-[#1E3A5F] text-white px-2.5 py-0.5 text-xs font-semibold">
                         {quickStats?.totalScholars?.toLocaleString() ?? "—"}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between px-3 py-1.5">
-                      <span className="text-sm text-gray-600">Pending Applications</span>
+                      <span className="text-sm text-muted-foreground">Pending Applications</span>
                       <Badge className="bg-amber-600 hover:bg-amber-600 text-white px-2.5 py-0.5 text-xs font-semibold">
                         {quickStats?.pendingApplications?.toLocaleString() ?? "—"}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between px-3 py-1.5">
-                      <span className="text-sm text-gray-600">Active Scholarships</span>
+                      <span className="text-sm text-muted-foreground">Active Scholarships</span>
                       <Badge className="bg-green-600 hover:bg-green-600 text-white px-2.5 py-0.5 text-xs font-semibold">
                         {quickStats?.activeScholarships?.toLocaleString() ?? "—"}
                       </Badge>
@@ -245,11 +265,11 @@ export function AdminLayout() {
             </div>
 
             {/* Back to Scholar Panel Link */}
-            <div className="mt-8 pt-6 border-t border-gray-200">
+            <div className="mt-8 pt-6 border-t border-sidebar-border">
               <Link
                 to="/dashboard"
                 onClick={() => setSidebarOpen(false)}
-                className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 text-sm font-medium"
+                className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-muted-foreground hover:bg-sidebar-accent text-sm font-medium"
               >
                 ← Back to Scholar Panel
               </Link>
@@ -259,7 +279,7 @@ export function AdminLayout() {
             <div className="mt-4">
               <button
                 onClick={() => { clearStoredUser(); navigate("/", { replace: true }); }}
-                className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 text-sm font-medium w-full"
+                className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-muted-foreground hover:bg-sidebar-accent text-sm font-medium w-full"
               >
                 Sign Out
               </button>
@@ -271,7 +291,7 @@ export function AdminLayout() {
       {/* Main Content */}
       <main className="flex-1 min-w-0">
         {/* Mobile Top Bar */}
-        <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 lg:hidden">
+        <div className="sticky top-0 z-30 bg-background border-b border-border px-4 py-3 flex items-center gap-3 lg:hidden">
           <Button variant="ghost" size="sm" onClick={() => setSidebarOpen(true)}>
             <Menu className="size-5" />
           </Button>

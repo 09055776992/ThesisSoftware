@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -6,8 +7,96 @@ import { Textarea } from "../../components/ui/textarea";
 import { Switch } from "../../components/ui/switch";
 import { Separator } from "../../components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
+import { toast } from "sonner";
+import { fetchAdminSettings, regenerateAdminApiKey, updateAdminSettings, type AdminSettings as AdminSettingsData } from "../../lib/api-client";
+import { Loader2 } from "lucide-react";
 
 export function AdminSettings() {
+  const [platformName, setPlatformName] = useState("");
+  const [tagline, setTagline] = useState("");
+  const [supportEmail, setSupportEmail] = useState("");
+  const [description, setDescription] = useState("");
+  const [welcomeEmail, setWelcomeEmail] = useState("");
+  const [approvalEmail, setApprovalEmail] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [registrationEnabled, setRegistrationEnabled] = useState(true);
+  const [applicationsEnabled, setApplicationsEnabled] = useState(true);
+  const [socialEnabled, setSocialEnabled] = useState(true);
+  const [emailNotificationsEnabled, setEmailNotificationsEnabled] = useState(true);
+  const [newScholarshipAlertsEnabled, setNewScholarshipAlertsEnabled] = useState(true);
+  const [applicationStatusUpdatesEnabled, setApplicationStatusUpdatesEnabled] = useState(true);
+  const [deadlineRemindersEnabled, setDeadlineRemindersEnabled] = useState(true);
+  const [savingSection, setSavingSection] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchAdminSettings()
+      .then(({ data }) => {
+        setPlatformName(data.platformName);
+        setTagline(data.tagline);
+        setSupportEmail(data.supportEmail);
+        setDescription(data.description);
+        setWelcomeEmail(data.welcomeEmail);
+        setApprovalEmail(data.approvalEmail);
+        setApiKey(data.apiKey);
+        setWebhookUrl(data.webhookUrl);
+        setRegistrationEnabled(data.registrationEnabled);
+        setApplicationsEnabled(data.applicationsEnabled);
+        setSocialEnabled(data.socialEnabled);
+        setEmailNotificationsEnabled(data.emailNotificationsEnabled);
+        setNewScholarshipAlertsEnabled(data.newScholarshipAlertsEnabled);
+        setApplicationStatusUpdatesEnabled(data.applicationStatusUpdatesEnabled);
+        setDeadlineRemindersEnabled(data.deadlineRemindersEnabled);
+      })
+      .catch((error) => toast.error(error instanceof Error ? error.message : "Failed to load settings."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async (section: "general" | "templates" | "api") => {
+    const values: Partial<AdminSettingsData> = section === "general"
+      ? {
+          platformName,
+          tagline,
+          supportEmail,
+          description,
+          registrationEnabled,
+          applicationsEnabled,
+          socialEnabled,
+          emailNotificationsEnabled,
+          newScholarshipAlertsEnabled,
+          applicationStatusUpdatesEnabled,
+          deadlineRemindersEnabled,
+        }
+      : section === "templates"
+        ? { welcomeEmail, approvalEmail }
+        : { apiKey, webhookUrl };
+    try {
+      setSavingSection(section);
+      const result = await updateAdminSettings(section, values);
+      if (result.data?.apiKey) setApiKey(result.data.apiKey);
+      toast.success(`${section === "templates" ? "Email templates" : section === "api" ? "API settings" : "Platform settings"} saved.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save settings.");
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const handleRegenerateApiKey = async () => {
+    if (!window.confirm("Are you sure you want to regenerate the API key? Existing integrations using the current key will stop working.")) return;
+    try {
+      setSavingSection("regenerate");
+      const result = await regenerateAdminApiKey();
+      setApiKey(result.apiKey);
+      toast.success("API key regenerated. Copy the new key before leaving this page.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to regenerate API key.");
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
   return (
     <div className="p-4 md:p-8 space-y-4 md:space-y-6">
       <div>
@@ -32,21 +121,24 @@ export function AdminSettings() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="platform-name">Platform Name</Label>
-                <Input id="platform-name" defaultValue="SCHOLAR" />
+                <Input id="platform-name" value={platformName} onChange={(event) => setPlatformName(event.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="tagline">Tagline</Label>
-                <Input id="tagline" defaultValue="Your Gateway to Educational Opportunities" />
+                <Input id="tagline" value={tagline} onChange={(event) => setTagline(event.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="support-email">Support Email</Label>
-                <Input id="support-email" type="email" defaultValue="support@scholar.qcydo.gov.ph" />
+                <Input id="support-email" type="email" value={supportEmail} onChange={(event) => setSupportEmail(event.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="description">Platform Description</Label>
-                <Textarea id="description" rows={3} defaultValue="SCHOLAR is a scholarship management system by the Quezon City Youth Development Office (QCYDO) that helps Quezon City students find, apply for, and track scholarship opportunities." />
+                <Textarea id="description" rows={3} value={description} onChange={(event) => setDescription(event.target.value)} />
               </div>
-              <Button>Save Changes</Button>
+              <Button onClick={() => save("general")} disabled={loading || savingSection !== null}>
+                {savingSection === "general" && <Loader2 className="size-4 mr-2 animate-spin" />}
+                Save Changes
+              </Button>
             </CardContent>
           </Card>
 
@@ -61,7 +153,7 @@ export function AdminSettings() {
                   <p className="font-semibold">User Registration</p>
                   <p className="text-sm text-muted-foreground">Allow new users to register</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch checked={registrationEnabled} onCheckedChange={setRegistrationEnabled} />
               </div>
               <Separator />
               <div className="flex items-center justify-between">
@@ -69,7 +161,7 @@ export function AdminSettings() {
                   <p className="font-semibold">Scholarship Applications</p>
                   <p className="text-sm text-muted-foreground">Enable scholarship application submissions</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch checked={applicationsEnabled} onCheckedChange={setApplicationsEnabled} />
               </div>
               <Separator />
               <div className="flex items-center justify-between">
@@ -77,7 +169,7 @@ export function AdminSettings() {
                   <p className="font-semibold">Social Features</p>
                   <p className="text-sm text-muted-foreground">Enable posts, comments, and social interactions</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch checked={socialEnabled} onCheckedChange={setSocialEnabled} />
               </div>
               <Separator />
               <div className="flex items-center justify-between">
@@ -85,7 +177,7 @@ export function AdminSettings() {
                   <p className="font-semibold">Email Notifications</p>
                   <p className="text-sm text-muted-foreground">Send automated email notifications</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch checked={emailNotificationsEnabled} onCheckedChange={setEmailNotificationsEnabled} />
               </div>
             </CardContent>
           </Card>
@@ -103,7 +195,7 @@ export function AdminSettings() {
                   <p className="font-semibold">New Scholarship Alert</p>
                   <p className="text-sm text-muted-foreground">Notify users when new scholarships match their profile</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch checked={newScholarshipAlertsEnabled} onCheckedChange={setNewScholarshipAlertsEnabled} />
               </div>
               <Separator />
               <div className="flex items-center justify-between">
@@ -111,7 +203,7 @@ export function AdminSettings() {
                   <p className="font-semibold">Application Status Updates</p>
                   <p className="text-sm text-muted-foreground">Notify users of application status changes</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch checked={applicationStatusUpdatesEnabled} onCheckedChange={setApplicationStatusUpdatesEnabled} />
               </div>
               <Separator />
               <div className="flex items-center justify-between">
@@ -119,8 +211,12 @@ export function AdminSettings() {
                   <p className="font-semibold">Deadline Reminders</p>
                   <p className="text-sm text-muted-foreground">Send reminders for upcoming deadlines</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch checked={deadlineRemindersEnabled} onCheckedChange={setDeadlineRemindersEnabled} />
               </div>
+              <Button onClick={() => save("general")} disabled={loading || savingSection !== null}>
+                {savingSection === "general" && <Loader2 className="size-4 mr-2 animate-spin" />}
+                Save Notification Settings
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -134,13 +230,16 @@ export function AdminSettings() {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="welcome-email">Welcome Email</Label>
-                <Textarea id="welcome-email" rows={4} defaultValue="Welcome to SCHOLAR! We're excited to help you find and apply for scholarship opportunities." />
+                <Textarea id="welcome-email" rows={4} value={welcomeEmail} onChange={(event) => setWelcomeEmail(event.target.value)} />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="approval-email">Application Approval Email</Label>
-                <Textarea id="approval-email" rows={4} defaultValue="Congratulations! Your application has been approved..." />
+                <Textarea id="approval-email" rows={4} value={approvalEmail} onChange={(event) => setApprovalEmail(event.target.value)} />
               </div>
-              <Button>Save Templates</Button>
+              <Button onClick={() => save("templates")} disabled={loading || savingSection !== null}>
+                {savingSection === "templates" && <Loader2 className="size-4 mr-2 animate-spin" />}
+                Save Templates
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -155,15 +254,21 @@ export function AdminSettings() {
               <div className="space-y-2">
                 <Label htmlFor="api-key">Primary API Key</Label>
                 <div className="flex gap-2">
-                  <Input id="api-key" type="password" defaultValue="sk_live_xxxxxxxxxxxxxxxx" readOnly />
-                  <Button variant="outline">Regenerate</Button>
+                  <Input id="api-key" type="password" value={apiKey} readOnly />
+                    <Button variant="outline" onClick={handleRegenerateApiKey} disabled={loading || savingSection !== null}>
+                      {savingSection === "regenerate" && <Loader2 className="size-4 mr-2 animate-spin" />}
+                      Regenerate
+                    </Button>
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="webhook-url">Webhook URL</Label>
-                <Input id="webhook-url" placeholder="https://your-domain.com/webhook" />
+                <Input id="webhook-url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder="https://your-domain.com/webhook" />
               </div>
-              <Button>Save API Settings</Button>
+              <Button onClick={() => save("api")} disabled={loading || savingSection !== null}>
+                {savingSection === "api" && <Loader2 className="size-4 mr-2 animate-spin" />}
+                Save API Settings
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

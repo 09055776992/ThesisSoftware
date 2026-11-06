@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
@@ -20,7 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { getStoredUser, saveStoredUser } from "../lib/user-storage";
+import { applyTheme, getStoredUser, saveStoredUser } from "../lib/user-storage";
+import { changeUserPassword, fetchUserSettings, updateTwoFactorAuthentication, updateUserSettings } from "../lib/api-client";
 
 type VisibilityOption = "public" | "providers-only" | "private";
 
@@ -140,26 +141,75 @@ export function Settings() {
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(true);
+  const [twoFactorOpen, setTwoFactorOpen] = useState(false);
+  const [twoFactorPassword, setTwoFactorPassword] = useState("");
+  const [showTwoFactorPassword, setShowTwoFactorPassword] = useState(false);
 
-  // Preferences state
-  const [language, setLanguage] = useState(user?.preferences?.language ?? "English");
-  const [theme, setTheme] = useState(user?.preferences?.theme ?? "Light");
+  // Preferences state — read from storage on mount so the dropdown
+  // reflects the current active theme even after navigation without reload
+  const [language, setLanguage] = useState(() => getStoredUser()?.preferences?.language ?? "English");
+  const [theme, setTheme] = useState(() => getStoredUser()?.preferences?.theme ?? "Light");
 
-  const saveNotificationSettings = (e: FormEvent<HTMLFormElement>) => {
+  // Re-sync dropdown with whatever is actually applied to <html> on mount
+  useEffect(() => {
+    const stored = getStoredUser();
+    const storedTheme = stored?.preferences?.theme ?? "Light";
+    const storedLang = stored?.preferences?.language ?? "English";
+    setTheme(storedTheme);
+    setLanguage(storedLang);
+
+    fetchUserSettings()
+      .then(({ data }) => {
+        setNotificationSettings(data.notificationSettings);
+        setPrivacySettings(data.privacySettings);
+        setLanguage(data.preferences.language);
+        setTheme(data.preferences.theme);
+        setTwoFactorEnabled(data.twoFactorEnabled);
+        saveStoredUser({
+          notificationSettings: data.notificationSettings,
+          privacySettings: data.privacySettings,
+          preferences: data.preferences,
+        });
+        applyTheme(data.preferences.theme);
+      })
+      .catch((error) => toast.error(error instanceof Error ? error.message : "Failed to load account settings."));
+  }, []);
+
+  const saveNotificationSettings = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    saveStoredUser({ notificationSettings });
-    setNotificationOpen(false);
-    toast.success("Notification settings updated.");
+    try {
+      setSavingSettings(true);
+      const { data } = await updateUserSettings({ notificationSettings });
+      setNotificationSettings(data.notificationSettings);
+      saveStoredUser({ notificationSettings: data.notificationSettings });
+      setNotificationOpen(false);
+      toast.success("Notification settings updated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update notification settings.");
+    } finally {
+      setSavingSettings(false);
+    }
   };
 
-  const savePrivacySettings = (e: FormEvent<HTMLFormElement>) => {
+  const savePrivacySettings = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    saveStoredUser({ privacySettings });
-    setPrivacyOpen(false);
-    toast.success("Privacy settings updated.");
+    try {
+      setSavingSettings(true);
+      const { data } = await updateUserSettings({ privacySettings });
+      setPrivacySettings(data.privacySettings);
+      saveStoredUser({ privacySettings: data.privacySettings });
+      setPrivacyOpen(false);
+      toast.success("Privacy settings updated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update privacy settings.");
+    } finally {
+      setSavingSettings(false);
+    }
   };
 
-  const savePassword = (e: FormEvent<HTMLFormElement>) => {
+  const savePassword = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (passwordForm.newPassword.length < 8) {
       toast.error("New password must be at least 8 characters long.");
@@ -169,99 +219,144 @@ export function Settings() {
       toast.error("New passwords do not match.");
       return;
     }
-    saveStoredUser({ password: passwordForm.newPassword });
-    setPasswordOpen(false);
-    setPasswordForm({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
-    setShowCurrentPassword(false);
-    setShowNewPassword(false);
-    setShowConfirmPassword(false);
-    toast.success("Password updated successfully.");
+    try {
+      setSavingSettings(true);
+      await changeUserPassword(passwordForm.currentPassword, passwordForm.newPassword);
+      setPasswordOpen(false);
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
+      setShowCurrentPassword(false);
+      setShowNewPassword(false);
+      setShowConfirmPassword(false);
+      toast.success("Password updated successfully.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update password.");
+    } finally {
+      setSavingSettings(false);
+    }
   };
 
-  const handlePreferenceSave = (nextLanguage: string, nextTheme: string) => {
-    setLanguage(nextLanguage);
-    setTheme(nextTheme);
-    saveStoredUser({ preferences: { language: nextLanguage, theme: nextTheme } });
-    if (nextTheme === "Dark") {
-      document.documentElement.classList.add("dark");
-    } else if (nextTheme === "Light") {
-      document.documentElement.classList.remove("dark");
-    } else {
-      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      if (prefersDark) document.documentElement.classList.add("dark");
-      else document.documentElement.classList.remove("dark");
+  const handlePreferenceSave = async (nextLanguage: string, nextTheme: string) => {
+    // Always include email so saveStoredUser writes to the correct user-keyed
+    // slot in localStorage, not the legacy fallback key.
+    const currentUser = getStoredUser();
+    try {
+      const { data } = await updateUserSettings({ preferences: { language: nextLanguage, theme: nextTheme } });
+      setLanguage(data.preferences.language);
+      setTheme(data.preferences.theme);
+      saveStoredUser({
+        ...(currentUser?.email ? { email: currentUser.email } : {}),
+        preferences: data.preferences,
+      });
+      applyTheme(data.preferences.theme);
+      toast.success("Preferences updated.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update preferences.");
     }
-    toast.success("Preferences updated.");
   };
 
   const passwordStrength = getPasswordStrength(passwordForm.newPassword);
+
+  const saveTwoFactorSetting = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!twoFactorPassword) {
+      toast.error("Enter your current password to change two-factor authentication.");
+      return;
+    }
+    try {
+      setSavingSettings(true);
+      const { enabled } = await updateTwoFactorAuthentication(twoFactorPassword, !twoFactorEnabled);
+      setTwoFactorEnabled(enabled);
+      setTwoFactorPassword("");
+      setShowTwoFactorPassword(false);
+      setTwoFactorOpen(false);
+      toast.success(enabled ? "Two-factor authentication enabled." : "Two-factor authentication disabled.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update two-factor authentication.");
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const settingsActionButtonClass =
+    "border-border bg-background text-foreground hover:bg-accent hover:text-accent-foreground dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700 dark:hover:text-white";
+
+  const settingsSelectTriggerClass =
+    "dark:bg-slate-800 dark:text-white dark:border-slate-700 dark:hover:bg-slate-700";
 
   return (
     <div className="p-4 md:p-8">
       <div className="max-w-2xl mx-auto space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Settings</h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
             Manage your account security and preferences.
             To update your profile information, visit{" "}
-            <a href="/dashboard/profile" className="text-blue-600 hover:underline">My Profile</a>.
+            <a href="/dashboard/profile" className="text-blue-600 dark:text-blue-400 hover:underline">My Profile</a>.
           </p>
         </div>
 
         {/* Account & Security */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6">
-          <h2 className="text-base font-semibold text-gray-900 mb-1">Account &amp; Security</h2>
-          <p className="text-sm text-gray-500 mb-4">Manage your password, notifications, and privacy.</p>
-          <div className="space-y-0 divide-y divide-gray-100">
+        <div className="rounded-xl border border-gray-200 bg-white p-6 text-card-foreground dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">Account &amp; Security</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">Manage your password, notifications, and privacy.</p>
+          <div className="space-y-0 divide-y divide-gray-100 dark:divide-slate-800">
             <div className="flex flex-wrap items-center justify-between gap-2 py-3">
               <div>
-                <p className="font-medium text-gray-900">Email Notifications</p>
-                <p className="text-sm text-gray-500">Receive scholarship and application updates</p>
+                <p className="font-medium text-gray-900 dark:text-white">Email Notifications</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Receive scholarship and application updates</p>
               </div>
-              <Button type="button" variant="outline" onClick={() => setNotificationOpen(true)}>Configure</Button>
+              <Button type="button" variant="outline" className={settingsActionButtonClass} onClick={() => setNotificationOpen(true)}>Configure</Button>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 py-3">
               <div>
-                <p className="font-medium text-gray-900">Privacy Settings</p>
-                <p className="text-sm text-gray-500">Control who can see your profile details</p>
+                <p className="font-medium text-gray-900 dark:text-white">Privacy Settings</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Control who can see your profile details</p>
               </div>
-              <Button type="button" variant="outline" onClick={() => setPrivacyOpen(true)}>Manage</Button>
+              <Button type="button" variant="outline" className={settingsActionButtonClass} onClick={() => setPrivacyOpen(true)}>Manage</Button>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 py-3">
               <div>
-                <p className="font-medium text-gray-900">Password</p>
-                <p className="text-sm text-gray-500">Update your login password</p>
+                <p className="font-medium text-gray-900 dark:text-white">Password</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Update your login password</p>
               </div>
-              <Button type="button" variant="outline" onClick={() => setPasswordOpen(true)}>Update</Button>
+              <Button type="button" variant="outline" className={settingsActionButtonClass} onClick={() => setPasswordOpen(true)}>Update</Button>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 py-3">
               <div>
-                <p className="font-medium text-gray-900">Two-Factor Authentication</p>
-                <p className="text-sm text-gray-500">Add an extra layer of security to your account</p>
+                <p className="font-medium text-gray-900 dark:text-white">Two-Factor Authentication</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  {twoFactorEnabled ? "Enabled — sign-ins require an email verification code" : "Disabled — enable verification codes for sign-ins"}
+                </p>
               </div>
-              <Button type="button" variant="outline" disabled>Configure</Button>
+              <Button type="button" variant="outline" className={settingsActionButtonClass} onClick={() => setTwoFactorOpen(true)}>
+                {twoFactorEnabled ? "Disable" : "Enable"}
+              </Button>
             </div>
           </div>
         </div>
 
         {/* Preferences */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6">
-          <h2 className="text-base font-semibold text-gray-900 mb-1">Preferences</h2>
-          <p className="text-sm text-gray-500 mb-4">Customize your language and display theme.</p>
+        <div className="rounded-xl border border-gray-200 bg-white p-6 text-card-foreground dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-1">Preferences</h2>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">Customize your language and display theme.</p>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="language">Language</Label>
+              <Label htmlFor="language" className="text-gray-900 dark:text-gray-200">Language</Label>
               <Select value={language} onValueChange={(v) => handlePreferenceSave(v, theme)}>
-                <SelectTrigger id="language"><SelectValue placeholder="Choose a language" /></SelectTrigger>
+                <SelectTrigger id="language" className={settingsSelectTriggerClass}>
+                  <SelectValue placeholder="Choose a language" />
+                </SelectTrigger>
                 <SelectContent>
                   {languageOptions.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="theme">Theme</Label>
+              <Label htmlFor="theme" className="text-gray-900 dark:text-gray-200">Theme</Label>
               <Select value={theme} onValueChange={(v) => handlePreferenceSave(language, v)}>
-                <SelectTrigger id="theme"><SelectValue placeholder="Choose a theme" /></SelectTrigger>
+                <SelectTrigger id="theme" className={settingsSelectTriggerClass}>
+                  <SelectValue placeholder="Choose a theme" />
+                </SelectTrigger>
                 <SelectContent>
                   {themeOptions.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                 </SelectContent>
@@ -287,16 +382,16 @@ export function Settings() {
                 { key: "newAnnouncements", label: "New scholarship announcements" },
                 { key: "promotionalEmails", label: "Promotional/marketing emails" },
               ] as const).map(({ key, label }) => (
-                <label key={key} className="flex items-start gap-3 rounded-lg border border-gray-200 p-3">
+                <label key={key} className="flex items-start gap-3 rounded-lg border border-gray-200 dark:border-slate-700 p-3">
                   <Checkbox
                     checked={notificationSettings[key]}
                     onCheckedChange={(v) => setNotificationSettings((prev) => ({ ...prev, [key]: v === true }))}
                   />
-                  <span className="text-sm text-gray-700">{label}</span>
+                  <span className="text-sm text-gray-700 dark:text-gray-200">{label}</span>
                 </label>
               ))}
             </div>
-            <DialogFooter><Button type="submit">Save Changes</Button></DialogFooter>
+            <DialogFooter><Button type="submit" disabled={savingSettings}>{savingSettings ? "Saving..." : "Save Changes"}</Button></DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -329,16 +424,16 @@ export function Settings() {
                 { key: "showFinancialInformation", label: "Show financial information" },
                 { key: "showContactInformation", label: "Show contact information" },
               ] as const).map(({ key, label }) => (
-                <label key={key} className="flex items-start gap-3 rounded-lg border border-gray-200 p-3">
+                <label key={key} className="flex items-start gap-3 rounded-lg border border-gray-200 dark:border-slate-700 p-3">
                   <Checkbox
                     checked={privacySettings[key]}
                     onCheckedChange={(v) => setPrivacySettings((prev) => ({ ...prev, [key]: v === true }))}
                   />
-                  <span className="text-sm text-gray-700">{label}</span>
+                  <span className="text-sm text-gray-700 dark:text-gray-200">{label}</span>
                 </label>
               ))}
             </div>
-            <DialogFooter><Button type="submit">Save Changes</Button></DialogFooter>
+            <DialogFooter><Button type="submit" disabled={savingSettings}>{savingSettings ? "Saving..." : "Save Changes"}</Button></DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -365,15 +460,42 @@ export function Settings() {
                 visible={showConfirmPassword} onToggle={() => setShowConfirmPassword((v) => !v)}
                 placeholder="Confirm new password" />
               <div className="space-y-1">
-                <div className="flex items-center justify-between text-xs text-gray-600">
+                <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
                   <span>Password strength</span><span>{passwordStrength.label}</span>
                 </div>
-                <div className="h-2 rounded-full bg-gray-200">
+                <div className="h-2 rounded-full bg-gray-200 dark:bg-slate-700">
                   <div className={`h-full rounded-full ${passwordStrength.color} ${passwordStrength.widthClass}`} />
                 </div>
               </div>
             </div>
-            <DialogFooter><Button type="submit">Update Password</Button></DialogFooter>
+            <DialogFooter><Button type="submit" disabled={savingSettings}>{savingSettings ? "Updating..." : "Update Password"}</Button></DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={twoFactorOpen} onOpenChange={setTwoFactorOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{twoFactorEnabled ? "Disable" : "Enable"} Two-Factor Authentication</DialogTitle>
+            <DialogDescription>
+              Confirm your current password to {twoFactorEnabled ? "disable" : "enable"} email verification codes during sign-in.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={saveTwoFactorSetting} className="space-y-4">
+            <PasswordField
+              id="twoFactorPassword"
+              label="Current Password"
+              value={twoFactorPassword}
+              onChange={setTwoFactorPassword}
+              visible={showTwoFactorPassword}
+              onToggle={() => setShowTwoFactorPassword((value) => !value)}
+              placeholder="Enter current password"
+            />
+            <DialogFooter>
+              <Button type="submit" disabled={savingSettings}>
+                {savingSettings ? "Saving..." : `Confirm ${twoFactorEnabled ? "Disable" : "Enable"}`}
+              </Button>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>

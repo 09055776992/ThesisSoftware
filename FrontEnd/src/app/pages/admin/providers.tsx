@@ -7,11 +7,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../../components/ui/dialog";
 import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
-import { CheckCircle, XCircle, UserX, UserCheck, Clock, ShieldCheck, ShieldOff } from "lucide-react";
+import { CheckCircle, XCircle, UserX, UserCheck, Clock, ShieldCheck, ShieldOff, FileText, ExternalLink, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { getAuthToken, getStoredUser } from "../../lib/user-storage";
 import { API_URL } from "../../lib/api-client";
-
 interface Provider {
   id: string;
   name: string;
@@ -27,6 +26,16 @@ interface Provider {
   rejectedAt: string | null;
   rejectionReason: string | null;
   deactivatedAt: string | null;
+  credentialCount?: number;
+}
+
+interface CredentialFile {
+  fileName: string;
+  storedName: string;
+  filePath: string;
+  fileSize: number;
+  mimeType: string;
+  uploadedAt: string;
 }
 
 const API_BASE = API_URL;
@@ -87,6 +96,11 @@ export function AdminProviders() {
   const [rejectReason, setRejectReason] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState("");
+
+  // Credentials modal state
+  const [credentialsProvider, setCredentialsProvider] = useState<Provider | null>(null);
+  const [credentials, setCredentials] = useState<CredentialFile[]>([]);
+  const [credentialsLoading, setCredentialsLoading] = useState(false);
 
   const user = getStoredUser();
 
@@ -200,6 +214,44 @@ export function AdminProviders() {
     return new Date(dateStr).toLocaleDateString("en-US", {
       year: "numeric", month: "short", day: "numeric",
     });
+  };
+
+  const handleViewCredentials = async (provider: Provider) => {
+    setCredentialsProvider(provider);
+    setCredentials([]);
+    setCredentialsLoading(true);
+    try {
+      const data = await adminProviderRequest(`/api/admin/providers/${provider.id}/credentials`);
+      setCredentials((data.credentials as CredentialFile[]) || []);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load credentials.");
+    } finally {
+      setCredentialsLoading(false);
+    }
+  };
+
+  const openCredential = async (storedName: string) => {
+    if (!credentialsProvider) return;
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/admin/providers/${credentialsProvider.id}/credentials/${encodeURIComponent(storedName)}`,
+        { headers: { Authorization: "Bearer " + getAuthToken() } },
+      );
+      if (!response.ok) {
+        const contentType = response.headers.get("content-type") ?? "";
+        const payload = contentType.includes("application/json")
+          ? await response.json().catch(() => ({}))
+          : {};
+        throw new Error(
+          String(payload.message || payload.error || `Unable to open credential file (HTTP ${response.status}).`),
+        );
+      }
+      const url = URL.createObjectURL(await response.blob());
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to open credential file.");
+    }
   };
 
   const statusBadge = (label: Provider["statusLabel"]) => {
@@ -325,7 +377,22 @@ export function AdminProviders() {
                     <TableCell className="text-sm">{formatDate(provider.requestedAt)}</TableCell>
                     <TableCell>{statusBadge(provider.statusLabel)}</TableCell>
                     <TableCell className="text-right">
-                      <div className="flex gap-2 justify-end">
+                      <div className="flex gap-2 justify-end flex-wrap">
+                        {/* View Credentials — always available */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleViewCredentials(provider)}
+                        >
+                          <FileText className="size-3.5 mr-1" />
+                          Credentials
+                          {(provider.credentialCount ?? 0) > 0 && (
+                            <Badge className="ml-1 bg-blue-600 hover:bg-blue-600 text-white text-xs px-1.5 py-0">
+                              {provider.credentialCount}
+                            </Badge>
+                          )}
+                        </Button>
+
                         {provider.statusLabel === "Pending" && (
                           <>
                             <Button
@@ -429,6 +496,91 @@ export function AdminProviders() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Credentials Modal */}
+      <Dialog open={!!credentialsProvider} onOpenChange={() => setCredentialsProvider(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="size-4 text-blue-600" />
+              Verification Documents
+            </DialogTitle>
+          </DialogHeader>
+          {credentialsProvider && (
+            <div className="space-y-4">
+              <div className="text-sm text-muted-foreground space-y-0.5">
+                <p><span className="font-medium text-foreground">{credentialsProvider.name}</span></p>
+                <p>{credentialsProvider.organizationName} · {credentialsProvider.position}</p>
+                <p>{credentialsProvider.email}</p>
+              </div>
+
+              {credentialsLoading ? (
+                <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
+                  <Loader2 className="size-5 animate-spin" />
+                  <span className="text-sm">Loading documents…</span>
+                </div>
+              ) : credentials.length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  <FileText className="size-10 mx-auto mb-3 opacity-30" />
+                  <p>No credential documents were uploaded.</p>
+                  <p className="text-xs mt-1">This provider registered before document upload was required.</p>
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {credentials.map((cred, idx) => {
+                    const isImage = cred.mimeType.startsWith("image/");
+                    return (
+                      <li key={idx} className="flex items-center gap-3 border rounded-lg px-3 py-2.5">
+                        <FileText className="size-5 text-blue-600 flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{cred.fileName}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {(cred.fileSize / 1024).toFixed(0)} KB ·{" "}
+                            {new Date(cred.uploadedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => openCredential(cred.storedName)}
+                          className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium flex-shrink-0"
+                        >
+                          {isImage ? "View" : "Open"}
+                          <ExternalLink className="size-3" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              <div className="flex gap-2 pt-2 border-t">
+                {credentialsProvider.statusLabel === "Pending" && (
+                  <>
+                    <Button
+                      className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                      disabled={!!actionLoading}
+                      onClick={() => { handleApprove(credentialsProvider.id); setCredentialsProvider(null); }}
+                    >
+                      <UserCheck className="size-4 mr-1" /> Approve
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      className="flex-1"
+                      disabled={!!actionLoading}
+                      onClick={() => { setCredentialsProvider(null); setRejectingId(credentialsProvider.id); setRejectReason(""); }}
+                    >
+                      <UserX className="size-4 mr-1" /> Reject
+                    </Button>
+                  </>
+                )}
+                <Button variant="outline" onClick={() => setCredentialsProvider(null)} className={credentialsProvider.statusLabel === "Pending" ? "" : "w-full"}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

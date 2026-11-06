@@ -158,9 +158,15 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
       if (result.success) {
         const token = result.token ?? "";
         saveRoleSession(token, {
+          _id: String(result.user._id ?? ""),
+          id: String(result.user.id ?? ""),
           email: result.user.email as string,
           fullName: result.user.fullName as string,
           userType: "admin",
+          role: typeof result.user.role === "string" ? result.user.role : undefined,
+          preferences: result.user.preferences && typeof result.user.preferences === "object"
+            ? result.user.preferences as { language?: string; theme?: string }
+            : undefined,
         });
         onSuccess?.(result.user, token);
         onClose();

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -91,6 +92,7 @@ interface EligibilityInfo {
 
 interface Scholarship {
   _id: string;
+  id?: string;
   scholarshipName?: string;
   name: string;
   provider: string;
@@ -208,20 +210,20 @@ function savedScholarshipsKey(email?: string): string {
   return `${SAVED_SCHOLARSHIPS_KEY_PREFIX}:${normalizedEmail}`;
 }
 
-function loadSavedScholarships(email?: string): number[] {
+function loadSavedScholarships(email?: string): string[] {
   if (typeof window === "undefined") return [];
 
   try {
     const raw = window.localStorage.getItem(savedScholarshipsKey(email));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map((value) => Number(value)).filter(Number.isFinite) : [];
+    return Array.isArray(parsed) ? parsed.map((value) => String(value)) : [];
   } catch {
     return [];
   }
 }
 
-function saveScholarships(ids: number[], email?: string): void {
+function saveScholarships(ids: string[], email?: string): void {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(savedScholarshipsKey(email), JSON.stringify(ids));
 }
@@ -230,7 +232,7 @@ function normalizeType(value: string): string {
   return String(value || "").trim().toLowerCase().replace(/-/g, " ");
 }
 
-async function getSavedScholarshipsWithFallback(email?: string): Promise<number[]> {
+async function getSavedScholarshipsWithFallback(email?: string): Promise<string[]> {
   const localIds = loadSavedScholarships(email);
 
   if (!email) {
@@ -239,7 +241,7 @@ async function getSavedScholarshipsWithFallback(email?: string): Promise<number[
 
   try {
     const result = await fetchSavedScholarships(email);
-    const remoteIds = Array.isArray(result.data) ? result.data.map((v) => Number(v)).filter(Number.isFinite) : [];
+    const remoteIds = Array.isArray(result.data) ? result.data.map((v) => String(v)) : [];
     const mergedIds = Array.from(new Set([...localIds, ...remoteIds]));
     saveScholarships(mergedIds, email);
 
@@ -255,7 +257,7 @@ async function getSavedScholarshipsWithFallback(email?: string): Promise<number[
   }
 }
 
-async function saveScholarshipsWithFallback(email: string | undefined, ids: number[]): Promise<void> {
+async function saveScholarshipsWithFallback(email: string | undefined, ids: string[]): Promise<void> {
   saveScholarships(ids, email);
 
   if (!email) {
@@ -272,6 +274,7 @@ async function saveScholarshipsWithFallback(email: string | undefined, ids: numb
 // Removed mockScholarships - now using real data from MongoDB
 
 export function Scholarships() {
+  const [searchParams] = useSearchParams();
   const [selectedScholarship, setSelectedScholarship] = useState<Scholarship | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [amountRange, setAmountRange] = useState([0, 100000]);
@@ -286,6 +289,8 @@ export function Scholarships() {
   // Application State - Simplified single-step flow
   const [declarationChecked, setDeclarationChecked] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasActiveApplication, setHasActiveApplication] = useState(false);
+  const [activeApplicationName, setActiveApplicationName] = useState<string | null>(null);
   
   // Legacy modal state - keeping for compatibility but not using multi-step
   const [isApplicationModalOpen, setIsApplicationModalOpen] = useState(false);
@@ -346,7 +351,30 @@ export function Scholarships() {
   useEffect(() => {
     const user = getStoredUser();
     loadSavedScholarshipsFromStorage(user?.email);
-    loadScholarships();
+    loadScholarships(searchParams.get("open") ?? undefined);
+
+    // Check for existing active application on mount
+    if (user?.email) {
+      const activeStatuses = [
+        "Pending", "System Qualified", "Under Review",
+        "Qualified for Final Screening",
+        "Action Required: Submit Specific Requirements",
+        "Approved",
+      ];
+      import("../lib/api-client").then(({ fetchMyApplications }) => {
+        fetchMyApplications(user.email!)
+          .then((res) => {
+            const active = (res.data || []).find((app: any) =>
+              activeStatuses.includes(String(app.status))
+            );
+            if (active) {
+              setHasActiveApplication(true);
+              setActiveApplicationName(String((active as any).scholarshipName || "another scholarship"));
+            }
+          })
+          .catch(() => {});
+      });
+    }
   }, []);
 
   const loadSavedScholarshipsFromStorage = async (email?: string) => {
@@ -359,14 +387,14 @@ export function Scholarships() {
         const remoteIds = Array.isArray(result.data) ? result.data.map(String) : [];
         const mergedIds = Array.from(new Set([...localIds.map(String), ...remoteIds]));
         setSavedScholarships(mergedIds);
-        saveScholarships(mergedIds.map(Number), email);
+        saveScholarships(mergedIds, email);
       } catch {
         // Keep local state if backend is unavailable
       }
     }
   };
 
-  const loadScholarships = async () => {
+  const loadScholarships = async (openId?: string) => {
     try {
       const user = getStoredUser();
       console.log('Current user:', user);
@@ -435,6 +463,14 @@ export function Scholarships() {
       
       console.log('Normalized scholarships:', normalized.length);
       setScholarshipsData(normalized);
+
+      // Auto-open a scholarship if ?open=<id> is in the URL (Matches, Saved, landing "Apply Now")
+      if (openId) {
+        const target = normalized.find(
+          (s: Scholarship) => String(s._id || "") === openId || String(s.id || "") === openId,
+        );
+        if (target) setSelectedScholarship(target);
+      }
     } catch (error) {
       console.error("Error fetching scholarships:", error);
     } finally {
@@ -586,11 +622,16 @@ export function Scholarships() {
         : [...current, scholarshipId];
 
       const user = getStoredUser();
-      saveScholarships(next.map(Number), user?.email || '');
+      saveScholarships(next, user?.email || '');
       if (user?.email) {
-        saveSavedScholarships(user.email, next.map(Number)).catch(() => {
-          // Ignore backend sync errors.
-        });
+        saveSavedScholarships(user.email, next)
+          .then(() => {
+            toast.success("Saved list synced");
+          })
+          .catch((err) => {
+            console.error("Failed to sync saved scholarships:", err);
+            toast.error("Failed to sync saved scholarships");
+          });
       }
       return next;
     });
@@ -668,15 +709,25 @@ export function Scholarships() {
 
       if (!response.ok) {
         const error = await response.json();
+        // If the server says there's already an active application, update
+        // local state so the UI disables the apply button immediately.
+        if (error.code === "ACTIVE_APPLICATION_EXISTS") {
+          setHasActiveApplication(true);
+          setActiveApplicationName(error.activeScholarshipName || "another scholarship");
+        }
         throw new Error(error.message || error.error || "Failed to submit application");
       }
 
       const result = await response.json();
-      
+
+      // Successful submission — this student now has an active application
+      setHasActiveApplication(true);
+      setActiveApplicationName(selectedScholarship?.name || "this scholarship");
+
       // Close modal and show success
       closeApplicationModal();
       toast.success(`Application submitted successfully! ${result.message}`);
-      
+
       // Refresh scholarships data
       loadScholarships();
     } catch (error) {
@@ -701,7 +752,7 @@ export function Scholarships() {
     <div className="py-8 px-4">
       <div className="max-w-7xl mx-auto">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Discover Scholarships</h1>
+          <h1 className="text-3xl font-bold mb-2 dark:text-white">Discover Scholarships</h1>
           <p className="text-muted-foreground">
             Find and apply for scholarships that match your profile
           </p>
@@ -848,12 +899,12 @@ export function Scholarships() {
 
             {/* ── Empty state when zero matches ── */}
             {!loading && recommendedScholarships.length === 0 && (
-              <div className="mb-8 flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-gray-50 py-14 px-6 text-center">
-                <div className="mb-4 flex size-16 items-center justify-center rounded-full bg-blue-50 text-4xl">
+              <div className="mb-8 flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 dark:border-slate-700 bg-gray-50 dark:bg-slate-900/80 py-14 px-6 text-center">
+                <div className="mb-4 flex size-16 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-950/50 text-4xl">
                   🔍
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">No Perfect Matches Right Now</h3>
-                <p className="max-w-md text-sm text-gray-500 leading-relaxed">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">No Perfect Matches Right Now</h3>
+                <p className="max-w-md text-sm text-gray-500 dark:text-slate-400 leading-relaxed">
                   Based on your current profile, you do not meet the baseline criteria for active targeted
                   scholarship allocations. Try updating your academic profile or explore the general
                   opportunities listed below.
@@ -892,7 +943,7 @@ export function Scholarships() {
                           <Badge className="bg-yellow-500 text-white">May Qualify</Badge>
                         )}
                         {scholarship.eligibilityStatus === "not-eligible" && (
-                          <Badge variant="outline" className="border-gray-400 text-gray-600">Not Eligible</Badge>
+                          <Badge variant="outline" className="border-gray-400 dark:border-slate-600 text-gray-600 dark:text-slate-300">Not Eligible</Badge>
                         )}
                         <Badge className="bg-accent">{scholarship.matchScore}% Match</Badge>
                       </div>
@@ -956,21 +1007,21 @@ export function Scholarships() {
             {!loading && fallbackScholarships.length > 0 && (
               <div className="mt-10">
                 <div className="flex items-center gap-3 mb-5">
-                  <div className="flex-1 border-t border-gray-200" />
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 border border-orange-200 rounded-full">
+                  <div className="flex-1 border-t border-gray-200 dark:border-slate-800" />
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 dark:bg-orange-950/50 border border-orange-200 dark:border-orange-900/60 rounded-full">
                     <AlertCircle className="size-4 text-orange-500" />
-                    <span className="text-sm font-semibold text-orange-700">Other Active Scholarship Programs</span>
+                    <span className="text-sm font-semibold text-orange-700 dark:text-orange-300">Other Active Scholarship Programs</span>
                   </div>
-                  <div className="flex-1 border-t border-gray-200" />
+                  <div className="flex-1 border-t border-gray-200 dark:border-slate-800" />
                 </div>
-                <p className="text-xs text-gray-500 text-center mb-5">
+                <p className="text-xs text-gray-500 dark:text-slate-400 text-center mb-5">
                   You do not currently meet all criteria for these programs. View each one to see exactly which requirements are missing.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {fallbackScholarships.map((scholarship) => (
                     <Card
                       key={scholarship._id}
-                      className="hover:shadow-lg transition-shadow cursor-pointer w-full border-orange-100"
+                      className="hover:shadow-lg transition-shadow cursor-pointer w-full border-orange-100 dark:border-orange-900/50"
                       onClick={() => setSelectedScholarship(scholarship)}
                     >
                       <div className="relative h-40">
@@ -986,7 +1037,7 @@ export function Scholarships() {
                             <Badge className="bg-red-500 text-white">Closing Soon</Badge>
                           )}
                           <Badge className="bg-orange-500 text-white text-xs">Criteria Missing</Badge>
-                          <Badge variant="outline" className="border-orange-300 text-orange-700 bg-white/90 text-xs">
+                          <Badge variant="outline" className="border-orange-300 dark:border-orange-800 text-orange-700 dark:text-orange-300 bg-white/90 dark:bg-slate-900/90 text-xs">
                             {scholarship.matchScore}% Match
                           </Badge>
                         </div>
@@ -1014,13 +1065,13 @@ export function Scholarships() {
                           {scholarship.eligibility?.unmetCriteria && scholarship.eligibility.unmetCriteria.length > 0 && (
                             <div className="mt-2 space-y-1">
                               {scholarship.eligibility.unmetCriteria.slice(0, 2).map((criterion, idx) => (
-                                <div key={idx} className="flex items-start gap-1.5 text-xs text-red-600">
+                                <div key={idx} className="flex items-start gap-1.5 text-xs text-red-600 dark:text-red-400">
                                   <XCircle className="size-3.5 shrink-0 mt-0.5" />
                                   <span className="leading-snug">{criterion}</span>
                                 </div>
                               ))}
                               {scholarship.eligibility.unmetCriteria.length > 2 && (
-                                <p className="text-xs text-gray-400 pl-5">+{scholarship.eligibility.unmetCriteria.length - 2} more criteria missing</p>
+                                <p className="text-xs text-gray-400 dark:text-slate-500 pl-5">+{scholarship.eligibility.unmetCriteria.length - 2} more criteria missing</p>
                               )}
                             </div>
                           )}
@@ -1077,7 +1128,7 @@ export function Scholarships() {
                 )}
 
                 {selectedScholarship.eligibilityStatus === "may-be-eligible" && (
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-5">
+                  <div className="bg-yellow-50 dark:bg-yellow-950/40 border border-yellow-200 dark:border-yellow-800 rounded-lg p-5">
                     <div className="flex items-start gap-4">
                       <div className="size-8 rounded-full bg-yellow-500 flex items-center justify-center flex-shrink-0 mt-0.5">
                         <svg className="size-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1085,10 +1136,10 @@ export function Scholarships() {
                         </svg>
                       </div>
                       <div className="flex-1">
-                        <p className="font-semibold text-yellow-800 text-base">You may qualify for this scholarship</p>
-                        <p className="text-sm text-yellow-700 mt-1">Some criteria require verification. Your application will need staff review.</p>
+                        <p className="font-semibold text-yellow-800 dark:text-yellow-200 text-base">You may qualify for this scholarship</p>
+                        <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">Some criteria require verification. Your application will need staff review.</p>
                         {selectedScholarship.eligibility?.unmetCriteria && selectedScholarship.eligibility.unmetCriteria.length > 0 && (
-                          <ul className="mt-3 text-sm text-yellow-700 list-disc list-inside space-y-1 ml-1">
+                          <ul className="mt-3 text-sm text-yellow-700 dark:text-yellow-300 list-disc list-inside space-y-1 ml-1">
                             {selectedScholarship.eligibility.unmetCriteria.map((criterion, idx) => (
                               <li key={idx}>{criterion}</li>
                             ))}
@@ -1100,7 +1151,7 @@ export function Scholarships() {
                 )}
 
                 {selectedScholarship.eligibilityStatus === "not-eligible" && (
-                  <div className="rounded-xl border border-red-200 bg-red-50 p-5 space-y-4">
+                  <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-5 space-y-4">
                     <div className="flex items-start gap-4">
                       <div className="size-8 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0 mt-0.5">
                         <svg className="size-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1108,18 +1159,18 @@ export function Scholarships() {
                         </svg>
                       </div>
                       <div className="flex-1">
-                        <p className="font-semibold text-red-800 text-base">You do not currently qualify for this scholarship</p>
-                        <p className="text-sm text-red-700 mt-1">The matching engine identified the following unmet requirements from your profile:</p>
+                        <p className="font-semibold text-red-800 dark:text-red-300 text-base">You do not currently qualify for this scholarship</p>
+                        <p className="text-sm text-red-700 dark:text-red-400 mt-1">The matching engine identified the following unmet requirements from your profile:</p>
                       </div>
                     </div>
 
                     {/* Per-criterion breakdown */}
                     {selectedScholarship.eligibility?.unmetCriteria && selectedScholarship.eligibility.unmetCriteria.length > 0 && (
-                      <div className="rounded-lg border border-red-200 bg-white divide-y divide-red-100">
+                      <div className="rounded-lg border border-red-200 dark:border-red-800 bg-white dark:bg-slate-900 divide-y divide-red-100 dark:divide-red-900/50">
                         {selectedScholarship.eligibility.unmetCriteria.map((criterion, idx) => (
                           <div key={idx} className="flex items-start gap-3 px-4 py-3">
                             <XCircle className="size-4 text-red-500 shrink-0 mt-0.5" />
-                            <span className="text-sm text-red-700 leading-snug">{criterion}</span>
+                            <span className="text-sm text-red-700 dark:text-red-300 leading-snug">{criterion}</span>
                           </div>
                         ))}
                       </div>
@@ -1130,12 +1181,12 @@ export function Scholarships() {
                       const passed = Object.values(selectedScholarship.eligibility!.criteriaChecks!).filter(c => c.passed);
                       return passed.length > 0 ? (
                         <div>
-                          <p className="text-xs font-semibold text-green-700 mb-2 uppercase tracking-wide">Criteria you DO meet:</p>
-                          <div className="rounded-lg border border-green-200 bg-white divide-y divide-green-100">
+                          <p className="text-xs font-semibold text-green-700 dark:text-green-300 mb-2 uppercase tracking-wide">Criteria you DO meet:</p>
+                          <div className="rounded-lg border border-green-200 dark:border-green-800 bg-white dark:bg-slate-900 divide-y divide-green-100 dark:divide-green-900/50">
                             {passed.map((c, idx) => (
                               <div key={idx} className="flex items-start gap-3 px-4 py-3">
                                 <CheckCircle className="size-4 text-green-500 shrink-0 mt-0.5" />
-                                <span className="text-sm text-green-700 leading-snug">{c.label || c.message}</span>
+                                <span className="text-sm text-green-700 dark:text-green-300 leading-snug">{c.label || c.message}</span>
                               </div>
                             ))}
                           </div>
@@ -1143,14 +1194,14 @@ export function Scholarships() {
                       ) : null;
                     })()}
 
-                    <p className="text-xs text-red-600 italic">
+                    <p className="text-xs text-red-600 dark:text-red-400 italic">
                       Update your profile with accurate information to re-evaluate your eligibility automatically.
                     </p>
                   </div>
                 )}
 
                 {selectedScholarship.deadlineStatus === "closing-soon" && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-5">
+                  <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-5">
                     <div className="flex items-start gap-4">
                       <div className="size-8 rounded-full bg-red-500 flex items-center justify-center flex-shrink-0 mt-0.5">
                         <svg className="size-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1158,42 +1209,42 @@ export function Scholarships() {
                         </svg>
                       </div>
                       <div>
-                        <p className="font-semibold text-red-800 text-base">Closing Soon!</p>
-                        <p className="text-sm text-red-700 mt-1">Only {selectedScholarship.daysUntilDeadline} day(s) left to apply. Submit your application now!</p>
+                        <p className="font-semibold text-red-800 dark:text-red-300 text-base">Closing Soon!</p>
+                        <p className="text-sm text-red-700 dark:text-red-400 mt-1">Only {selectedScholarship.daysUntilDeadline} day(s) left to apply. Submit your application now!</p>
                       </div>
                     </div>
                   </div>
                 )}
 
                 {selectedScholarship.deadlineStatus === "closed" && (
-                  <div className="bg-gray-100 border border-gray-300 rounded-lg p-5">
-                    <p className="font-semibold text-gray-700 text-base">Application period has ended</p>
-                    <p className="text-sm text-gray-600 mt-1">This scholarship is no longer accepting applications.</p>
+                  <div className="bg-gray-100 dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-lg p-5">
+                    <p className="font-semibold text-gray-700 dark:text-slate-200 text-base">Application period has ended</p>
+                    <p className="text-sm text-gray-600 dark:text-slate-400 mt-1">This scholarship is no longer accepting applications.</p>
                   </div>
                 )}
 
                 {selectedScholarship.deadlineStatus === "not-yet-open" && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-5">
-                    <p className="font-semibold text-blue-800 text-base">Applications have not opened yet</p>
-                    <p className="text-sm text-blue-700 mt-1">Please check back later when applications are open.</p>
+                  <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-lg p-5">
+                    <p className="font-semibold text-blue-800 dark:text-blue-200 text-base">Applications have not opened yet</p>
+                    <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">Please check back later when applications are open.</p>
                   </div>
                 )}
 
                 {/* Stats Row - Award, Deadline, Match Score */}
-                <div className="grid grid-cols-3 gap-6 py-6 bg-gray-50 rounded-xl px-6">
-                  <div className="text-center">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 py-5 bg-gray-50 dark:bg-slate-800/60 rounded-xl px-5">
+                  <div className="text-center py-2">
                     <p className="text-2xl font-bold text-primary font-mono">
                       ₱{Number(selectedScholarship.amount).toLocaleString()}
                     </p>
-                    <p className="text-sm text-muted-foreground mt-2">Award Amount</p>
+                    <p className="text-sm text-muted-foreground mt-1">Award Amount</p>
                   </div>
-                  <div className="text-center border-l border-r border-gray-200 px-4">
-                    <p className="text-lg font-semibold">{selectedScholarship.deadline}</p>
-                    <p className="text-sm text-muted-foreground mt-2">Application Deadline</p>
+                  <div className="text-center py-2 sm:border-l sm:border-r border-gray-200 dark:border-slate-700 sm:px-4">
+                    <p className="text-lg font-semibold text-gray-900 dark:text-white">{selectedScholarship.deadline}</p>
+                    <p className="text-sm text-muted-foreground mt-1">Application Deadline</p>
                   </div>
-                  <div className="text-center">
+                  <div className="text-center py-2 flex flex-col items-center gap-1">
                     <Badge
-                      className={`text-lg px-4 py-1.5 ${
+                      className={`text-base px-4 py-1.5 ${
                         selectedScholarship.eligibilityStatus === "not-eligible"
                           ? "bg-gray-500 hover:bg-gray-500"
                           : "bg-accent"
@@ -1201,7 +1252,7 @@ export function Scholarships() {
                     >
                       {selectedScholarship.matchScore}% Match
                     </Badge>
-                    <p className="text-sm text-muted-foreground mt-2">
+                    <p className="text-sm text-muted-foreground mt-1">
                       {selectedScholarship.eligibilityStatus === "not-eligible"
                         ? "Profile fit (not eligible to apply)"
                         : "Your Match Score"}
@@ -1371,15 +1422,15 @@ export function Scholarships() {
                   {/* Document Status Summary */}
                   {selectedScholarship.eligibilityStatus === "eligible" ||
                     selectedScholarship.eligibilityStatus === "may-be-eligible" ? (
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                    <div className="bg-gray-50 dark:bg-slate-800/60 rounded-lg p-4 border border-transparent dark:border-slate-700">
+                      <h4 className="font-semibold text-sm mb-3 flex items-center gap-2 text-gray-900 dark:text-white">
                         <FileText className="size-4 text-primary" />
                         Application Documents
                       </h4>
-                      <p className="text-sm text-gray-600 mb-2">
+                      <p className="text-sm text-gray-600 dark:text-slate-400 mb-2">
                         Your profile documents will be automatically linked to this application:
                       </p>
-                      <ul className="text-sm text-gray-600 space-y-1 ml-5 list-disc">
+                      <ul className="text-sm text-gray-600 dark:text-slate-400 space-y-1 ml-5 list-disc">
                         <li>Copy of Grades / Transcript of Records / Form 137 or 138</li>
                         <li>Proof of school enrollment/registration/acceptance</li>
                         <li>Valid QCitizen ID</li>
@@ -1388,7 +1439,7 @@ export function Scholarships() {
                         Scholarship-specific documents will be requested after acceptance.
                       </p>
                       {!isLoadingProfileDocs && !hasProfileDocuments && (
-                        <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                        <div className="mt-3 flex items-start gap-2 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
                           <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
                           <span>
                             One or more required documents are not yet uploaded. Please go to{" "}
@@ -1410,9 +1461,20 @@ export function Scholarships() {
                   ) : selectedScholarship.eligibilityStatus === "eligible" ||
                     selectedScholarship.eligibilityStatus === "may-be-eligible" ? (
                     <div className="space-y-4">
+                      {/* Active application banner — blocks applying for another */}
+                      {hasActiveApplication && (
+                        <div className="flex items-start gap-2 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 px-3 py-3 text-sm text-amber-800 dark:text-amber-300">
+                          <AlertCircle className="size-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                          <span>
+                            You currently have an active application for <strong>{activeApplicationName}</strong>.
+                            You must withdraw or complete that application before applying for another.
+                          </span>
+                        </div>
+                      )}
+
                       {/* Error message */}
                       {submitError && (
-                        <div className="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+                        <div className="flex items-start gap-2 rounded-md bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 px-3 py-2 text-sm text-red-700 dark:text-red-300">
                           <AlertCircle className="size-4 mt-0.5 shrink-0" />
                           <span>{submitError}</span>
                         </div>
@@ -1438,13 +1500,13 @@ export function Scholarships() {
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <span
-                              className={`inline-flex flex-1 ${!declarationChecked || !deriveStudentApplyAllowed(selectedScholarship) ? "cursor-not-allowed" : ""}`}
+                              className={`inline-flex flex-1 ${!declarationChecked || !deriveStudentApplyAllowed(selectedScholarship) || hasActiveApplication ? "cursor-not-allowed" : ""}`}
                             >
                               <Button
                                 onClick={handleSubmitApplication}
-                                disabled={!declarationChecked || isSubmitting || !deriveStudentApplyAllowed(selectedScholarship)}
+                                disabled={!declarationChecked || isSubmitting || !deriveStudentApplyAllowed(selectedScholarship) || hasActiveApplication}
                                 className={`w-full h-12 text-base bg-blue-600 hover:bg-blue-700 ${
-                                  !declarationChecked || isSubmitting || !deriveStudentApplyAllowed(selectedScholarship)
+                                  !declarationChecked || isSubmitting || !deriveStudentApplyAllowed(selectedScholarship) || hasActiveApplication
                                     ? "opacity-50 cursor-not-allowed"
                                     : ""
                                 }`}

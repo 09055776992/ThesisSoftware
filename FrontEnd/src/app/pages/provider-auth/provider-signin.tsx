@@ -1,11 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
-import { Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { clearStoredUser, saveRoleSession } from "../../lib/user-storage";
-import { API_URL } from "../../lib/api-client";
+import {
+  providerSignIn,
+  resendProviderLoginOTP,
+  verifyProviderLoginOTP,
+} from "../../lib/api-client";
 
 interface ProviderSignInProps {
   onSwitch: () => void;
@@ -21,6 +25,35 @@ export function ProviderSignIn({ onSwitch, onClose, onSuccess }: ProviderSignInP
   });
   const [errorMessage, setErrorMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [step, setStep] = useState<"login" | "otp">("login");
+  const [providerId, setProviderId] = useState("");
+  const [maskedEmail, setMaskedEmail] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setTimeout(() => setResendCooldown((current) => current - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [resendCooldown]);
+
+  const completeSignIn = (user: Record<string, unknown>, token: string) => {
+    clearStoredUser();
+    saveRoleSession(token, {
+      _id: String(user.id || ""),
+      id: String(user.id || ""),
+      email: String(user.email || ""),
+      fullName: String(user.name || ""),
+      userType: "provider",
+      role: "provider",
+      organizationName: typeof user.organizationName === "string" ? user.organizationName : "",
+      position: typeof user.position === "string" ? user.position : "",
+    });
+    onSuccess?.(user, token);
+    onClose();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,39 +61,16 @@ export function ProviderSignIn({ onSwitch, onClose, onSuccess }: ProviderSignInP
 
     try {
       setIsSubmitting(true);
-      const API_BASE_URL = API_URL;
-      
-      const response = await fetch(`${API_BASE_URL}/api/provider/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: formData.email.trim().toLowerCase(),
-          password: formData.password,
-        }),
+      const result = await providerSignIn({
+        email: formData.email.trim().toLowerCase(),
+        password: formData.password,
       });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        if (payload.pending) {
-          throw new Error("Your account is pending admin approval. You will receive an email once it has been reviewed.");
-        }
-        if (payload.deactivated) {
-          throw new Error("Your provider account has been deactivated. Please contact the administrator.");
-        }
-        throw new Error(payload.message || payload.error || "Sign in failed");
-      }
-
-      const result = await response.json();
-      const token = result.token ?? "";
-      saveRoleSession(token, {
-        email: result.user.email,
-        fullName: result.user.name,
-        userType: "provider",
-        organizationName: result.user.organizationName,
-        position: result.user.position,
-      });
-      onSuccess?.(result.user, token);
-      onClose();
+      setProviderId(result.userId);
+      setMaskedEmail(result.maskedEmail);
+      setOtpCode("");
+      setOtpError("");
+      setResendCooldown(60);
+      setStep("otp");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to sign in");
     } finally {
@@ -68,13 +78,107 @@ export function ProviderSignIn({ onSwitch, onClose, onSuccess }: ProviderSignInP
     }
   };
 
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOtpError("");
+    if (otpCode.length !== 6) {
+      setOtpError("Please enter the complete 6-digit code.");
+      return;
+    }
+
+    try {
+      setIsVerifying(true);
+      const result = await verifyProviderLoginOTP(providerId, otpCode);
+      completeSignIn(result.user, result.token);
+    } catch (error) {
+      setOtpError(error instanceof Error ? error.message : "Verification failed.");
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0) return;
+    setOtpError("");
+    try {
+      const result = await resendProviderLoginOTP(providerId);
+      setMaskedEmail(result.maskedEmail || maskedEmail);
+      setOtpCode("");
+      setResendCooldown(60);
+    } catch (error) {
+      setOtpError(error instanceof Error ? error.message : "Failed to resend the code.");
+    }
+  };
+
   return (
     <Card>
       <CardHeader className="text-center">
-        <CardTitle>Provider Login</CardTitle>
-        <CardDescription>Scholarship provider portal</CardDescription>
+        {step === "login" ? (
+          <>
+            <CardTitle>Provider Login</CardTitle>
+            <CardDescription>Scholarship provider portal</CardDescription>
+          </>
+        ) : (
+          <>
+            <div className="mb-2 flex justify-center">
+              <div className="rounded-full bg-blue-100 p-3">
+                <ShieldCheck className="size-8 text-blue-600" />
+              </div>
+            </div>
+            <CardTitle>Verify Your Sign-In</CardTitle>
+            <CardDescription>
+              Enter the 6-digit code sent to <strong>{maskedEmail}</strong>
+            </CardDescription>
+          </>
+        )}
       </CardHeader>
       <CardContent>
+        {step === "otp" ? (
+          <form onSubmit={handleVerifyOtp} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="provider-login-otp">Verification Code</Label>
+              <Input
+                id="provider-login-otp"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                placeholder="123456"
+                value={otpCode}
+                onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                className="h-12 text-center text-xl font-bold tracking-widest"
+                required
+              />
+              <p className="text-xs text-muted-foreground">The code expires in 10 minutes.</p>
+            </div>
+            {otpError && <p role="alert" className="text-sm text-destructive">{otpError}</p>}
+            <Button type="submit" className="w-full" disabled={isVerifying || otpCode.length !== 6}>
+              {isVerifying ? "Verifying..." : "Verify and Sign In"}
+            </Button>
+            <div className="flex items-center justify-between text-sm">
+              <button
+                type="button"
+                onClick={handleResendOtp}
+                disabled={resendCooldown > 0}
+                className="text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground"
+              >
+                {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : "Resend code"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("login");
+                  setOtpCode("");
+                  setOtpError("");
+                }}
+                className="inline-flex items-center gap-1 text-muted-foreground hover:underline"
+              >
+                <ArrowLeft className="size-3" />
+                Back
+              </button>
+            </div>
+          </form>
+        ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="provider-email">Email Address</Label>
@@ -129,6 +233,7 @@ export function ProviderSignIn({ onSwitch, onClose, onSuccess }: ProviderSignInP
             </button>
           </div>
         </form>
+        )}
       </CardContent>
     </Card>
   );

@@ -51,6 +51,7 @@ const userSchema = new mongoose.Schema(
     userType: { type: String, default: undefined },
     profileImage: { type: String, default: "" },
     profilePicture: { type: String, default: "" },
+    coverPhoto: { type: String, default: "" },
     profileCompletionStatus: { type: mongoose.Schema.Types.Mixed, default: "incomplete" },
     providerDetails: { type: providerDetailsSchema, default: () => ({}) },
     loginAttempts: { type: Number, default: 0 },

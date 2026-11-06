@@ -1,4 +1,16 @@
+import dns from "dns";
 import { MongoClient } from "mongodb";
+
+// Some routers/ISPs mishandle SRV lookups from Node (querySrv ECONNREFUSED/ENOTFOUND)
+// while nslookup still works. Public DNS resolvers fix Atlas mongodb+srv connections.
+const dnsServers = (process.env.DNS_SERVERS || "8.8.8.8,8.8.4.4,1.1.1.1")
+  .split(",")
+  .map((server) => server.trim())
+  .filter(Boolean);
+
+if (dnsServers.length > 0) {
+  dns.setServers(dnsServers);
+}
 
 const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI || process.env.MONGO_URL || process.env.DATABASE_URL;
 const databaseName = process.env.MONGODB_DB || process.env.MONGO_DB || "thesis_software";
@@ -97,6 +109,13 @@ export async function getDb() {
         collection: (name) => createCollection(db, name),
       };
     } catch (err) {
+      const dnsCodes = new Set(["ENOTFOUND", "ECONNREFUSED", "ETIMEOUT"]);
+      if (dnsCodes.has(err?.code) && String(mongoUri).startsWith("mongodb+srv://")) {
+        console.error(
+          "MongoDB connection error: DNS SRV lookup failed for Atlas host. " +
+            "If this persists, set DNS_SERVERS=8.8.8.8,8.8.4.4 in Backend/.env or use a direct mongodb:// URI."
+        );
+      }
       console.error("MongoDB connection error:", err);
       throw err;
     }
