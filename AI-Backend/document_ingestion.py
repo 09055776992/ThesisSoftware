@@ -21,7 +21,6 @@ import tempfile
 import logging
 
 import pdfplumber
-import easyocr
 from pdf2image import convert_from_path
 from PIL import Image
 
@@ -35,6 +34,7 @@ _ocr_reader = None
 def _get_ocr_reader():
     global _ocr_reader
     if _ocr_reader is None:
+        import easyocr
         print("[OCR] Initializing EasyOCR reader (English) — first run downloads model...")
         _ocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
         print("[OCR] EasyOCR ready.")
