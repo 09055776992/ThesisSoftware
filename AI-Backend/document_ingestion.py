@@ -28,12 +28,17 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# EasyOCR singleton — loaded once at startup, never re-initialized per request
+# EasyOCR singleton — lazy loaded on first use to save memory at startup
 # ---------------------------------------------------------------------------
-print("[OCR] Initializing EasyOCR reader (English) — first run downloads model...")
-ocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
-print("[OCR] EasyOCR ready.")
-# cache-bust: v2
+_ocr_reader = None
+
+def _get_ocr_reader():
+    global _ocr_reader
+    if _ocr_reader is None:
+        print("[OCR] Initializing EasyOCR reader (English) — first run downloads model...")
+        _ocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+        print("[OCR] EasyOCR ready.")
+    return _ocr_reader
 
 # ---------------------------------------------------------------------------
 # Supported extensions
@@ -100,7 +105,7 @@ def _extract_pdf_scanned(path: str) -> str:
     pages_text: list[str] = []
     images = convert_from_path(path, dpi=200)
     for img in images:
-        result = ocr_reader.readtext(
+        result = _get_ocr_reader().readtext(
             _pil_to_numpy(img),
             detail=0,               # returns plain string list
             paragraph=True,         # merge nearby text into paragraphs
@@ -140,7 +145,7 @@ def extract_text_from_image(path: str) -> str:
     import numpy as np
     img = Image.open(path).convert("RGB")
     img_array = np.array(img)
-    result = ocr_reader.readtext(img_array, detail=0, paragraph=True)
+    result = _get_ocr_reader().readtext(img_array, detail=0, paragraph=True)
     return " ".join(result)
 
 
@@ -209,10 +214,10 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> dict:
 
     normalized = _normalize_ocr_text(raw_text)
 
-    if not normalized:
+    if not normalized or len(normalized.strip()) < 15:
         return _failed_result(
-            f"No text could be extracted from '{filename}'. "
-            "The document may be blank, corrupted, or an unreadable scan."
+            f"No readable document text could be extracted from '{filename}'. "
+            "The image may be a selfie, photo, blank, or an unreadable scan. Please upload a clear document image."
         )
 
     return {
