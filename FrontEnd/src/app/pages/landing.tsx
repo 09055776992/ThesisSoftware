@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
-import { X, GraduationCap, Search, ChevronDown, ChevronUp, Award, FileText, Coins, Users, Calendar, Eye, EyeOff, ExternalLink, CheckCircle } from "lucide-react";
+import { X, GraduationCap, ShieldCheck, Search, ChevronDown, ChevronUp, Award, FileText, Coins, Users, Calendar, Eye, EyeOff, ExternalLink, CheckCircle } from "lucide-react";
 import { fetchScholarships, signIn, signUp, verifyOTP, resendOTP, fetchUserProfile } from "../lib/api-client";
 import { saveStoredUser, saveAuthToken, clearStoredUser, buildNameFromEmail } from "../lib/user-storage";
 import { PasswordStrengthIndicator } from "../components/password-strength";
@@ -155,15 +155,6 @@ export function LandingPage() {
       setSignUpResendCooldown(remainingCooldown);
     }
   }, []);
-  const otpInputRefs = [
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-    useRef<HTMLInputElement>(null),
-  ];
-  
   const signUpOtpInputRefs = [
     useRef<HTMLInputElement>(null),
     useRef<HTMLInputElement>(null),
@@ -279,7 +270,6 @@ export function LandingPage() {
         });
         // Focus first OTP input after a short delay
         setTimeout(() => {
-          otpInputRefs[0].current?.focus();
         }, 100);
       } else if (response.token && response.user) {
         clearStoredUser();
@@ -305,31 +295,6 @@ export function LandingPage() {
   const openProviderSignIn = () => {
     setActiveModal(null);
     window.dispatchEvent(new Event("scholar:open-provider-auth"));
-  };
-
-  const handleOtpChange = (index: number, value: string) => {
-    // Only allow single digit
-    const digit = value.slice(-1);
-    if (!/^\d*$/.test(digit)) return;
-    
-    const newOtpDigits = [...otpDigits];
-    newOtpDigits[index] = digit;
-    setOtpDigits(newOtpDigits);
-    
-    // Auto-focus next input if current is filled
-    if (digit && index < 5) {
-      otpInputRefs[index + 1].current?.focus();
-    }
-  };
-
-  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Handle backspace to go back
-    if (e.key === "Backspace" && !otpDigits[index] && index > 0) {
-      const newOtpDigits = [...otpDigits];
-      newOtpDigits[index - 1] = "";
-      setOtpDigits(newOtpDigits);
-      otpInputRefs[index - 1].current?.focus();
-    }
   };
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
@@ -396,7 +361,6 @@ export function LandingPage() {
       console.error("OTP verification error:", error);
       setOtpError(error instanceof Error ? error.message : "Invalid verification code.");
       setOtpDigits(["", "", "", "", "", ""]);
-      otpInputRefs[0].current?.focus();
     } finally {
       setIsVerifying(false);
     }
@@ -423,7 +387,6 @@ export function LandingPage() {
       // Clear OTP digits
       setOtpDigits(["", "", "", "", "", ""]);
       // Focus first input
-      otpInputRefs[0].current?.focus();
     } catch (error) {
       console.error("Resend OTP error:", error);
       setOtpError(error instanceof Error ? error.message : "Failed to resend code.");
@@ -818,7 +781,7 @@ export function LandingPage() {
         >
           <div
             ref={signInRef}
-            className="bg-white rounded-2xl p-6 md:p-8 w-full max-w-[400px] mx-4 shadow-2xl relative"
+            className={`bg-white rounded-2xl p-6 md:p-8 w-full ${showOtpVerification ? "max-w-md" : "max-w-[400px]"} mx-4 shadow-2xl relative`}
             onClick={(e) => e.stopPropagation()}
           >
             <button
@@ -837,19 +800,13 @@ export function LandingPage() {
               <X className="size-5" />
             </button>
             
-            <div className="text-center mb-6">
+            {!showOtpVerification && <div className="text-center mb-6">
               <div className="size-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-4">
                 <GraduationCap className="size-6 text-white" />
               </div>
-              <h2 className="text-2xl font-bold text-slate-900">
-                {showOtpVerification ? "Security Verification" : "Welcome Back"}
-              </h2>
-              <p className="text-sm text-slate-500 mt-1">
-                {showOtpVerification 
-                  ? "Enter the 6-digit OTP code sent to your registered email or device." 
-                  : "Sign in to access your scholarship portal"}
-              </p>
-            </div>
+              <h2 className="text-2xl font-bold text-slate-900">Welcome Back</h2>
+              <p className="text-sm text-slate-500 mt-1">Sign in to access your scholarship portal</p>
+            </div>}
 
             {!showOtpVerification ? (
               // Sign In Form
@@ -915,104 +872,83 @@ export function LandingPage() {
               </form>
             ) : (
               // OTP Verification Panel
-              <form onSubmit={handleVerifyOtp} className="space-y-6">
-                {/* Masked Email Display */}
-                <div className="text-center">
-                  <p className="text-sm text-slate-600">
-                    Verification code sent to
-                  </p>
-                  <p className="text-sm font-medium text-slate-800 mt-1">
-                    {maskedEmail || signInEmail}
+              <>
+              <h2 className="mb-4 text-center text-2xl font-semibold text-slate-800">Student Portal</h2>
+              <div className="rounded-lg border border-slate-200 p-6">
+                <div className="text-center mb-6">
+                  <div className="size-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4">
+                    <ShieldCheck className="size-9 text-blue-600" />
+                  </div>
+                  <h2 className="text-xl font-semibold text-slate-900">Verify Your Sign-In</h2>
+                  <p className="text-sm text-slate-500 mt-1">
+                    Enter the 6-digit code sent to <strong className="text-slate-700">{maskedEmail || signInEmail}</strong>
                   </p>
                 </div>
-                
-                {/* Error Message */}
-                {otpError && (
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-600 text-center">
-                    {otpError}
-                  </div>
-                )}
-                
-                <div className="flex justify-center gap-2">
-                  {otpDigits.map((digit, index) => (
-                    <input
-                      key={index}
-                      ref={otpInputRefs[index]}
+                <form onSubmit={handleVerifyOtp} className="space-y-4">
+                  <div className="space-y-2">
+                    <label htmlFor="student-signin-otp" className="block text-sm font-medium text-slate-700">
+                      Verification Code
+                    </label>
+                    <Input
+                      id="student-signin-otp"
                       type="text"
                       inputMode="numeric"
-                      maxLength={1}
-                      value={digit}
-                      onChange={(e) => handleOtpChange(index, e.target.value)}
-                      onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                      className="size-12 text-center text-xl font-bold border border-slate-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                      autoComplete="one-time-code"
+                      autoFocus
+                      maxLength={6}
+                      placeholder="123456"
+                      value={otpDigits.join("")}
+                      onChange={(event) => {
+                        const code = event.target.value.replace(/\D/g, "").slice(0, 6);
+                        setOtpDigits(Array.from({ length: 6 }, (_, index) => code[index] ?? ""));
+                      }}
+                      className="h-12 text-center text-xl font-bold tracking-widest"
                       required
                       disabled={isVerifying}
                     />
-                  ))}
-                </div>
-
-                {/* Countdown Timer */}
-                <div className="text-center">
-                  {signInTimeLeft > 0 ? (
-                    <p className="text-sm text-slate-500">
-                      Code expires in{" "}
-                      <span className={`font-mono font-semibold ${signInTimeLeft <= 60 ? "text-red-500" : "text-slate-700"}`}>
-                        {signInTimerDisplay}
-                      </span>{" "}
-                      ⏱
-                    </p>
-                  ) : (
-                    <p className="text-sm text-red-500 font-medium">Code has expired. Please resend.</p>
-                  )}
-                </div>
-
-                <Button 
-                  type="submit" 
-                  className="w-full bg-blue-600 hover:bg-blue-700"
-                  disabled={isVerifying || isRequestingOtp || otpDigits.join("").length !== 6 || signInTimeLeft <= 0}
-                >
-                  {isVerifying ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <span className="animate-spin rounded-full size-4 border-b-2 border-white"></span>
-                      Verifying...
-                    </span>
-                  ) : (
-                    "Verify & Proceed"
-                  )}
-                </Button>
-                
-                {/* Resend Code */}
-                <div className="text-center text-sm text-slate-600">
-                  Didn't receive a code?{" "}
-                  {signInResendCooldown > 0 ? (
-                    <span className="text-slate-400 font-mono">
-                      Resend in {signInResendCooldown}s
-                    </span>
-                  ) : (
+                    {signInTimeLeft > 0 ? (
+                      <p className="text-xs text-slate-500">The code expires in {signInTimerDisplay}.</p>
+                    ) : (
+                      <p className="text-xs text-red-500">Code expired. Please resend.</p>
+                    )}
+                  </div>
+                  {otpError && <p role="alert" className="text-sm text-red-600">{otpError}</p>}
+                  <Button
+                    type="submit"
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                    disabled={isVerifying || isRequestingOtp || otpDigits.join("").length !== 6 || signInTimeLeft <= 0}
+                  >
+                    {isVerifying ? "Verifying..." : "Verify and Sign In"}
+                  </Button>
+                  <div className="flex items-center justify-between text-sm">
                     <button
                       type="button"
                       onClick={handleResendOtp}
-                      disabled={isRequestingOtp}
-                      className="text-blue-600 hover:text-blue-700 font-medium hover:underline disabled:text-slate-400 transition-colors"
+                      disabled={isRequestingOtp || signInResendCooldown > 0}
+                      className="text-blue-600 hover:underline disabled:cursor-not-allowed disabled:text-slate-400"
                     >
-                      {isRequestingOtp ? "Sending..." : "Resend Code"}
+                      {isRequestingOtp
+                        ? "Sending..."
+                        : signInResendCooldown > 0
+                          ? `Resend code in ${signInResendCooldown}s`
+                          : "Resend code"}
                     </button>
-                  )}
-                </div>
-                
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearOtpSession();
-                    setShowOtpVerification(false);
-                    setOtpDigits(["", "", "", "", "", ""]);
-                    setOtpError("");
-                  }}
-                  className="w-full text-sm text-slate-500 hover:text-slate-700 transition-colors"
-                >
-                  Back to Login
-                </button>
-              </form>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearOtpSession();
+                        setShowOtpVerification(false);
+                        setOtpDigits(["", "", "", "", "", ""]);
+                        setOtpError("");
+                      }}
+                      className="text-sm text-slate-500 hover:text-slate-700"
+                    >
+                      Back
+                    </button>
+                  </div>
+                </form>
+              </div>
+              </>
             )}
 
             {!showOtpVerification && (

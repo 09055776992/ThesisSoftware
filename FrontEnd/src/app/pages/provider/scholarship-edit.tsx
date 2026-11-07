@@ -12,12 +12,21 @@ import { API_URL } from "../../lib/api-client";
 
 const API_BASE = API_URL;
 
+function localTodayISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function ProviderScholarshipEdit() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const today = localTodayISO();
   const [formData, setFormData] = useState({
     name: "",
     amount: "",
@@ -30,6 +39,14 @@ export function ProviderScholarshipEdit() {
     description: "",
     minimumGPA: "",
   });
+
+  // Keep existing past values selectable, but block choosing any earlier past day.
+  const openingMin =
+    formData.openingDate && formData.openingDate < today ? formData.openingDate : today;
+  const deadlineFloor =
+    formData.openingDate && formData.openingDate > today ? formData.openingDate : today;
+  const deadlineMin =
+    formData.deadline && formData.deadline < deadlineFloor ? formData.deadline : deadlineFloor;
 
   useEffect(() => {
     const fetchScholarship = async () => {
@@ -73,6 +90,12 @@ export function ProviderScholarshipEdit() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    if (formData.openingDate && formData.deadline && formData.deadline < formData.openingDate) {
+      setError("Application deadline must be on or after the opening date.");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const token = getAuthToken();
@@ -140,11 +163,24 @@ export function ProviderScholarshipEdit() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="openingDate">Opening Date</Label>
-                <Input id="openingDate" type="date" value={formData.openingDate} onChange={handleChange} />
+                <Input
+                  id="openingDate"
+                  type="date"
+                  min={openingMin}
+                  value={formData.openingDate}
+                  onChange={handleChange}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="deadline">Application Deadline *</Label>
-                <Input id="deadline" type="date" value={formData.deadline} onChange={handleChange} required />
+                <Input
+                  id="deadline"
+                  type="date"
+                  min={deadlineMin}
+                  value={formData.deadline}
+                  onChange={handleChange}
+                  required
+                />
               </div>
             </div>
 

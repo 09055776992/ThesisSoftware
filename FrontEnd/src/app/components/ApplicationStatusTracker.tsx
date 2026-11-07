@@ -86,7 +86,7 @@ export function ApplicationStatusTracker({
     {
       id: 3,
       title: "Qualified for Final Screening",
-      description: "Stage 1 approved - specific docs required",
+      description: "Upload your recorded video to the provider Drive folder",
       icon: <FileCheck className="size-5" />,
       status: currentStep === 3 ? "current" : currentStep > 3 ? "completed" : "pending",
       timestamp: finalScreening?.submissionDeadline
@@ -95,11 +95,11 @@ export function ApplicationStatusTracker({
           ? formatDate(finalScreening.scheduledDate)
           : null,
       subLabel: currentStep === 3
-        ? finalScreening?.googleDriveLink
+        ? finalScreening?.googleDriveLink || finalScreening?.videoSubmissionType === "recorded"
           ? `Video submission due ${formatDate(finalScreening.submissionDeadline) || "TBD"}`
           : finalScreening?.scheduledDate
             ? `Screening scheduled for ${formatDate(finalScreening.scheduledDate)}`
-            : "Submit scholarship-specific documents"
+            : "Waiting for provider Drive link"
         : null,
     },
     {

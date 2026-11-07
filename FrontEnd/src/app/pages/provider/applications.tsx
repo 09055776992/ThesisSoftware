@@ -46,9 +46,9 @@ export function ProviderApplications() {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
 
-  // Qualify modal
+  // Qualify modal (recorded video screening)
   const [qualifyingId, setQualifyingId] = useState<string | null>(null);
-  const [qualifyForm, setQualifyForm] = useState({ scheduledDate: "", scheduledTime: "", venue: "", notes: "" });
+  const [qualifyForm, setQualifyForm] = useState({ googleDriveLink: "", submissionDeadline: "", notes: "" });
 
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -123,20 +123,34 @@ export function ProviderApplications() {
 
   const handleQualifyConfirm = async () => {
     if (!qualifyingId) return;
+    const link = qualifyForm.googleDriveLink.trim();
+    if (!link || !qualifyForm.submissionDeadline) {
+      alert("Google Drive link and submission deadline are required.");
+      return;
+    }
+    if (!/^https?:\/\//i.test(link)) {
+      alert("Google Drive link must start with http:// or https://");
+      return;
+    }
+
     setActionLoading(qualifyingId);
     try {
       const token = getAuthToken();
       const res = await fetch(`${API_BASE}/api/provider/applications/${qualifyingId}/qualify`, {
         method: "PATCH",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(qualifyForm),
+        body: JSON.stringify({
+          googleDriveLink: link,
+          submissionDeadline: qualifyForm.submissionDeadline,
+          notes: qualifyForm.notes,
+        }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.message || data.error || "Failed to qualify");
       }
       setQualifyingId(null);
-      setQualifyForm({ scheduledDate: "", scheduledTime: "", venue: "", notes: "" });
+      setQualifyForm({ googleDriveLink: "", submissionDeadline: "", notes: "" });
       fetchApplications();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to qualify");
@@ -331,31 +345,46 @@ export function ProviderApplications() {
         </DialogContent>
       </Dialog>
 
-      {/* Qualify / Schedule Dialog */}
+      {/* Qualify / Video Screening Dialog */}
       <Dialog open={!!qualifyingId} onOpenChange={() => setQualifyingId(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>Qualify for Final Screening</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Qualify this applicant for final screening. Optionally schedule a virtual meeting.
+              Qualify this applicant for video screening. Provide a Google Drive folder where they should upload their recorded video.
             </p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="q-date">Screening Date</Label>
-                <input id="q-date" type="date" className="w-full border rounded px-3 py-2 text-sm" value={qualifyForm.scheduledDate} onChange={(e) => setQualifyForm((p) => ({ ...p, scheduledDate: e.target.value }))} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="q-time">Time</Label>
-                <input id="q-time" type="time" className="w-full border rounded px-3 py-2 text-sm" value={qualifyForm.scheduledTime} onChange={(e) => setQualifyForm((p) => ({ ...p, scheduledTime: e.target.value }))} />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="q-deadline">Deadline</Label>
+              <input
+                id="q-deadline"
+                type="datetime-local"
+                className="w-full border rounded px-3 py-2 text-sm"
+                value={qualifyForm.submissionDeadline}
+                onChange={(e) => setQualifyForm((p) => ({ ...p, submissionDeadline: e.target.value }))}
+                required
+              />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="q-venue">Venue / Meeting Link</Label>
-              <input id="q-venue" type="text" className="w-full border rounded px-3 py-2 text-sm" placeholder="e.g., Google Meet link or QCYDO Office" value={qualifyForm.venue} onChange={(e) => setQualifyForm((p) => ({ ...p, venue: e.target.value }))} />
+              <Label htmlFor="q-gdrive">GDrive Link</Label>
+              <input
+                id="q-gdrive"
+                type="url"
+                className="w-full border rounded px-3 py-2 text-sm"
+                placeholder="https://drive.google.com/..."
+                value={qualifyForm.googleDriveLink}
+                onChange={(e) => setQualifyForm((p) => ({ ...p, googleDriveLink: e.target.value }))}
+                required
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="q-notes">Notes (optional)</Label>
-              <Textarea id="q-notes" rows={2} value={qualifyForm.notes} onChange={(e) => setQualifyForm((p) => ({ ...p, notes: e.target.value }))} placeholder="Additional instructions..." />
+              <Textarea
+                id="q-notes"
+                rows={2}
+                value={qualifyForm.notes}
+                onChange={(e) => setQualifyForm((p) => ({ ...p, notes: e.target.value }))}
+                placeholder="Video length, what to cover, naming format..."
+              />
             </div>
             <div className="flex gap-3">
               <Button className="flex-1" disabled={!!actionLoading} onClick={handleQualifyConfirm}>Qualify Applicant</Button>

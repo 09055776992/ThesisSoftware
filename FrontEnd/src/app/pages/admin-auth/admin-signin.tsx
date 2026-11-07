@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -6,66 +6,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../..
 import { Eye, EyeOff, ShieldCheck, ArrowLeft } from "lucide-react";
 import { clearStoredUser, saveRoleSession } from "../../lib/user-storage";
 import { adminSignIn, adminVerifyOTP, adminResendOTP } from "../../lib/api-client";
-
-// ---------------------------------------------------------------------------
-// OTP Input — 6 separate boxes with auto-advance
-// ---------------------------------------------------------------------------
-function OtpInput({
-  value,
-  onChange,
-}: {
-  value: string[];
-  onChange: (v: string[]) => void;
-}) {
-  const refs = useRef<(HTMLInputElement | null)[]>([]);
-
-  const handleChange = (index: number, raw: string) => {
-    const digit = raw.replace(/\D/g, "").slice(-1);
-    const next = [...value];
-    next[index] = digit;
-    onChange(next);
-    if (digit && index < 5) refs.current[index + 1]?.focus();
-  };
-
-  const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === "Backspace" && !value[index] && index > 0) {
-      refs.current[index - 1]?.focus();
-    }
-  };
-
-  const handlePaste = (e: React.ClipboardEvent) => {
-    e.preventDefault();
-    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
-    if (!pasted) return;
-    const next = [...value];
-    for (let i = 0; i < 6; i++) next[i] = pasted[i] ?? "";
-    onChange(next);
-    refs.current[Math.min(pasted.length, 5)]?.focus();
-  };
-
-  return (
-    <div className="flex gap-2 justify-center" onPaste={handlePaste}>
-      {value.map((digit, i) => (
-        <input
-          key={i}
-          ref={(el) => { refs.current[i] = el; }}
-          type="text"
-          inputMode="numeric"
-          maxLength={1}
-          value={digit}
-          onChange={(e) => handleChange(i, e.target.value)}
-          onKeyDown={(e) => handleKeyDown(i, e)}
-          className={`
-            w-10 h-12 text-center text-lg font-bold rounded-lg border-2 outline-none
-            transition-colors
-            ${digit ? "border-primary bg-primary/10 text-primary" : "border-input bg-background"}
-            focus:border-primary focus:ring-2 focus:ring-primary/20
-          `}
-        />
-      ))}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Countdown timer hook
@@ -101,7 +41,7 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
   const [step, setStep] = useState<"login" | "otp">("login");
   const [userId, setUserId] = useState("");
   const [maskedEmail, setMaskedEmail] = useState("");
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  const [otp, setOtp] = useState("");
   const [otpError, setOtpError] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
@@ -143,8 +83,7 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
 
   // Step 2: verify OTP
   const handleVerify = async () => {
-    const otpString = otp.join("");
-    if (otpString.length !== 6) {
+    if (otp.length !== 6) {
       setOtpError("Please enter the complete 6-digit code.");
       return;
     }
@@ -153,7 +92,7 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
     setIsVerifying(true);
 
     try {
-      const result = await adminVerifyOTP(userId, otpString);
+      const result = await adminVerifyOTP(userId, otp);
 
       if (result.success) {
         const token = result.token ?? "";
@@ -173,7 +112,7 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
       }
     } catch (error) {
       setOtpError(error instanceof Error ? error.message : "Verification failed");
-      setOtp(["", "", "", "", "", ""]);
+      setOtp("");
     } finally {
       setIsVerifying(false);
     }
@@ -185,7 +124,7 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
       await adminResendOTP(userId);
       resetTimer();
       setResendCooldown(60);
-      setOtp(["", "", "", "", "", ""]);
+      setOtp("");
       setOtpError("");
     } catch (error) {
       setOtpError(error instanceof Error ? error.message : "Failed to resend code.");
@@ -202,14 +141,14 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
           </>
         ) : (
           <>
-            <div className="flex justify-center mb-2">
-              <div className="inline-flex items-center justify-center size-12 bg-primary rounded-xl">
-                <ShieldCheck className="size-6 text-primary-foreground" />
+            <div className="mb-2 flex justify-center">
+              <div className="rounded-full bg-blue-100 p-3">
+                <ShieldCheck className="size-8 text-blue-600" />
               </div>
             </div>
-            <CardTitle>Verify Your Identity</CardTitle>
+            <CardTitle>Verify Your Sign-In</CardTitle>
             <CardDescription>
-              We sent a code to <span className="font-semibold text-primary">{maskedEmail}</span>
+              Enter the 6-digit code sent to <strong>{maskedEmail}</strong>
             </CardDescription>
           </>
         )}
@@ -274,67 +213,54 @@ export function AdminSignIn({ onSwitch, onClose, onSuccess }: AdminSignInProps) 
 
         {/* ---- Step 2: OTP Verification ---- */}
         {step === "otp" && (
-          <div className="space-y-5">
-            <div>
-              <p className="text-sm text-muted-foreground text-center mb-3">
-                Enter the 6-digit verification code:
-              </p>
-              <OtpInput value={otp} onChange={setOtp} />
-            </div>
-
-            {/* Timer */}
-            <div className="text-center">
+          <form onSubmit={(event) => { event.preventDefault(); void handleVerify(); }} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="admin-login-otp">Verification Code</Label>
+              <Input
+                id="admin-login-otp"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                placeholder="123456"
+                value={otp}
+                onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                className="h-12 text-center text-xl font-bold tracking-widest"
+                required
+              />
               {timeLeft > 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Expires in{" "}
-                  <span className={`font-mono font-semibold ${timeLeft <= 60 ? "text-destructive" : ""}`}>
-                    {timerDisplay}
-                  </span>{" "}
-                  ⏱
-                </p>
+                <p className="text-xs text-muted-foreground">The code expires in {timerDisplay}.</p>
               ) : (
-                <p className="text-sm text-destructive font-medium">Code expired. Please resend.</p>
+                <p className="text-xs text-destructive">Code expired. Please resend.</p>
               )}
             </div>
-
-            {otpError && <p className="text-sm text-destructive text-center">{otpError}</p>}
-
-            <Button
-              onClick={handleVerify}
-              className="w-full"
-              disabled={isVerifying || otp.join("").length !== 6}
-            >
-              {isVerifying ? "Verifying..." : "Verify Code"}
+            {otpError && <p role="alert" className="text-sm text-destructive">{otpError}</p>}
+            <Button type="submit" className="w-full" disabled={isVerifying || otp.length !== 6}>
+              {isVerifying ? "Verifying..." : "Verify and Sign In"}
             </Button>
-
-            <div className="text-center text-sm text-muted-foreground">
-              Didn't receive a code?{" "}
-              {resendCooldown > 0 ? (
-                <span className="text-muted-foreground/60">Resend in {resendCooldown}s</span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleResend}
-                  className="text-primary hover:underline font-medium"
-                >
-                  Resend Code
-                </button>
-              )}
+            <div className="flex items-center justify-between text-sm">
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resendCooldown > 0}
+                className="text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground"
+              >
+                {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : "Resend code"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("login");
+                  setOtp("");
+                  setOtpError("");
+                }}
+                className="inline-flex items-center gap-1 text-muted-foreground hover:underline"
+              >
+                <ArrowLeft className="size-3" />
+                Back
+              </button>
             </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                setStep("login");
-                setOtp(["", "", "", "", "", ""]);
-                setOtpError("");
-              }}
-              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mx-auto"
-            >
-              <ArrowLeft className="size-4" />
-              Back to Login
-            </button>
-          </div>
+          </form>
         )}
       </CardContent>
     </Card>

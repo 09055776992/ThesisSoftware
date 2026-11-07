@@ -901,6 +901,26 @@ export function fetchMyApplications(email: string) {
   );
 }
 
+export function submitScreeningVideo(applicationId: string, studentEmail: string, videoUrl: string) {
+  return request<{
+    message: string;
+    data: {
+      studentVideoUrl?: string;
+      videoSubmitted?: boolean;
+      videoSubmittedAt?: string;
+      googleDriveLink?: string;
+      submissionDeadline?: string;
+      notes?: string;
+    };
+  }>(`/api/applications/${encodeURIComponent(applicationId)}/submit-video`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      studentEmail: String(studentEmail || "").trim().toLowerCase(),
+      videoUrl: String(videoUrl || "").trim(),
+    }),
+  });
+}
+
 export type ScholarshipRenewal = {
   _id: string;
   originalApplicationId: string;

@@ -334,7 +334,10 @@ export const getScholarshipRenewalDocument = async (req, res) => {
     }
 
     const user = req.currentUser;
-    const isStudent = String(renewal.studentId) === String(user._id);
+    const userEmail = String(user?.email || "").trim().toLowerCase();
+    const isStudent =
+      String(renewal.studentId) === String(user._id) ||
+      (userEmail && String(renewal.studentEmail || "").trim().toLowerCase() === userEmail);
     const scholarship = await Scholarship.findById(renewal.scholarshipId).lean();
     const isOwningProvider = scholarship && String(scholarship.createdBy) === String(user._id);
     if (!isStudent && !isOwningProvider) {
@@ -352,7 +355,9 @@ export const getScholarshipRenewalDocument = async (req, res) => {
     }
     const resolvedPath = path.resolve(document.filePath);
     const uploadRoot = path.resolve(path.join(backendRoot, "private-uploads", "renewals"));
-    if (!resolvedPath.startsWith(`${uploadRoot}${path.sep}`)) {
+    const normalizedResolved = resolvedPath.toLowerCase();
+    const normalizedRoot = `${uploadRoot}${path.sep}`.toLowerCase();
+    if (!normalizedResolved.startsWith(normalizedRoot)) {
       return res.status(400).json({ success: false, message: "Invalid document path." });
     }
     res.type(document.mimeType || "application/octet-stream");

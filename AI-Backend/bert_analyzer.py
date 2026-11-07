@@ -18,18 +18,35 @@ from document_ingestion import _normalize_ocr_text
 EXPECTED_TERMS: dict[str, list[str]] = {
     "TOR": [
         "transcript", "grades", "units", "grade point", "academic",
-        "weighted average", "general weighted", "semester", "subject"
+        "weighted average", "general weighted", "semester", "subject",
+        "gwa", "gpa", "course", "college", "school"
+    ],
+    "gradesTranscript": [
+        "transcript", "grades", "units", "grade point", "academic",
+        "weighted average", "general weighted", "semester", "subject",
+        "gwa", "gpa", "course", "college", "school"
     ],
     "enrollment": [
-        "enrolled", "enrollment", "registered", "student",
+        "enrolled", "enrollment", "registered", "registration", "student",
         "school year", "semester", "certificate of enrollment",
         "currently enrolled", "date enrolled", "subject", "units",
         "student id", "year level", "student type", "regular",
-        "schedule", "total load", "subject title"
+        "schedule", "total load", "subject title", "assessment"
+    ],
+    "enrollmentProof": [
+        "enrolled", "enrollment", "registered", "registration", "student",
+        "school year", "semester", "certificate of enrollment",
+        "currently enrolled", "date enrolled", "subject", "units",
+        "student id", "year level", "student type", "regular",
+        "schedule", "total load", "subject title", "assessment"
     ],
     "QCitizen_ID": [
         "quezon city", "citizen", "resident", "identification",
-        "qc", "barangay", "address"
+        "qc", "barangay", "address", "card", "republic of the philippines"
+    ],
+    "qCitizenId": [
+        "quezon city", "citizen", "resident", "identification",
+        "qc", "barangay", "address", "card", "republic of the philippines"
     ],
     "indigency": [
         "indigent", "certificate", "barangay", "income",
@@ -162,15 +179,26 @@ class BERTDocumentAnalyzer:
                 "reason": "No text provided for analysis",
             }
 
-        terms = EXPECTED_TERMS.get(doc_type, [])
-        if not terms:
+        if not text or len(text.strip()) < 15:
             return {
                 "doc_type": doc_type,
-                "is_authentic": True,
-                "confidence": 50.0,
+                "is_authentic": False,
+                "confidence": 0.0,
                 "matched_terms": 0,
                 "total_expected_terms": 0,
-                "reason": f"Unknown document type '{doc_type}' — neutral score applied",
+                "reason": "Insufficient readable text in document (possible photo/selfie)",
+            }
+
+        terms = EXPECTED_TERMS.get(doc_type, [])
+        if not terms:
+            has_substance = len(text.strip()) >= 50
+            return {
+                "doc_type": doc_type,
+                "is_authentic": has_substance,
+                "confidence": 50.0 if has_substance else 0.0,
+                "matched_terms": 0,
+                "total_expected_terms": 0,
+                "reason": f"Unknown document type '{doc_type}'" if has_substance else "Document lacks verifiable text content",
             }
 
         text_lower = text.lower()
@@ -184,16 +212,18 @@ class BERTDocumentAnalyzer:
                 matched.append(term)
 
         confidence = len(matched) / len(terms)
+        is_auth = (confidence >= 0.20) and (len(matched) >= 1)
 
         return {
             "doc_type": doc_type,
-            "is_authentic": confidence >= 0.4,
+            "is_authentic": is_auth,
             "confidence": round(confidence * 100, 2),
             "matched_terms": len(matched),
             "matched_keywords": matched,
             "total_expected_terms": len(terms),
             "fuzzy_threshold": self.FUZZY_THRESHOLD,
             "match_scores": match_scores,
+            "reason": None if is_auth else f"Document failed authenticity check: missing expected {doc_type} keywords",
         }
 
     def extract_gwa_from_text(self, text: str) -> float | None:

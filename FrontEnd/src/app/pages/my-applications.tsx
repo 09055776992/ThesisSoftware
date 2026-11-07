@@ -5,7 +5,7 @@ import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import { ImageWithFallback } from "../components/figma/ImageWithFallback";
-import { FileText, Calendar, ExternalLink, Award, AlertCircle, CheckCircle, Clock, XCircle, Trophy, Brain, TrendingUp, TrendingDown, Info, RefreshCw } from "lucide-react";
+import { FileText, Calendar, AlertCircle, XCircle, Trophy, Brain, TrendingUp, TrendingDown, Info, RefreshCw } from "lucide-react";
 import {
   fetchMyApplications,
   fetchMyScore,
@@ -16,6 +16,7 @@ import {
   type ShapContribution,
 } from "../lib/api-client";
 import { ApplicationStatusTracker } from "../components/ApplicationStatusTracker";
+import { VideoScreeningSubmission } from "../components/VideoScreeningSubmission";
 import { getStoredUser } from "../lib/user-storage";
 import { useNavigate } from "react-router";
 
@@ -143,11 +144,20 @@ export function MyApplications() {
     }
   }, [user?.email]);
 
-  const getRenewalForApplication = (app: Application) =>
-    renewals.find((renewal) =>
-      renewal.originalApplicationId === app._id &&
-      renewal.renewalPeriodNumber === app.scholarshipData?.renewalPeriodNumber
+  const getRenewalForApplication = (app: Application) => {
+    const period = app.scholarshipData?.renewalPeriodNumber;
+    const matches = renewals.filter((renewal) =>
+      String(renewal.originalApplicationId) === String(app._id) &&
+      renewal.renewalPeriodNumber === period
     );
+    // Prefer the active submission for this period (pending/approved), then newest.
+    return (
+      matches.find((renewal) => renewal.status === "Pending") ||
+      matches.find((renewal) => renewal.status === "Approved") ||
+      matches.find((renewal) => renewal.status === "Rejected") ||
+      matches[0]
+    );
+  };
 
   const handleRenewalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -279,6 +289,16 @@ export function MyApplications() {
                               stage={app.stage}
                             />
                           </div>
+                          {app.status === "Qualified for Final Screening" && (
+                            <div className="mt-4">
+                              <VideoScreeningSubmission
+                                compact
+                                googleDriveLink={app.finalScreening?.googleDriveLink}
+                                submissionDeadline={app.finalScreening?.submissionDeadline}
+                                notes={app.finalScreening?.notes}
+                              />
+                            </div>
+                          )}
                         </div>
                         <div className="flex flex-col items-start sm:items-end gap-3 sm:pl-4">
                           {(() => { const s = getProgressStatus(app); return (
@@ -435,37 +455,12 @@ export function MyApplications() {
                 </div>
 
                 {/* Final Screening Details */}
-                {selectedApp.status === "Qualified for Final Screening" && selectedApp.finalScreening && (
-                  <div className="bg-green-50 dark:bg-green-950/30 p-4 rounded-lg border border-green-200 dark:border-green-800">
-                    <h4 className="font-semibold text-green-800 dark:text-green-300 flex items-center gap-2 mb-3">
-                      <Award className="size-4" />
-                      Video Interview Submission
-                    </h4>
-                    <div className="space-y-2 text-sm text-gray-800 dark:text-slate-200">
-                      {selectedApp.finalScreening.googleDriveLink && (
-                        <p>
-                          <span className="font-medium">🔗 Google Drive Upload Link:</span>{" "}
-                          <a
-                            href={selectedApp.finalScreening.googleDriveLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
-                          >
-                            Upload Your Video <ExternalLink className="size-3" />
-                          </a>
-                        </p>
-                      )}
-                      <p>
-                        <span className="font-medium">📅 Submission Deadline:</span>{" "}
-                        {selectedApp.finalScreening.submissionDeadline
-                          ? formatDate(selectedApp.finalScreening.submissionDeadline)
-                          : "TBD"}
-                      </p>
-                      {selectedApp.finalScreening.notes && (
-                        <p><span className="font-medium">📝 Instructions:</span> {selectedApp.finalScreening.notes}</p>
-                      )}
-                    </div>
-                  </div>
+                {selectedApp.status === "Qualified for Final Screening" && (
+                  <VideoScreeningSubmission
+                    googleDriveLink={selectedApp.finalScreening?.googleDriveLink}
+                    submissionDeadline={selectedApp.finalScreening?.submissionDeadline}
+                    notes={selectedApp.finalScreening?.notes}
+                  />
                 )}
 
                 {/* Rejection Reason */}

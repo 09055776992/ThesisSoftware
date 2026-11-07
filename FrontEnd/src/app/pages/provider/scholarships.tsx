@@ -4,10 +4,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Button } from "../../components/ui/button";
 import { Badge } from "../../components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
-import { Plus, Edit, Trash2, Users, Search, RefreshCw, Repeat } from "lucide-react";
+import { Plus, Edit, Trash2, Users, Search, RefreshCw, Repeat, Lock, AlertTriangle } from "lucide-react";
 import { Input } from "../../components/ui/input";
 import { getAuthToken } from "../../lib/user-storage";
 import { API_URL, setScholarshipRenewalPeriod } from "../../lib/api-client";
+import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog";
 
 interface Scholarship {
   _id: string;
@@ -30,6 +39,12 @@ export function ProviderScholarships() {
   const [searchQuery, setSearchQuery] = useState("");
   const [renewalUpdating, setRenewalUpdating] = useState<string | null>(null);
 
+  // Password-confirmed deletion state
+  const [deleteTarget, setDeleteTarget] = useState<Scholarship | null>(null);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
   useEffect(() => { fetchScholarships(); }, []);
 
   const fetchScholarships = async () => {
@@ -49,18 +64,51 @@ export function ProviderScholarships() {
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+  const handleOpenDeleteModal = (scholarship: Scholarship) => {
+    setDeleteTarget(scholarship);
+    setDeletePassword("");
+    setDeleteError("");
+  };
+
+  const handleConfirmDelete = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deleteTarget) return;
+
+    if (!deletePassword.trim()) {
+      setDeleteError("Password is required to confirm deletion.");
+      return;
+    }
+
+    setIsDeleting(true);
+    setDeleteError("");
+
     try {
       const token = getAuthToken();
-      const res = await fetch(`${API_BASE}/api/provider/scholarships/${id}`, {
+      const res = await fetch(`${API_BASE}/api/provider/scholarships/${deleteTarget._id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ password: deletePassword }),
       });
-      if (!res.ok) throw new Error("Failed to delete");
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Failed to delete scholarship");
+      }
+
+      toast.success(`"${deleteTarget.name}" was deleted successfully.`);
+      setDeleteTarget(null);
+      setDeletePassword("");
       fetchScholarships();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete scholarship");
+      const msg = err instanceof Error ? err.message : "Failed to delete scholarship";
+      setDeleteError(msg);
+      toast.error(msg);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -238,7 +286,13 @@ export function ProviderScholarships() {
                         <Link to={`/provider/scholarships/${s._id}/edit`}>
                           <Button variant="ghost" size="sm"><Edit className="size-4" /></Button>
                         </Link>
-                        <Button variant="ghost" size="sm" className="text-destructive" onClick={() => handleDelete(s._id, s.name)}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:bg-destructive/10"
+                          title="Delete scholarship"
+                          onClick={() => handleOpenDeleteModal(s)}
+                        >
                           <Trash2 className="size-4" />
                         </Button>
                       </div>
@@ -251,6 +305,82 @@ export function ProviderScholarships() {
           )}
         </CardContent>
       </Card>
+
+      {/* Password Confirmation Modal for Deletion */}
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) {
+            setDeleteTarget(null);
+            setDeletePassword("");
+            setDeleteError("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <form onSubmit={handleConfirmDelete}>
+            <DialogHeader>
+              <DialogTitle className="text-destructive flex items-center gap-2">
+                <AlertTriangle className="size-5" />
+                Confirm Scholarship Deletion
+              </DialogTitle>
+              <DialogDescription className="pt-2 text-foreground/80">
+                Are you sure you want to delete{" "}
+                <span className="font-semibold text-foreground">
+                  "{deleteTarget?.name}"
+                </span>
+                ? This action is permanent and cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="py-4 space-y-3">
+              <label className="text-sm font-medium text-foreground flex items-center gap-2">
+                <Lock className="size-4 text-muted-foreground" />
+                Enter your account password to confirm:
+              </label>
+              <Input
+                type="password"
+                placeholder="Enter your password"
+                value={deletePassword}
+                onChange={(e) => {
+                  setDeletePassword(e.target.value);
+                  setDeleteError("");
+                }}
+                disabled={isDeleting}
+                autoFocus
+                required
+              />
+              {deleteError && (
+                <div className="text-xs text-destructive font-medium bg-destructive/10 border border-destructive/20 p-2.5 rounded-md">
+                  {deleteError}
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isDeleting}
+                onClick={() => {
+                  setDeleteTarget(null);
+                  setDeletePassword("");
+                  setDeleteError("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="destructive"
+                disabled={isDeleting || !deletePassword.trim()}
+              >
+                {isDeleting ? "Verifying..." : "Delete Scholarship"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

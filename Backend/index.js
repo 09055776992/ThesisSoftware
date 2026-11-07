@@ -2916,6 +2916,45 @@ app.post("/api/users/profile/documents", uploadProfileDoc.single("document"), as
       return res.status(404).json({ error: "User not found." });
     }
 
+    // Human-readable labels for error messaging
+    const docLabels = {
+      gradesTranscript: "Copy of Grades / Transcript of Records",
+      enrollmentProof: "Proof of School Enrollment / Registration",
+      qCitizenId: "Valid QCitizen ID",
+    };
+
+    // Run AI Document Authenticity & OCR Verification
+    let analysis = null;
+    try {
+      const fs = await import("fs/promises");
+      const fileBuffer = await fs.readFile(file.path);
+      analysis = await analyzeDocumentFile(fileBuffer, file.originalname, docType);
+    } catch (scannerErr) {
+      console.warn("[Profile Document Upload] AI Scanner warning:", scannerErr?.message || scannerErr);
+    }
+
+    if (analysis) {
+      const isAuthentic = Boolean(analysis.authenticity?.is_authentic);
+      const ocrFailed = Boolean(analysis.ocr_failed);
+      const confidence = Number(analysis.authenticity?.confidence || 0);
+
+      if (ocrFailed || !analysis.success || !isAuthentic || confidence < 20) {
+        // Clean up the rejected file from disk
+        const fs = await import("fs/promises");
+        await fs.unlink(file.path).catch(() => {});
+
+        const reason = analysis.reason || analysis.authenticity?.reason || "No valid document text or keywords detected.";
+        return res.status(400).json({
+          error: `Document verification failed: The uploaded image does not appear to be a valid ${docLabels[docType] || docType}. Please upload a clear photo or scan of your actual document (selfies and photos without readable text are not allowed). Details: ${reason}`,
+          details: {
+            ocrFailed,
+            confidence,
+            reason,
+          },
+        });
+      }
+    }
+
     // Build the document object
     const docObject = {
       fileName: file.originalname,
@@ -2923,7 +2962,10 @@ app.post("/api/users/profile/documents", uploadProfileDoc.single("document"), as
       fileSize: file.size,
       mimeType: file.mimetype,
       uploadedAt: new Date(),
-      status: "pending",
+      status: analysis?.authenticity?.is_authentic ? "verified" : "pending",
+      authenticityScore: analysis?.authenticity?.confidence ?? null,
+      isAuthentic: analysis?.authenticity?.is_authentic ?? true,
+      extractedGwa: analysis?.extracted_gwa ?? null,
       rejectionReason: null,
     };
 
@@ -4695,16 +4737,29 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
       const requiredProfileDocs = ['gradesTranscript', 'enrollmentProof', 'qCitizenId'];
       const missingDocs = requiredProfileDocs.filter(docType => !profileDocs[docType]?.fileName);
       
+      const docLabels = {
+        gradesTranscript: 'Copy of Grades / Transcript of Records',
+        enrollmentProof: 'Proof of school enrollment/registration/acceptance',
+        qCitizenId: 'Valid QCitizen ID'
+      };
+
       if (missingDocs.length > 0) {
-        const docLabels = {
-          gradesTranscript: 'Copy of Grades / Transcript of Records',
-          enrollmentProof: 'Proof of school enrollment/registration/acceptance',
-          qCitizenId: 'Valid QCitizen ID'
-        };
         return res.status(400).json({
           error: "Missing required profile documents",
           missingDocuments: missingDocs.map(d => docLabels[d]),
           message: `Please upload the following documents in your Profile > Document Vault: ${missingDocs.map(d => docLabels[d]).join(', ')}`
+        });
+      }
+
+      // Check if any uploaded document is flagged as unverified / rejected / not authentic
+      const unverifiedDocs = requiredProfileDocs.filter(
+        docType => profileDocs[docType]?.isAuthentic === false || profileDocs[docType]?.status === 'rejected'
+      );
+      if (unverifiedDocs.length > 0) {
+        return res.status(400).json({
+          error: "Unverified documents detected",
+          unverifiedDocuments: unverifiedDocs.map(d => docLabels[d]),
+          message: `The following document(s) did not pass authenticity verification: ${unverifiedDocs.map(d => docLabels[d]).join(', ')}. Please re-upload clear official document scans in your Document Vault.`
         });
       }
 
@@ -4764,8 +4819,10 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
           fileSize: profileDocs.gradesTranscript.fileSize,
           mimeType: profileDocs.gradesTranscript.mimeType,
           uploadedAt: profileDocs.gradesTranscript.uploadedAt,
-          status: profileDocs.gradesTranscript.status || 'pending',
+          status: profileDocs.gradesTranscript.status || 'verified',
           rejectionReason: profileDocs.gradesTranscript.rejectionReason,
+          authenticityScore: profileDocs.gradesTranscript.authenticityScore ?? null,
+          isAuthentic: profileDocs.gradesTranscript.isAuthentic ?? true,
         },
         {
           documentType: 'enrollmentProof',
@@ -4774,8 +4831,10 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
           fileSize: profileDocs.enrollmentProof.fileSize,
           mimeType: profileDocs.enrollmentProof.mimeType,
           uploadedAt: profileDocs.enrollmentProof.uploadedAt,
-          status: profileDocs.enrollmentProof.status || 'pending',
+          status: profileDocs.enrollmentProof.status || 'verified',
           rejectionReason: profileDocs.enrollmentProof.rejectionReason,
+          authenticityScore: profileDocs.enrollmentProof.authenticityScore ?? null,
+          isAuthentic: profileDocs.enrollmentProof.isAuthentic ?? true,
         },
         {
           documentType: 'qCitizenId',
@@ -4784,8 +4843,10 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
           fileSize: profileDocs.qCitizenId.fileSize,
           mimeType: profileDocs.qCitizenId.mimeType,
           uploadedAt: profileDocs.qCitizenId.uploadedAt,
-          status: profileDocs.qCitizenId.status || 'pending',
+          status: profileDocs.qCitizenId.status || 'verified',
           rejectionReason: profileDocs.qCitizenId.rejectionReason,
+          authenticityScore: profileDocs.qCitizenId.authenticityScore ?? null,
+          isAuthentic: profileDocs.qCitizenId.isAuthentic ?? true,
         },
       ];
 
@@ -5331,6 +5392,76 @@ app.delete("/api/users/profile/documents/:docType", async (req, res) => {
     } catch (error) {
       console.error("Error fetching my applications:", error);
       res.status(500).json({ error: "Failed to fetch applications." });
+    }
+  });
+
+  // PATCH /api/applications/:applicationId/submit-video — student submits screening video link
+  app.patch("/api/applications/:applicationId/submit-video", async (req, res) => {
+    try {
+      const db = await getDb();
+      const { ObjectId } = await import("mongodb");
+      const { applicationId } = req.params;
+      const { videoUrl, studentEmail } = req.body || {};
+
+      if (!ObjectId.isValid(applicationId)) {
+        return res.status(400).json({ error: "Invalid application ID." });
+      }
+
+      const link = String(videoUrl || "").trim();
+      if (!link) {
+        return res.status(400).json({ error: "Video URL is required." });
+      }
+      if (!/^https?:\/\//i.test(link)) {
+        return res.status(400).json({ error: "Video URL must start with http:// or https://" });
+      }
+
+      const email = String(studentEmail || "").trim().toLowerCase();
+      if (!email) {
+        return res.status(400).json({ error: "Student email is required." });
+      }
+
+      const application = await db.collection("applications").findOne({
+        _id: new ObjectId(applicationId),
+      });
+      if (!application) {
+        return res.status(404).json({ error: "Application not found." });
+      }
+
+      if (String(application.studentEmail || "").trim().toLowerCase() !== email) {
+        return res.status(403).json({ error: "You can only submit a video for your own application." });
+      }
+
+      if (application.status !== "Qualified for Final Screening") {
+        return res.status(400).json({
+          error: "Video screening can only be submitted when the application is Qualified for Final Screening.",
+        });
+      }
+
+      const submittedAt = new Date();
+      const finalScreening = {
+        ...(application.finalScreening || {}),
+        studentVideoUrl: link,
+        videoSubmitted: true,
+        videoSubmittedAt: submittedAt,
+      };
+
+      await db.collection("applications").updateOne(
+        { _id: new ObjectId(applicationId) },
+        {
+          $set: {
+            finalScreening,
+            updatedAt: submittedAt,
+          },
+        }
+      );
+
+      res.json({
+        message: "Video screening submitted successfully.",
+        data: finalScreening,
+      });
+    } catch (error) {
+      console.error("[Submit Video] Error:", error);
+      res.status(500).json({ error: "Failed to submit video screening." });
     }
   });
 

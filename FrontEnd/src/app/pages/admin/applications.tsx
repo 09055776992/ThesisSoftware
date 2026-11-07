@@ -1657,6 +1657,9 @@ export function AdminApplications() {
                     )}
                     <p>Submission Deadline: {app.finalScreening.submissionDeadline ? formatDate(app.finalScreening.submissionDeadline) : "TBD"}</p>
                     {app.finalScreening.notes && <p>Notes: {app.finalScreening.notes}</p>}
+                    <p className="pt-1 text-blue-800">
+                      Students upload their recorded video into this Google Drive folder. Check the folder for submissions.
+                    </p>
                   </div>
                 </CardContent>
               </Card>

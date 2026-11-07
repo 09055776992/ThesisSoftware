@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log
+.env
+uploads
+private-uploads
+.git
+tests
+test
+*.test.js

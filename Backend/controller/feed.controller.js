@@ -186,6 +186,11 @@ export const moderateStudentPost = async (req, res) => {
 
     const now = new Date();
     let attachmentCleanupWarning = false;
+    const author = await User.findById(post.authorId).select("email").lean();
+    if ((action === "warn" || action === "approve") && !author?.email) {
+      return res.status(404).json({ success: false, message: "Post author could not be found." });
+    }
+
     if (action === "approve") {
       post.moderationStatus = "approved";
       post.reviewedBy = req.adminId;
@@ -206,28 +211,53 @@ export const moderateStudentPost = async (req, res) => {
         attachmentCleanupWarning = true;
         console.error("[Admin Student Post Moderation] Removed post attachments could not all be deleted:", cleanupError);
       }
-    } else {
-      const author = await User.findById(post.authorId).select("email").lean();
-      if (!author?.email) {
-        return res.status(404).json({ success: false, message: "Post author could not be found." });
+    }
+
+    if ((action === "approve" || action === "remove" || action === "warn") && author?.email) {
+      if (action === "warn") {
+        post.warningReason = reason;
+        post.warnedBy = req.adminId;
+        post.warnedAt = now;
+        await post.save();
       }
-      post.warningReason = reason;
-      post.warnedBy = req.adminId;
-      post.warnedAt = now;
-      await post.save();
+
+      const postPreview = String(post.content || post.title || "your post").trim().slice(0, 80);
+      const notificationCopy = {
+        approve: {
+          title: "Your scholar post was approved",
+          message: `An administrator approved your post${postPreview ? `: ${postPreview}` : ""}. It is now visible to students and providers.`,
+          type: "post_approved",
+          priority: "normal",
+        },
+        warn: {
+          title: "Reminder about your scholar post",
+          message: `An administrator reviewed your post and issued a warning: ${reason}`,
+          type: "warning",
+          priority: "high",
+        },
+        remove: {
+          title: "Your scholar post was removed",
+          message: `An administrator removed your post: ${reason}`,
+          type: "post_removed",
+          priority: "high",
+        },
+      }[action];
 
       const { ObjectId } = await import("mongodb");
       const db = await getDb();
       await db.collection("notifications").insertOne({
         userId: String(post.authorId),
         userEmail: String(author.email).trim().toLowerCase(),
-        title: "Reminder about your scholar post",
-        message: `An administrator reviewed your post and issued a warning: ${reason}`,
-        type: "warning",
-        priority: "high",
+        userRole: "student",
+        title: notificationCopy.title,
+        message: notificationCopy.message,
+        type: notificationCopy.type,
+        priority: notificationCopy.priority,
         source: "admin",
         postId: String(post._id),
+        link: "/dashboard/feed",
         read: false,
+        is_read: false,
         createdAt: now,
         ...(ObjectId.isValid(String(req.adminId)) ? { adminId: new ObjectId(String(req.adminId)) } : {}),
       });

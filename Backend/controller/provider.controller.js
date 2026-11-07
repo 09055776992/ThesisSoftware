@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import fs from "fs";
+import bcrypt from "bcryptjs";
 import Scholarship from "../models/scholarship.model.js";
 import Application from "../models/application.model.js";
 import User from "../models/user.model.js";
@@ -309,6 +310,30 @@ export const deleteProviderScholarship = async (req, res) => {
   try {
     const { id } = req.params;
     const providerId = req.providerId;
+    const password = req.body?.password || req.headers["x-confirm-password"] || req.query?.password;
+
+    if (!password || !String(password).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Password is required to confirm scholarship deletion.",
+      });
+    }
+
+    const providerUser = await User.findById(providerId).select("+passwordHash");
+    if (!providerUser || !providerUser.passwordHash) {
+      return res.status(401).json({
+        success: false,
+        message: "Provider account authentication failed.",
+      });
+    }
+
+    const isPasswordValid = await bcrypt.compare(String(password).trim(), providerUser.passwordHash);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Incorrect password. Scholarship deletion cancelled.",
+      });
+    }
 
     const scholarship = await Scholarship.findById(id);
 
@@ -370,9 +395,12 @@ export const getProviderApplications = async (req, res) => {
         ];
 
     // Build the data filter — apply status separately so statConditions stay unaffected
-    const dataFilter = status
-      ? { $or: orConditions, status }
-      : { $or: orConditions };
+    const statusFilter = status === "Under Review"
+      ? { status: { $in: ["Under Review", "System Qualified"] } }
+      : status
+        ? { status }
+        : {};
+    const dataFilter = { $or: orConditions, ...statusFilter };
 
     const applications = await Application.collection
       .find(dataFilter)
@@ -543,14 +571,28 @@ export const rejectApplicationByProvider = async (req, res) => {
 
 /**
  * PATCH /api/provider/applications/:id/qualify
- * Provider qualifies an applicant for final screening.
- * Optionally schedules a virtual meeting.
+ * Provider qualifies an applicant for recorded video screening.
+ * Requires Google Drive upload link + submission deadline.
  */
 export const qualifyApplicationByProvider = async (req, res) => {
   try {
     const { id } = req.params;
-    const { scheduledDate, scheduledTime, venue, notes } = req.body;
+    const { googleDriveLink, submissionDeadline, notes } = req.body;
     const providerId = req.providerId;
+
+    const link = String(googleDriveLink || "").trim();
+    if (!link || !submissionDeadline) {
+      return res.status(400).json({
+        success: false,
+        message: "Google Drive link and submission deadline are required for video screening.",
+      });
+    }
+    if (!/^https?:\/\//i.test(link)) {
+      return res.status(400).json({
+        success: false,
+        message: "Google Drive link must start with http:// or https://",
+      });
+    }
 
     const application = await Application.findById(id);
     if (!application) {
@@ -566,33 +608,67 @@ export const qualifyApplicationByProvider = async (req, res) => {
       return res.status(403).json({ success: false, message: "You do not have permission to qualify this application" });
     }
 
-    const update = {
-      status: "System Qualified",
-      updatedAt: new Date(),
+    const finalScreening = {
+      scheduled: true,
+      videoSubmissionType: "recorded",
+      googleDriveLink: link,
+      submissionDeadline: new Date(submissionDeadline),
+      notes: notes || "",
+      scheduledDate: null,
+      scheduledTime: "",
+      meetingPlatform: "",
+      meetingLink: "",
     };
 
-    // Schedule virtual meeting if details provided
-    if (scheduledDate && scheduledTime && venue) {
-      update.screeningSchedule = {
-        scheduledDate: new Date(scheduledDate),
-        scheduledTime,
-        venue,
-        notes: notes || "",
-        scheduledBy: new mongoose.Types.ObjectId(providerId),
-        scheduledAt: new Date(),
-        isScheduled: true,
-      };
-    }
-
-    await Application.findByIdAndUpdate(id, { $set: update });
+    await Application.findByIdAndUpdate(id, {
+      $set: {
+        status: "Qualified for Final Screening",
+        finalScreening,
+        updatedAt: new Date(),
+      },
+    });
     const updated = await Application.findById(id);
+
+    // Notify the student in-app (same pattern as admin qualify)
+    try {
+      const db = await getDb();
+      const email = String(application.studentEmail || "").trim().toLowerCase();
+      const scholarshipName = application.scholarshipName || scholarship.name || "the scholarship";
+      const formattedDeadline = new Date(submissionDeadline).toLocaleString("en-US", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+      let userId = application.studentId ? String(application.studentId) : null;
+      if (!userId && email) {
+        const student = await db.collection("users").findOne({ email });
+        userId = student?._id ? String(student._id) : null;
+      }
+      if (email) {
+        await db.collection("notifications").insertOne({
+          userEmail: email,
+          userId,
+          userRole: "student",
+          type: "qualified_for_screening",
+          title: "Qualified for Final Screening",
+          message: `Congratulations! You qualified for the final screening of ${scholarshipName}.\n\nVideo Interview Submission Details:\n🔗 Google Drive Link: ${link}\n📅 Submission Deadline: ${formattedDeadline}\n\n${notes ? `Notes: ${notes}\n\n` : ""}Please upload your recorded video introduction before the deadline.`,
+          scholarshipName,
+          read: false,
+          is_read: false,
+          createdAt: new Date(),
+        });
+      }
+    } catch (notifyErr) {
+      console.error("[Provider Qualify] Failed to notify student:", notifyErr);
+    }
 
     res.json({
       success: true,
       data: updated,
-      message: scheduledDate
-        ? "Application qualified and screening scheduled"
-        : "Application qualified for final screening",
+      message: "Applicant qualified for video screening. Student notified.",
     });
   } catch (err) {
     console.error("[Provider Qualify Application] Error:", err);
